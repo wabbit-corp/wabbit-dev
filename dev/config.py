@@ -606,6 +606,26 @@ def load_config() -> Config:
     # Projects
     ###############################################################################################
 
+    def verify_project(project: Project) -> None:
+        def is_publishable(project: Project) -> bool:
+            return project.publish and project.github_repo is not None and (not project.quarantine)
+
+        # Verify that IF there is a github_repo (project is publishable),
+        # then ALL projects in the dependency chain are also publishable.
+        for dep in project.resolved_dependencies:
+            if isinstance(dep.target, ProjectDependencyTarget):
+                dep_project = config.defined_projects[dep.target.project]
+                if is_publishable(project):
+                    assert is_publishable(dep_project), f"Project {project.name} depends on {dep_project.name}. " \
+                        f"Project {dep_project.name} is not publishable, but {project.name} is publishable. " \
+                        f"{project.name}.github_repo = {project.github_repo}, " \
+                        f"{dep_project.name}.github_repo = {dep_project.github_repo}, " \
+                        f"{project.name}.quarantine = {project.quarantine}, " \
+                        f"{dep_project.name}.quarantine = {dep_project.quarantine}" \
+                        f"{project.name}.publish = {project.publish}, " \
+                        f"{dep_project.name}.publish = {dep_project.publish}"
+                    
+
     @ctx.register(name='python')
     def python_project(
         name: str,
@@ -624,6 +644,7 @@ def load_config() -> Config:
             ownership=ownership,
             version=Version.parse(version) if version else None,
             resolved_dependencies=[])
+        verify_project(project_obj)
         config.defined_projects[name] = project_obj
 
     @ctx.register(name='purescript')
@@ -644,6 +665,7 @@ def load_config() -> Config:
             ownership=ownership,
             version=Version.parse(version) if version else None,
             resolved_dependencies=[])
+        verify_project(project_obj)
         config.defined_projects[name] = project_obj
 
     @ctx.register(name='data')
@@ -664,6 +686,7 @@ def load_config() -> Config:
             ownership=ownership,
             version=Version.parse(version) if version else None,
             resolved_dependencies=[])
+        verify_project(project_obj)
         config.defined_projects[name] = project_obj
 
     @ctx.register(name='premake')
@@ -684,6 +707,7 @@ def load_config() -> Config:
             ownership=ownership,
             version=Version.parse(version) if version else None,
             resolved_dependencies=[])
+        verify_project(project_obj)
         config.defined_projects[name] = project_obj
 
     @ctx.register(name='gradle')
@@ -730,15 +754,7 @@ def load_config() -> Config:
                 if maven_repo not in maven_repositories:
                     maven_repositories.append(maven_repo)
 
-        # Verify that IF there is a github_repo (project is publishable),
-        # then ALL projects in the dependency chain are also publishable.
-        if repo:
-            for dep in resolved_dependencies:
-                if isinstance(dep.target, ProjectDependencyTarget):
-                    project = config.defined_projects[dep.target.project]
-                    assert project.github_repo, f"Project {project.name} is not publishable, but {name} is"
-
-        config.defined_projects[name] = GradleProject(
+        project_obj = GradleProject(
             path=Path(f"./{name}"),
             group_name=config.default_maven_project_group,
             name=name,
@@ -753,6 +769,10 @@ def load_config() -> Config:
             resolved_dependencies=resolved_dependencies,
             ownership=ownership
         )
+
+        verify_project(project_obj)
+
+        config.defined_projects[name] = project_obj
 
     eval_sexpr(ctx, root, ignore_toplevel_exceptions=True)
     eval_sexpr(ctx, root_private, ignore_toplevel_exceptions=True)
