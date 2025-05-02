@@ -333,6 +333,11 @@ def commit_repo_changes(project: Project, repo: Repo, openai_key: str=None, inte
       6) Optionally commits.
     """
 
+    if project.quarantine:
+        # Skip commit if project is in quarantine
+        error(f"Skipping commit for {project.name} (quarantine mode)")
+        return
+
     try:
         diffs: List[FileDiff] = compute_repo_diffs(repo)
     except Exception as ex:

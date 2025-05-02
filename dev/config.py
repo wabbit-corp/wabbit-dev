@@ -319,6 +319,7 @@ DependencyTarget.Maven = MavenDependencyTarget
 class Project:
     path: Path
     name: str
+    quarantine: bool
     github_repo: str | None
     ownership: OwnershipType
     resolved_dependencies: List[Dependency]
@@ -344,6 +345,7 @@ class PythonProject(Project):
     name: str
     version: Version | None
     github_repo: str | None
+    quarantine: bool
     ownership: OwnershipType
 
     # # Python dependencies in a raw user form vs. resolved objects
@@ -358,6 +360,7 @@ class PythonProject(Project):
 class PurescriptProject(Project):
     path: Path
     name: str
+    quarantine: bool
     github_repo: str | None
     ownership: OwnershipType
     version: Version | None
@@ -367,6 +370,7 @@ class PurescriptProject(Project):
 class PremakeProject(Project):
     path: Path
     name: str
+    quarantine: bool
     github_repo: str | None
     ownership: OwnershipType
     version: Version | None
@@ -376,6 +380,7 @@ class PremakeProject(Project):
 class DataProject(Project):
     path: Path
     name: str
+    quarantine: bool
     github_repo: str | None
     ownership: OwnershipType
     version: Version | None
@@ -387,6 +392,7 @@ class GradleProject(Project):
     group_name: str
     name: str
     version: Version | None
+    quarantine: bool
     github_repo: str | None
     ownership: OwnershipType
 
@@ -435,6 +441,10 @@ def load_config() -> Config:
 
     config = Config(raw=root)
     ctx = ExecutionContext()
+
+    ctx.env["true"] = True
+    ctx.env["false"] = False
+    ctx.env["null"] = None
 
     @ctx.register(name="define")
     def define(name: Quoted[SAtom], value: Any):
@@ -594,12 +604,14 @@ def load_config() -> Config:
     def python_project(
         name: str,
         version: Quoted[SStr],
+        quarantine: bool = False,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
     ) -> None:
         path = Path(f"./{name}")
         project_obj = PythonProject(
             path=path, name=name, 
+            quarantine=quarantine,
             github_repo=repo,
             ownership=ownership,
             version=Version.parse(version) if version else None,
@@ -610,12 +622,14 @@ def load_config() -> Config:
     def purescript_project(
         name: str,
         version: Quoted[SStr],
+        quarantine: bool = False,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
     ) -> None:
         path = Path(f"./{name}")
         project_obj = PurescriptProject(
-            path=path, name=name, 
+            path=path, name=name,
+            quarantine=quarantine, 
             github_repo=repo,
             ownership=ownership,
             version=Version.parse(version) if version else None,
@@ -626,12 +640,14 @@ def load_config() -> Config:
     def data_project(
         name: str,
         version: Quoted[SStr],
+        quarantine: bool = False,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
     ) -> None:
         path = Path(f"./{name}")
         project_obj = DataProject(
             path=path, name=name, 
+            quarantine=quarantine,
             github_repo=repo,
             ownership=ownership,
             version=Version.parse(version) if version else None,
@@ -642,6 +658,7 @@ def load_config() -> Config:
     def premake_project(
         name: str,
         version: Quoted[SStr],
+        quarantine: bool = False,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
     ) -> None:
@@ -649,6 +666,7 @@ def load_config() -> Config:
         project_obj = PremakeProject(
             path=path, name=name, 
             github_repo=repo,
+            quarantine=quarantine,
             ownership=ownership,
             version=Version.parse(version) if version else None,
             resolved_dependencies=[])
@@ -658,6 +676,7 @@ def load_config() -> Config:
     def gradle_project(
         name: str,
         version: Quoted[SStr],
+        quarantine: bool = False,
         dependencies: List[str | DependencyTarget | List[DependencyTarget]] | None = None,
         features: List[Feature] | None = None,
         repo: str | None = None,
@@ -709,6 +728,7 @@ def load_config() -> Config:
             group_name=config.default_maven_project_group,
             name=name,
             version=Version.parse(version) if version else None,
+            quarantine=quarantine,
             github_repo=repo,
             raw_dependencies=raw_dependencies,
             raw_features=features or [],
