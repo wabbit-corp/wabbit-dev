@@ -330,6 +330,8 @@ async def publish_single_project(proj: GradleProject, jitpack_api: JitPackAPI, r
     """
     path = proj.path
 
+    assert not proj.quarantine, f"Project {proj.name} is in quarantine. Cannot publish."
+
     with Timer(f'Step 1: getting info for {proj.name}'):
         if proj.github_repo is None:
             raise PublishError(f"Project {proj.name} has no GitHub repository set.")
@@ -488,6 +490,12 @@ async def publish_single_project(proj: GradleProject, jitpack_api: JitPackAPI, r
         success(f"Skipped JitPack steps for private repository {proj.name}.")
         return True
     
+
+    if not isinstance(proj, GradleProject): 
+        warning(f"Skipping publishing to jitpack for {proj.name}: not a Gradle project.")
+        return True
+        
+
     # Step 4: poll JitPack
     with Timer(f'Step 4: poll JitPack for {proj.name}'):
         github_org = proj.github_repo.split("/")[0]
@@ -575,7 +583,6 @@ async def publish_main(project_name=None):
 
     # Use an async context for JitPackAPI
     async with JitPackAPI(session_cookie=config.jitpack_cookie) as jitpack_api:
-        # Filter only GradleProject
         all_projects = {
             name: p
             for name, p in config.defined_projects.items()
@@ -594,10 +601,6 @@ async def publish_main(project_name=None):
 
         for name in order:
             proj = all_projects[name]
-
-            if not isinstance(proj, GradleProject): 
-                warning(f"Skipping {proj.name}: not a Gradle project.")
-                continue
 
             if proj.github_repo is None:
                 warning(f"Skipping {proj.name}: no GitHub repository set.")
