@@ -26,10 +26,7 @@ from dev.config import (
 )
 from dev.git_changes import (
     compute_repo_diffs,
-    ChangeType,
-    BareRepoNotSupportedError,
-    SubmoduleNotSupportedError,
-    SymlinkNotSupportedError
+    ChangeType
 )
 from dev.messages import info, warning, error, success, ask
 from dev.ai import suggest_commit_name, suggest_version_number

@@ -25,7 +25,6 @@ from dev.ai import suggest_commit_name
 
 import dev.git_changes
 from dev.git_changes import compute_repo_diffs, FileType, ChangeType, FileDiff
-from dev.git_changes import BareRepoNotSupportedError, SubmoduleNotSupportedError, SymlinkNotSupportedError
 
 
 class RepoSetupMode(Enum):
@@ -336,7 +335,7 @@ def commit_repo_changes(project: Project, repo: Repo, openai_key: str=None, inte
 
     try:
         diffs: List[FileDiff] = compute_repo_diffs(repo)
-    except (BareRepoNotSupportedError, SubmoduleNotSupportedError, SymlinkNotSupportedError) as ex:
+    except Exception as ex:
         error(f"Cannot proceed: {ex}")
         return
 
@@ -386,99 +385,168 @@ def commit_repo_changes(project: Project, repo: Repo, openai_key: str=None, inte
         # We'll do a single pass and write all info into buf.
         # ---------------------------------------------------------------------
         # Re-gather to see final state
-        final_diffs: List[FileDiff] = compute_repo_diffs(repo)
+        final_diffs: List[FileDiff] = compute_repo_diffs(repo, include_untracked=True)
 
         buf = io.StringIO()
         for diff_item in final_diffs:
-            # Skip unchanged files
+            # Skip unchanged files (shouldn't normally be returned, but check anyway)
             if diff_item.change_type == ChangeType.UNCHANGED:
                 continue
 
-            # Prepare
-            old_path = diff_item.old_path
-            new_path = diff_item.new_path
-            print(f"File: {old_path if old_path == new_path else f'{old_path} => {new_path}'}", file=buf)
+            # --- File Path ---
+            path_str = ""
+            if diff_item.change_type == ChangeType.ADDED or diff_item.change_type == ChangeType.UNTRACKED:
+                path_str = f"File: {diff_item.new_path} (Added)"
+            elif diff_item.change_type == ChangeType.DELETED:
+                path_str = f"File: {diff_item.old_path} (Deleted)"
+            elif diff_item.change_type == ChangeType.RENAMED:
+                path_str = f"File: {diff_item.old_path} => {diff_item.new_path} (Renamed)"
+            else: # MODIFIED, MODE_CHANGED, TYPE_CHANGED
+                path_str = f"File: {diff_item.path}" # Use the primary path attribute
 
-            # Change type & partial staging
-            status_char = diff_item.change_type.name  # ADDED / DELETED / MODIFIED / etc.
-            print(f"  Status: {status_char}", file=buf)
-            if diff_item.partial_staging_suspected:
-                print("  Note: partial staging detected (HEAD->INDEX and INDEX->WORKING both differ)", file=buf)
+            print(path_str, file=buf)
 
-            # # If mode changed
-            # if diff_item.head and diff_item.working:
-            #     a_mode = diff_item.head.mode
-            #     b_mode = diff_item.working.mode
-            #     if a_mode != b_mode and a_mode is not None and b_mode is not None:
-            #         print(f"  Mode changed from {a_mode} to {b_mode}", file=buf)
+            # --- Status & Flags ---
+            status_str = diff_item.change_type.name
+            flags = []
+            if diff_item.staged: flags.append("Staged")
+            if diff_item.unstaged: flags.append("Unstaged")
+            if diff_item.untracked: flags.append("Untracked")
+            if diff_item.partial_staging_suspected: flags.append("Partial")
 
-            # If text vs. binary
-            if diff_item.head and diff_item.working:
-                if (diff_item.head.file_type == FileType.TEXT and
-                    diff_item.working.file_type == FileType.TEXT and
-                    diff_item.unified_diff):
-                    # Check if line-endings only
-                    a_normalized = [l.replace('\r\n', '\n') for l in (diff_item.head.lines or [])]
-                    b_normalized = [l.replace('\r\n', '\n') for l in (diff_item.working.lines or [])]
-                    if a_normalized == b_normalized:
-                        print("  Note: Only line endings changed (CRLF vs LF)", file=buf)
-                    else:
-                        # Show the diff. We already store HEAD->WORKING in unified_diff
-                        print("  Diff:", file=buf)
-                        print(f'<diff old_path="{old_path}" new_path="{new_path}">', file=buf)
-                        print(diff_item.unified_diff, file=buf)
-                        print(f'</diff> (old_path="{old_path}" new_path="{new_path}")', file=buf)
-                elif diff_item.head.file_type == FileType.BINARY or diff_item.working.file_type == FileType.BINARY:
-                    if diff_item.binary_different:
-                        print("  Binary files differ", file=buf)
-                    else:
-                        print("  Binary files are identical except for possible mode changes", file=buf)
-            elif diff_item.head is None and diff_item.working:  # Possibly ADDED
-                if diff_item.working.file_type == FileType.BINARY:
-                    print("  New binary file", file=buf)
+            print(f"  Status: {status_str} [{', '.join(flags)}]", file=buf)
+
+            # --- Mode Change ---
+            if diff_item.old_mode is not None and diff_item.new_mode is not None and \
+            diff_item.old_mode != diff_item.new_mode:
+                # Only print mode change if it's the *only* change, otherwise it's implied in MODIFIED
+                if diff_item.change_type == ChangeType.MODE_CHANGED:
+                    print(f"  Mode changed: {oct(diff_item.old_mode)} -> {oct(diff_item.new_mode)}", file=buf)
                 else:
-                    print("  New text file", file=buf)
-                    if diff_item.unified_diff:
-                        print(diff_item.unified_diff, file=buf)
-            elif diff_item.head and diff_item.working is None:  # Possibly DELETED
-                if diff_item.head.file_type == FileType.BINARY:
+                    # Optionally add a note if mode changed alongside content
+                    print(f"  Mode also changed: {oct(diff_item.old_mode)} -> {oct(diff_item.new_mode)}", file=buf)
+
+
+            # --- Content Diff (Text/Binary) ---
+            is_text_change = diff_item.old_type in (FileType.TEXT, FileType.EMPTY) and \
+                            diff_item.new_type in (FileType.TEXT, FileType.EMPTY)
+
+            if diff_item.binary_different:
+                print("  Binary difference detected", file=buf)
+            elif is_text_change and diff_item.unified_diff:
+                # Show the diff for text changes
+                print("  Diff:", file=buf)
+                # Simple diff tagging for clarity
+                print(f'<diff path="{diff_item.path}">', file=buf)
+                # Indent diff lines for readability
+                for line in diff_item.unified_diff.splitlines():
+                    print(f"    {line}", file=buf)
+                print(f'</diff>', file=buf)
+            elif not diff_item.binary_different and not diff_item.unified_diff and \
+                diff_item.change_type not in (ChangeType.ADDED, ChangeType.DELETED, ChangeType.MODE_CHANGED):
+                # If no binary diff and no text diff, but status is MODIFIED/RENAMED etc.
+                # it might be a subtle change (e.g. whitespace only, if diff generation skipped it)
+                print("  Note: Content difference detected, but no textual diff generated (check whitespace/type).", file=buf)
+            elif diff_item.change_type == ChangeType.ADDED:
+                if diff_item.new_type == FileType.BINARY:
+                    print("  New binary file", file=buf)
+                elif diff_item.new_type == FileType.EMPTY:
+                    print("  New empty file", file=buf)
+                elif diff_item.unified_diff: # New text file with content
+                    print("  Diff (New File):", file=buf)
+                    print(f'<diff path="{diff_item.path}">', file=buf)
+                    for line in diff_item.unified_diff.splitlines():
+                        print(f"    {line}", file=buf)
+                    print(f'</diff>', file=buf)
+                else: # New text file, but no diff generated (shouldn't happen often)
+                    print("  New text file (no diff content found)", file=buf)
+            elif diff_item.change_type == ChangeType.DELETED:
+                if diff_item.old_type == FileType.BINARY:
                     print("  Deleted binary file", file=buf)
                 else:
-                    print("  Deleted text file", file=buf)
-            else:
-                # Fallback / unusual scenario
-                print("  No HEAD or WORKING content found. Possibly renamed or special case.", file=buf)
+                    print("  Deleted text/empty file", file=buf)
+            # No need for explicit UNCHANGED check here as we skipped it earlier
 
             print(file=buf)  # blank line after each file
 
-        # Print the assembled diff text
+        # --- Process the assembled diff text ---
         final_diff_text = buf.getvalue()
 
-        import tiktoken
-        enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
-        num_tokens = len(enc.encode(final_diff_text))
-        print(f"Number of tokens in diff text: {num_tokens}")
-        if num_tokens > 100000:
+        # Assuming tiktoken is installed and available
+        try:
+            import tiktoken
+            enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
+            num_tokens = len(enc.encode(final_diff_text))
+            print(f"Number of tokens in diff text: {num_tokens}")
+        except ImportError:
+            print("Warning: tiktoken not installed. Cannot calculate token count.")
+            num_tokens = len(final_diff_text) // 4 # Rough estimate
+            print(f"Estimated token count: ~{num_tokens}")
+
+
+        if num_tokens > 100000: # Example token limit
             # Spawn editor
-            editor = os.environ.get('EDITOR', 'vim')
-            commit_file = Path(repo.working_dir) / '.git/COMMIT_EDITMSG'
+            editor = os.environ.get('EDITOR', 'vim') # Use vim as fallback
+            # Use a more robust temp file location if possible, or ensure .git dir exists
+            commit_file_path = Path(repo.working_dir) / '.git' / 'COMMIT_EDITMSG'
+            commit_file_path.parent.mkdir(exist_ok=True) # Ensure .git dir exists
 
             # Create a temporary commit message file
-            commit_file_text = f"\n\n# Commit changes for {project.name}"
+            commit_file_text = f"\n\n# Commit changes for {project.name}\n# Changes detected:\n"
+            # Add a summary of changed files to the commit message template
+            for diff_item in final_diffs:
+                if diff_item.change_type != ChangeType.UNCHANGED:
+                    commit_file_text += f"#  {diff_item.change_type.name}: {diff_item.path}\n"
 
-            with open(commit_file, 'w') as f:
-                f.write(commit_file_text)
-            os.system(f'{editor} {repo.working_dir}/.git/COMMIT_EDITMSG')
-            with open(commit_file, 'r') as f:
-                # Read the commit message from the file and strip it
-                # of leading/trailing whitespace and comments
-                commit_name = f.read().strip()
-                commit_name = re.sub(r'^\s*#.*\n?', '', commit_name, flags=re.MULTILINE)
-                commit_name = commit_name.strip()
+            try:
+                with open(commit_file_path, 'w', encoding='utf-8') as f:
+                    f.write(commit_file_text)
+
+                # Use full path for editor command
+                status = os.system(f'{editor} "{str(commit_file_path)}"') # Quote path
+                if status != 0:
+                    warning(f"Editor '{editor}' exited with status {status}. Commit message might not be saved.")
+
+                with open(commit_file_path, 'r', encoding='utf-8') as f:
+                    # Read the commit message from the file and strip it
+                    # of leading/trailing whitespace and comments
+                    commit_name = f.read().strip()
+                    # Remove comment lines more carefully
+                    commit_lines = [
+                        line for line in commit_name.splitlines()
+                        if not line.strip().startswith('#')
+                    ]
+                    commit_name = "\n".join(commit_lines).strip()
+
+                if not commit_name:
+                    warning("Commit message is empty after editing. Aborting commit.")
+                    # Handle empty commit message case (e.g., raise error, return None)
+                    commit_name = None # Or raise an exception
+                else:
+                    print(f"Using commit message from editor:\n---\n{commit_name}\n---")
+
+
+            except Exception as e:
+                warning(f"Error handling commit message editing: {e}")
+                commit_name = f"Error processing commit message for {project.name}" # Fallback
+
+            finally:
+                # Clean up commit message file if it still exists
+                if commit_file_path.exists():
+                    try:
+                        commit_file_path.unlink()
+                    except OSError as e:
+                        warning(f"Could not remove temporary commit file {commit_file_path}: {e}")
+
+
         else:
+            print("--- Generated Diff Summary ---")
             print(final_diff_text)
+            print("--- End Diff Summary ---")
             # Suggest a commit message using the assembled patch content
+            # Ensure suggest_commit_name handles potential errors
             commit_name = suggest_commit_name(final_diff_text, api_key=openai_key)
+            print(f"Suggested commit message: {commit_name}")
 
         # Optionally commit if user agrees
 
