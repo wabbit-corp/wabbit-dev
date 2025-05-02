@@ -99,19 +99,26 @@ def set_project_version_in_root_clj(project_name: str,
     in_target_gradle_block = False  # True if we are inside the (gradle "project_name" ...) form
     found_and_replaced = False
     block_start_index = None  # The index of the line containing (gradle "project_name"
+
+    project_types = ["gradle", "python", "data", "purescript"]
+    import re
+    re_project_type_no_name = re.compile(rf"\((?:{'|'.join(project_types)})\s+\"[^\"]+\"")
+    re_project_type = re.compile(rf"\((?:{'|'.join(project_types)})\s+\"{project_name}\"")
     
     # We'll walk through lines, and once we detect `(gradle "project_name"`,
     # we know we are in that block until the matching `)` or until we see next (gradle ...
     for i, line in enumerate(lines):
         # Check if we hit a new gradle form. If we were in a block already,
         # end that block (even if not closed) to avoid messing up the next project.
-        if "(gradle \"" in line:
+        # if "(gradle \"" in line or "(python \"" in line or "(data \"" in line or "(purescript \"" in line:
+
+        if re_project_type_no_name.match(line):
             # If we hit another gradle form while already in the target block
             # without seeing a closing paren, we forcibly end the old block.
             in_target_gradle_block = False
 
             # Now see if this is our target form
-            if f'(gradle "{project_name}"' in line:
+            if re_project_type.match(line):
                 in_target_gradle_block = True
                 block_start_index = i
 
