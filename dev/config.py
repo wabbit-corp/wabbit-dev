@@ -320,6 +320,7 @@ class Project:
     path: Path
     name: str
     quarantine: bool
+    publish: bool
     github_repo: str | None
     ownership: OwnershipType
     resolved_dependencies: List[Dependency]
@@ -346,6 +347,7 @@ class PythonProject(Project):
     version: Version | None
     github_repo: str | None
     quarantine: bool
+    publish: bool
     ownership: OwnershipType
 
     # # Python dependencies in a raw user form vs. resolved objects
@@ -361,6 +363,7 @@ class PurescriptProject(Project):
     path: Path
     name: str
     quarantine: bool
+    publish: bool
     github_repo: str | None
     ownership: OwnershipType
     version: Version | None
@@ -371,6 +374,7 @@ class PremakeProject(Project):
     path: Path
     name: str
     quarantine: bool
+    publish: bool
     github_repo: str | None
     ownership: OwnershipType
     version: Version | None
@@ -381,6 +385,7 @@ class DataProject(Project):
     path: Path
     name: str
     quarantine: bool
+    publish: bool
     github_repo: str | None
     ownership: OwnershipType
     version: Version | None
@@ -393,6 +398,7 @@ class GradleProject(Project):
     name: str
     version: Version | None
     quarantine: bool
+    publish: bool
     github_repo: str | None
     ownership: OwnershipType
 
@@ -605,6 +611,7 @@ def load_config() -> Config:
         name: str,
         version: Quoted[SStr],
         quarantine: bool = False,
+        publish: bool = True,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
     ) -> None:
@@ -612,6 +619,7 @@ def load_config() -> Config:
         project_obj = PythonProject(
             path=path, name=name, 
             quarantine=quarantine,
+            publish=publish,
             github_repo=repo,
             ownership=ownership,
             version=Version.parse(version) if version else None,
@@ -623,6 +631,7 @@ def load_config() -> Config:
         name: str,
         version: Quoted[SStr],
         quarantine: bool = False,
+        publish: bool = True,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
     ) -> None:
@@ -630,6 +639,7 @@ def load_config() -> Config:
         project_obj = PurescriptProject(
             path=path, name=name,
             quarantine=quarantine, 
+            publish=publish,
             github_repo=repo,
             ownership=ownership,
             version=Version.parse(version) if version else None,
@@ -641,6 +651,7 @@ def load_config() -> Config:
         name: str,
         version: Quoted[SStr],
         quarantine: bool = False,
+        publish: bool = True,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
     ) -> None:
@@ -648,6 +659,7 @@ def load_config() -> Config:
         project_obj = DataProject(
             path=path, name=name, 
             quarantine=quarantine,
+            publish=publish,
             github_repo=repo,
             ownership=ownership,
             version=Version.parse(version) if version else None,
@@ -659,6 +671,7 @@ def load_config() -> Config:
         name: str,
         version: Quoted[SStr],
         quarantine: bool = False,
+        publish: bool = True,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
     ) -> None:
@@ -667,6 +680,7 @@ def load_config() -> Config:
             path=path, name=name, 
             github_repo=repo,
             quarantine=quarantine,
+            publish=publish,
             ownership=ownership,
             version=Version.parse(version) if version else None,
             resolved_dependencies=[])
@@ -677,6 +691,7 @@ def load_config() -> Config:
         name: str,
         version: Quoted[SStr],
         quarantine: bool = False,
+        publish: bool = True,
         dependencies: List[str | DependencyTarget | List[DependencyTarget]] | None = None,
         features: List[Feature] | None = None,
         repo: str | None = None,
@@ -729,6 +744,7 @@ def load_config() -> Config:
             name=name,
             version=Version.parse(version) if version else None,
             quarantine=quarantine,
+            publish=publish,
             github_repo=repo,
             raw_dependencies=raw_dependencies,
             raw_features=features or [],

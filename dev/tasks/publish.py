@@ -490,6 +490,10 @@ async def publish_single_project(proj: GradleProject, jitpack_api: JitPackAPI, r
         success(f"Skipped JitPack steps for private repository {proj.name}.")
         return True
     
+    if proj.publish is False:
+        success(f"Skipping JitPack publish for {proj.name}.")
+        return True
+    
 
     if not isinstance(proj, GradleProject): 
         warning(f"Skipping publishing to jitpack for {proj.name}: not a Gradle project.")
