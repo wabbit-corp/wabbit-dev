@@ -589,8 +589,9 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
     wabbit_corp_org = github.get_organization('wabbit-corp')
     corsaircraft_org = github.get_organization('corsaircraft')
 
-
-    all_repos = list(wabbit_corp_org.get_repos()) + list(corsaircraft_org.get_repos()) + list(sir_wabbit_org.get_repos())
+    # list(wabbit_corp_org.get_repos()) + list(corsaircraft_org.get_repos()) +
+    # list(sir_wabbit_org.get_repos()) + \
+    all_repos = (list(github.get_user().get_repos()))
     known_repo_names = ([r.full_name for r in all_repos])
     known_github_repos = {
         r.full_name: RepoInfo(
