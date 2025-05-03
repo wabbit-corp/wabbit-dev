@@ -100,7 +100,7 @@ def set_project_version_in_root_clj(project_name: str,
     found_and_replaced = False
     block_start_index = None  # The index of the line containing (gradle "project_name"
 
-    project_types = ["gradle", "python", "data", "purescript"]
+    project_types = ["gradle", "python", "data", "purescript", "premake"]
     import re
     re_project_type_no_name = re.compile(rf"\((?:{'|'.join(project_types)})\s+\"[^\"]+\"")
     re_project_type = re.compile(rf"\((?:{'|'.join(project_types)})\s+\"{project_name}\"")
