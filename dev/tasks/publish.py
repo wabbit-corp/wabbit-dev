@@ -346,7 +346,9 @@ async def publish_single_project(proj: GradleProject, jitpack_api: JitPackAPI, r
         repo_info = repo_setup_context.known_github_repos.get(proj.github_repo)
 
         if repo_info is None:
-            raise PublishError(f"Project {proj.name} has no actual GitHub repository.")
+            raise PublishError(f"Project {proj.name} has no actual GitHub repository.\n"
+                               f"Known repos: {repo_setup_context.known_github_repos.keys()}\n"
+                               f"Target repo: {proj.github_repo}")
 
         repo_is_private = repo_info.is_private
         if repo_is_private:
