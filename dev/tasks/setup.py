@@ -589,6 +589,7 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
     wabbit_corp_org = github.get_organization('wabbit-corp')
     corsaircraft_org = github.get_organization('corsaircraft')
 
+
     all_repos = list(wabbit_corp_org.get_repos()) + list(corsaircraft_org.get_repos()) + list(sir_wabbit_org.get_repos())
     known_repo_names = ([r.full_name for r in all_repos])
     known_github_repos = {
@@ -599,6 +600,9 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
         )
         for r in all_repos
     }
+
+    for repo in all_repos:
+        print(f"Repo: {repo.name} ({repo.full_name}) - {repo.private} - {repo.clone_url}")
 
     repo_template = Path('data-repo-template')
 
