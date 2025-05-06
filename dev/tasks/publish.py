@@ -619,6 +619,10 @@ async def publish_main(project_name=None):
                 warning(f"Skipping {proj.name}: no GitHub repository set.")
                 continue
 
+            if proj.quarantine:
+                warning(f"Skipping {proj.name}: in quarantine.")
+                continue
+
             ok = await publish_single_project(proj, jitpack_api, repo_setup_context, openai_key=config.openai_key)
             if not ok:
                 warning(f"Stopped after {proj.name} failed.")
