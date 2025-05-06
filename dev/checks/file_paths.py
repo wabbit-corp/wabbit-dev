@@ -8,14 +8,14 @@ from typing import List, Set, Optional, Dict, Pattern
 # Import necessary components from your base framework
 # (Adjust the import path if necessary)
 from dev.checks.base import (
-    FileCheck, DirectoryCheck, Issue, IssueType, Severity, 
+    FileCheck, DirectoryCheck, Issue, IssueType, Severity,
     FileLocation, IntRangeSet, FileContext, IssueList
 )
 
 # --- Configuration Defaults ---
 
 # Reasonable max filename length, adjust as needed
-DEFAULT_MAX_FILENAME_LENGTH = 100 
+DEFAULT_MAX_FILENAME_LENGTH = 100
 
 # Common sensitive filename patterns (lowercase for case-insensitive matching)
 # Using simple substring checks for broader matching
@@ -32,7 +32,7 @@ DEFAULT_PROBLEMATIC_FILENAME_CHARS: Set[str] = set("*?:[]$&;|<>!`\"'()")
 
 # Windows reserved filenames (case-insensitive, without extension)
 WINDOWS_RESERVED_NAMES: Set[str] = {
-    "CON", "PRN", "AUX", "NUL", 
+    "CON", "PRN", "AUX", "NUL",
     "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
     "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 }
@@ -78,7 +78,7 @@ class SensitiveFilenameCheck(FileCheck):
     def check(self, path: Path, ctx: FileContext) -> List[Issue]:
         issues = IssueList()
         filename_lower = path.name.lower()
-        
+
         # Check for exact matches first (e.g., ".env")
         if filename_lower in self.sensitive_patterns_lower:
              issues.append(E_SENSITIVE_FILENAME.make(
@@ -98,8 +98,8 @@ class SensitiveFilenameCheck(FileCheck):
                      pattern=pattern
                  ).at(path))
                  # Optionally break after first match per file:
-                 # break 
-                 
+                 # break
+
         return issues.issues
 
 
@@ -111,7 +111,7 @@ class FilenamePropertiesCheck(FileCheck):
     - Windows reserved names
     - Leading/trailing spaces or dots
     """
-    def __init__(self, 
+    def __init__(self,
                  problematic_chars: Set[str] = DEFAULT_PROBLEMATIC_FILENAME_CHARS,
                  check_non_ascii: bool = True, # Flag non-ASCII by default
                  check_reserved: bool = True, # Check reserved names by default
@@ -123,7 +123,7 @@ class FilenamePropertiesCheck(FileCheck):
         self.check_leading_trailing = check_leading_trailing
         # Compile reserved names check (case-insensitive)
         self.reserved_pattern = re.compile(
-            r'^(' + '|'.join(re.escape(name) for name in WINDOWS_RESERVED_NAMES) + r')(\..*)?$', 
+            r'^(' + '|'.join(re.escape(name) for name in WINDOWS_RESERVED_NAMES) + r')(\..*)?$',
             re.IGNORECASE
         ) if self.check_reserved else None
 
@@ -167,9 +167,9 @@ class NamingConventionCheck(FileCheck):
     def __init__(self, conventions: Optional[Dict[str, Dict[str, Pattern]]] = None):
         """
         Args:
-            conventions: A dictionary mapping file extensions (e.g., '.py') 
+            conventions: A dictionary mapping file extensions (e.g., '.py')
                          to convention rules (e.g., {'pattern': re.compile(r'^[a-z_]+$'), 'description': 'snake_case'}).
-                         Example: 
+                         Example:
                          {
                              '.py': {'pattern': re.compile(r'^[a-z0-9_]+$'), 'description': 'snake_case'},
                              '.java': {'pattern': re.compile(r'^[A-Z][a-zA-Z0-9]*$'), 'description': 'PascalCase'}
@@ -195,7 +195,7 @@ class NamingConventionCheck(FileCheck):
                 file_type=f"'{extension}' files",
                 reason=f"does not match expected pattern ({description})"
             ).at(path))
-            
+
         # Add more complex convention checks here if needed (e.g., based on FileContext)
 
         return issues.issues
@@ -215,7 +215,7 @@ class SymlinkTargetCheck(FileCheck):
         try:
             target_path_str = os.readlink(str(path)) # Read link target as string
             target_path = Path(target_path_str) # Convert to Path
-            
+
             # 1. Check if target is absolute
             if self.check_absolute and target_path.is_absolute():
                  issues.append(E_SYMLINK_POINTS_ABSOLUTE.make(
@@ -254,7 +254,7 @@ class SymlinkTargetCheck(FileCheck):
              issues.append(Issue(
                 IssueType("symlink-generic-error", f"Unexpected error checking symbolic link '{path.name}': {e}", Severity.ERROR)
             ).at(path))
-            
+
         return issues.issues
 
 
@@ -273,7 +273,7 @@ class CaseConflictCheck(DirectoryCheck):
         try:
             for item in path.iterdir():
                 # Optional: Only check files, or check both files and dirs? Checking both seems safer.
-                # if item.is_file(): 
+                # if item.is_file():
                 name = item.name
                 name_lower = name.lower()
                 if name_lower not in filenames_lower_map:

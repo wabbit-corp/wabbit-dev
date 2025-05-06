@@ -7,12 +7,12 @@ from typing import List, Set, Optional, Tuple
 # Import necessary components from your base framework
 # (Adjust the import path if necessary)
 from dev.checks.base import (
-    FileCheck, Issue, IssueType, Severity, 
+    FileCheck, Issue, IssueType, Severity,
     FileLocation, IntRangeSet, FileContext, IssueList
 )
 # Assuming get_expected_file_properties exists and helps identify text files
 # If not, we might need a simpler text file check.
-from dev.file_properties import get_expected_file_properties, ExpectedFileProperties 
+from dev.file_properties import get_expected_file_properties, ExpectedFileProperties
 
 # --- Constants ---
 
@@ -28,7 +28,7 @@ DEFAULT_HEX_ENTROPY_THRESHOLD = 3.0
 # Regex to find potential URLs. This is a common but not exhaustive pattern.
 # It looks for common schemes or www. and captures characters typical in URLs.
 DEFAULT_URL_REGEX = re.compile(
-    r"""\b((?:https?|ftp|file)://|www\.|ftp\.)[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]""", 
+    r"""\b((?:https?|ftp|file)://|www\.|ftp\.)[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]""",
     re.IGNORECASE
 )
 
@@ -43,7 +43,7 @@ class HighEntropyStringCheck(FileCheck):
     Scans text files for high entropy strings (potential secrets) like Base64 or Hex,
     while attempting to ignore strings that are part of URLs.
     """
-    def __init__(self, 
+    def __init__(self,
                  min_length: int = DEFAULT_MIN_SECRET_LENGTH,
                  b64_entropy_threshold: float = DEFAULT_B64_ENTROPY_THRESHOLD,
                  hex_entropy_threshold: float = DEFAULT_HEX_ENTROPY_THRESHOLD,
@@ -64,7 +64,7 @@ class HighEntropyStringCheck(FileCheck):
         """
         if min_length <= 0:
             raise ValueError("min_length must be positive")
-            
+
         self.min_length = min_length
         self.b64_threshold = b64_entropy_threshold
         self.hex_threshold = hex_entropy_threshold
@@ -85,13 +85,13 @@ class HighEntropyStringCheck(FileCheck):
             return 0.0
         entropy: float = 0.0
         data_len = float(len(data)) # Use float for division
-        
+
         char_counts = {}
         for char in data:
              char_counts[char] = char_counts.get(char, 0) + 1
 
         # Use only characters from the specified iterator set found in the data
-        for char in iterator: 
+        for char in iterator:
             count = char_counts.get(char, 0)
             if count > 0:
                 p_x = float(count) / data_len
@@ -115,8 +115,8 @@ class HighEntropyStringCheck(FileCheck):
 
         # --- Pre-checks ---
         # 1. Skip non-files or symlinks (optional, could be handled by caller)
-        if not path.is_file(): 
-             return [] 
+        if not path.is_file():
+             return []
         # if path.is_symlink(): # Decide if you want to check symlinks
         #     return []
 
@@ -126,7 +126,7 @@ class HighEntropyStringCheck(FileCheck):
         if not props.is_text:
              # Alternatively, implement a basic binary check here if needed
              # e.g., read first few KB, check for null bytes percentage
-             return [] 
+             return []
 
         # --- Main Processing ---
         line_number = 0
@@ -135,7 +135,7 @@ class HighEntropyStringCheck(FileCheck):
                 for line in f:
                     line_number += 1
                     original_line = line.strip() # Keep for context if needed, but avoid putting in issue data by default
-                    
+
                     # 1. Find all URL spans in the current line
                     url_spans = [(m.start(), m.end()) for m in self.url_regex.finditer(line)]
 
@@ -162,7 +162,7 @@ class HighEntropyStringCheck(FileCheck):
                             ).at(path, line=line_number))
                             # Don't check the same string multiple times if nested B64 patterns match
                             # Breaking here might miss overlapping valid secrets, careful
-                            # break 
+                            # break
 
                     # 6. Find potential Hex strings
                     for match in self.hex_regex.finditer(line):

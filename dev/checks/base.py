@@ -19,7 +19,7 @@ class FileLocation:
         """
         if self.path != other.path:
             raise ValueError("Cannot combine different file locations.")
-        
+
         combined_lines = (self.lines or []) + (other.lines or [])
         return FileLocation(self.path, combined_lines)
 
@@ -81,12 +81,12 @@ class Issue:
         """
         self.fix = fix
         return self
-    
+
     def at(self, path: Path, line: int | None = None) -> 'Issue':
         """
         Returns an Issue with the specified path.
         """
-        
+
         if self.location is None:
             self.location = FileLocation(path, IntRangeSet([line]) if line else None)
         else:
@@ -108,7 +108,7 @@ class IssueList:
         """
         Adds an issue to the list.
         """
-        if self.issues: 
+        if self.issues:
             if self.issues[-1] == issue: return
             if self.issues[-1].issue_type == issue.issue_type and self.issues[-1].data == issue.data:
                 self.issues[-1].location = self.issues[-1].location + issue.location
@@ -163,7 +163,7 @@ class RepoCheck(abc.ABC):
     @abc.abstractmethod
     def check(self, path: Path, project: Any) -> List[Issue]:
         raise NotImplementedError()
-    
+
 
 class ProjectCheck(abc.ABC):
     @abc.abstractmethod

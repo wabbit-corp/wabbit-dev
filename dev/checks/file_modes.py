@@ -23,7 +23,7 @@ def has_shebang(filepath):
     except Exception as e:
         # print(f"Warning: Error reading {filepath}: {e}", file=sys.stderr)
         return False
-    
+
 def is_elf_exe_mach(filepath):
     """
     Checks if a file is an ELF, a Windows EXE, or a Mach-O (Darwin) executable
@@ -69,7 +69,7 @@ def is_elf_exe_mach(filepath):
         return None
     except Exception:
         return None
-    
+
 assert is_elf_exe_mach("trufflehog")
 
 def is_executable(filepath):

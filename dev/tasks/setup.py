@@ -16,7 +16,7 @@ import jinja2
 import dev.io
 from dev.messages import info, error, warning, ask
 from dev.config import (
-    load_config, 
+    load_config,
     GradleProject, Project, PythonProject, PurescriptProject, DataProject, PremakeProject,
     Version, Config, Dependency, DependencyTarget, OwnershipType
 )
@@ -41,7 +41,7 @@ class RepoInfo:
     @property
     def full_name(self) -> str:
         return f"{self.organization}/{self.name}"
-    
+
     @property
     def is_public(self) -> bool:
         return not self.is_private
@@ -80,7 +80,7 @@ def _make_dependency_strings(ctx: RepoSetupContext, project: Project) -> Tuple[L
         match dep.target:
             case DependencyTarget.Maven(_, _):
                 other_dependencies.append(dep.as_string())
-            
+
             case DependencyTarget.JarFile(_):
                 other_dependencies.append(dep.as_string())
 
@@ -95,7 +95,7 @@ def _make_dependency_strings(ctx: RepoSetupContext, project: Project) -> Tuple[L
                     project_dependencies.append(artifact_dep.as_string())
                 else:
                     project_dependencies.append(f"{dep.as_string()} // {subproject.version}")
-    
+
     return project_dependencies, other_dependencies
 
 
@@ -132,7 +132,7 @@ def setup_project(ctx: RepoSetupContext, project: Project, interactive: bool=Tru
                 project.path.mkdir()
             else:
                 raise Exception("Directory does not exist")
-        
+
         # Project directory should be a directory (lol).
         if not project.path.is_dir():
             error(f"{project.path} is not a directory")
@@ -194,7 +194,7 @@ def setup_project(ctx: RepoSetupContext, project: Project, interactive: bool=Tru
                 repo.config_writer() \
                     .set_value('user', 'name', ctx.config.default_git_user_name) \
                     .release()
-            
+
             config = repo.config_reader()
             if config.has_section('user'):
                 current_email = config.get_value('user', 'email', default=None)
@@ -331,7 +331,7 @@ def setup_gradle_project(ctx: RepoSetupContext, project: GradleProject, interact
             dev.io.delete_if_exists(project.path / 'settings.gradle.kts')
             dev.io.touch(project.path / '.is-ij-mode')
             dev.io.delete_if_exists(project.path / '.is-dev-mode')
-        
+
         case RepoSetupMode.DEV:
             dev.io.write_text_file(project.path / 'settings.gradle.kts', render_template(ctx.settings_template, project_name=project.name))
             dev.io.delete_if_exists(project.path / '.is-ij-mode')
@@ -347,7 +347,7 @@ def setup_gradle_project(ctx: RepoSetupContext, project: GradleProject, interact
     # ))
     dev.io.write_text_file(project.path / '.gitignore', render_template(ctx.gitignore_template) + "\n" + render_template(ctx.gradle_gitignore_template))
     dev.io.write_text_file(project.path / 'gradle.properties', render_template(ctx.gradle_properties_template))
-    
+
     if project.ownership == OwnershipType.WABBIT:
         dev.io.write_text_file(project.path / 'LICENSE.md', ctx.licenses['AGPL'])
 
@@ -420,7 +420,7 @@ def commit_repo_changes(project: Project, repo: Repo, openai_key: str=None, inte
 
     if changed_paths:
         warning(f"{project.name}: Changes on master")
-        
+
         # ---------------------------------------------------------------------
         # Build a user-readable diff summary for HEAD->WORKING
         # using the FileDiff objects from gather_changes again (or we can re-run).
@@ -691,7 +691,7 @@ def setup(mode: RepoSetupMode) -> None:
     if any_gradle:
         gradle_build = render_template(ctx.build_template)
         dev.io.write_text_file(Path('build.gradle.kts'), gradle_build)
-        
+
         gradle_subprojects = [p.name for p in config.defined_projects.values() if isinstance(p, GradleProject)]
         result = render_template(ctx.settings_template, subprojects=gradle_subprojects)
         dev.io.write_text_file(Path('settings.gradle.kts'), result)
@@ -699,7 +699,7 @@ def setup(mode: RepoSetupMode) -> None:
     defined_projects = config.defined_projects
     for name, project in defined_projects.items():
         setup_project(ctx, project, interactive=True)
-    
+
     project_dirs = [p.path.name for p in defined_projects.values()]
     ignored_dirs = [
         'build', '.gradle', 'gradle', '.idea', '.git',

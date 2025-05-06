@@ -35,7 +35,7 @@ class Commands:
 
             if '' not in subparsers:
                 subparsers[''] = commands.root_parser.add_subparsers(dest='command')
-                
+
             for i in range(1, len(path) + 1):
                 p = '/'.join(path[:i])
                 p0 = '/'.join(path[:i-1])
@@ -48,10 +48,10 @@ class Commands:
 
         def __enter__(self) -> 'Commands.Command':
             return self.parser
-        
+
         def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
             pass
-        
+
     def __call__(self, name: str) -> Any:
         return Commands.Command(self, name)
 
@@ -84,7 +84,7 @@ async def main() -> None:
     with commands('setup') as cmd:
         cmd.add_argument('--dev', action='store_true')
         cmd.add_argument('--ij', action='store_true')
-        
+
     with commands('llmcopy') as cmd:
         cmd.add_argument('path', type=str, nargs='?')
 
@@ -95,7 +95,7 @@ async def main() -> None:
         cmd.add_argument('project', type=str, nargs='?', default='.')
         cmd.add_argument('--projects', action='store_true')
         cmd.add_argument('--graph', action='store_true')
-    
+
     with commands('publish') as cmd:
         cmd.add_argument('project', type=str, nargs='?')
 
@@ -134,10 +134,10 @@ async def main() -> None:
     if args.command is None:
         parser.print_help()
         return
-    
+
     # enable DEBUG logging
     # logging.getLogger().setLevel(logging.DEBUG)
-    
+
     match args.command:
         case 'check-config':
             from dev.tasks.check_config import check_config
@@ -169,8 +169,8 @@ async def main() -> None:
             elif args.subcommand == 'graph':
                 from dev.tasks.dep_graph import get_project_dependencies
                 get_project_dependencies(
-                    project_name=args.project, 
-                    only_projects=args.projects, 
+                    project_name=args.project,
+                    only_projects=args.projects,
                     include_graph=args.graph)
             else:
                 raise ValueError(f"Unknown subcommand: {args.subcommand}")
@@ -192,7 +192,7 @@ async def main() -> None:
             status(project_name, path)
 
         case 'commit':
-            from dev.tasks.commit import commit        
+            from dev.tasks.commit import commit
             project_name = args.project[0]
             message = args.message[0]
             commit(project_name, message)
@@ -211,7 +211,7 @@ async def main() -> None:
                 checks = None
             fix = args.fix
             check_main(project_or_dir_or_file, checks, fix)
-            
+
         case 'trufflehog':
             from dev.tasks.check import trufflehog
             trufflehog()
@@ -260,7 +260,7 @@ async def main() -> None:
                     # print()
                 else:
                     # print(f"  No contributors found in {path}.")
-                    pass 
+                    pass
 
                 # print()
 

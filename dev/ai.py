@@ -32,7 +32,7 @@ Finally, at the end of the commit message, explicitly include a line stating the
 
 **Important**:
 1. **Public/Runtime code vs. Test/Dev changes**:
-   - If the diff only changes test or dev dependencies (e.g., `testImplementation`, `devDependencies`, build config, docs, comments, etc.), assume **NONE** impact because it does not affect the public API.  
+   - If the diff only changes test or dev dependencies (e.g., `testImplementation`, `devDependencies`, build config, docs, comments, etc.), assume **NONE** impact because it does not affect the public API.
    - If a library version is changed in runtime or compile scope from X.Y.Z to X'.Y'.Z', follow the standard rules:
      - If X' != X, it’s **MAJOR**.
      - Else if Y' != Y, it’s **MINOR**.
@@ -95,7 +95,7 @@ def suggest_commit_name(modified: str, /, api_key: str) -> str:
         return obj["full_commit_message"]
     else:
         return "Unknown"
-    
+
 SUGGEST_VERSION_NUMBER = textwrap.dedent(
 """
 Since the last release {last_version}, here are the commit messages:
@@ -181,7 +181,7 @@ def suggest_version_number(commits: List[str], last_version: str, /, api_key: st
             "commits": commits,
             "response": response.choices[0].message.content
         }, f, indent=2)
-    
+
     return obj["version"], obj["rationale"], obj["commit_rationales"]
 
 
@@ -203,7 +203,7 @@ def suggest_version_number(commits: List[str], last_version: str, /, api_key: st
 #         "<rationale for the second commit>",
 #         ...
 #     ],
-    
+
 #     // The rationale for the version number based on "commit_rationales".
 #     "rationale": "<rationale for the version number>",
 

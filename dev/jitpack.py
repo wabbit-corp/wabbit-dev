@@ -147,10 +147,10 @@ class JitPackAPI:
         :param timeout: Overall request timeout in seconds.
         """
         self.base_url = base_url.rstrip("/")
-        # Just store the session ID or full cookie line. 
-        # Typically for JitPack it’s "sessionId=XYZ", but you could store only "XYZ" 
+        # Just store the session ID or full cookie line.
+        # Typically for JitPack it’s "sessionId=XYZ", but you could store only "XYZ"
         # and handle it yourself in `cookies` or `headers`.
-        self.session_cookie = session_cookie  
+        self.session_cookie = session_cookie
         self.timeout = timeout
 
         self._session: Optional[ClientSession] = None
@@ -195,7 +195,7 @@ class JitPackAPI:
             # If your cookie is exactly "XYZ" and you want a "sessionId" key:
             # cookies["sessionId"] = self.session_cookie
             #
-            # If your cookie is already "sessionId=XYZ", you can split by '=' or just parse. 
+            # If your cookie is already "sessionId=XYZ", you can split by '=' or just parse.
             # For simplicity, let's assume the user provided "sessionId=XYZ":
             try:
                 # e.g. "sessionId" / "XYZ"
@@ -256,12 +256,12 @@ class JitPackAPI:
         refs = []
 
         # Expecting something like:  {"tags": [...], "branches": [...]}
-        # Let's combine them or parse them separately. 
+        # Let's combine them or parse them separately.
         tags = data.get("tags", [])
         branches = data.get("branches", [])
 
-        # We unify them as "Ref" objects. 
-        # The JS code suggests "tag_name" and "commit" for branches as well. 
+        # We unify them as "Ref" objects.
+        # The JS code suggests "tag_name" and "commit" for branches as well.
         for t in tags:
             name = t.get("tag_name") or t.get("name") or "unknown"
             commit = t.get("commit", "")[:7]
@@ -272,7 +272,7 @@ class JitPackAPI:
             refs.append(Ref(name=name, commit=commit))
 
         return refs
-    
+
     async def force_build(self, group: str, project: str, version: str) -> None:
         # We can force a build by sending a GET to the POM file URL.
         # This will trigger a new build for the specified version.
@@ -284,7 +284,7 @@ class JitPackAPI:
         path = f"/com/github/{group}/{project}/{version}/{project}-{version}.pom"
         # We need it to timeout quickly, so we don't wait for the response.
         # And we don't need cookies or JSON data.
-        try: 
+        try:
             async with self._session.request(
                 "GET",
                 f"{self.base_url}{path}",
@@ -310,7 +310,7 @@ class JitPackAPI:
             # If your cookie is exactly "XYZ" and you want a "sessionId" key:
             # cookies["sessionId"] = self.session_cookie
             #
-            # If your cookie is already "sessionId=XYZ", you can split by '=' or just parse. 
+            # If your cookie is already "sessionId=XYZ", you can split by '=' or just parse.
             # For simplicity, let's assume the user provided "sessionId=XYZ":
             try:
                 # e.g. "sessionId" / "XYZ"
@@ -320,7 +320,7 @@ class JitPackAPI:
                 # Fallback: if there's a parse error, treat the entire string as sessionId
                 cookies["sessionId"] = self.session_cookie
         return cookies
-            
+
     async def get_build_log(self, group: str, project: str, version: str) -> str:
         # We can get the build log by sending a GET to the build log URL.
         # https://jitpack.io/com/github/wabbit-corp/kotlin-base58/1.1.0-SNAPSHOT/build.log
@@ -570,8 +570,8 @@ async def main():
 
         # 8. Start a trial
         # trial_resp = await api.post_trial(
-        #     git_owner_url="https://github.com/wabbit-corp", 
-        #     login="wabbit-corp", 
+        #     git_owner_url="https://github.com/wabbit-corp",
+        #     login="wabbit-corp",
         #     plan="FREE"
         # )
         # print("Trial response:", trial_resp)

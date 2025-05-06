@@ -95,7 +95,7 @@ def check_for_duplicates(paths, exclude_filters, include_filters, min_size, no_d
                 # the file access might've changed till the exec point got here
                 continue
             files_by_small_hash[(file_size, small_hash)].append(filename)
-    
+
     del files_by_size
 
     # For all files with the hash on the first 1024 bytes, get their hash on the full
@@ -133,10 +133,10 @@ def check_for_duplicates(paths, exclude_filters, include_filters, min_size, no_d
                     # not accessible (permissions, etc) - pass on
                     continue
                 total_size += file_size
-                    
+
             file_groups.append(FileGroup(total_size, total_count, files))
-            
-    
+
+
     file_groups.sort(key=lambda x: x.total_size, reverse=True)
     for file_group in file_groups:
         print(f"Total size: {file_group.total_size} bytes, Total count: {file_group.total_count}")
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     # -f, --filter <filter>   Include only files matching the filter (-f '*.txt' -f '*.doc')
     # -s, --size <size>       Minimum file size to consider (default: 1)
     # -no-default-excludes    Do not exclude common files and directories
-    
+
     parser.add_argument('-e', '--exclude', type=str, default='', help='Exclude files matching the filter', nargs='+')
     parser.add_argument('-f', '--filter', type=str, default='', help='Include only files matching the filter', nargs='+')
     parser.add_argument('-s', '--size', type=int, default=1, help='Minimum file size to consider')
@@ -164,8 +164,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     check_for_duplicates(
-        args.folders, 
-        args.exclude, 
-        args.filter, 
-        args.size, 
+        args.folders,
+        args.exclude,
+        args.filter,
+        args.size,
         args.no_default_excludes)

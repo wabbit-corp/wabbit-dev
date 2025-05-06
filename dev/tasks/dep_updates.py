@@ -11,7 +11,7 @@ MAVEN_CENTRAL = MavenRepositoryDefinition(
 
 def check_for_updates():
     config = load_config()
-    
+
     for _, library in config.libraries.items():
         if library.repo is None:
             repo = MAVEN_CENTRAL
@@ -34,7 +34,7 @@ def check_for_updates():
         except Exception as e:
             # print(f"Failed to fetch metadata for {library.name}: {e}")
             continue
-        
+
         newer_versions = []
         for version in metadata.versions:
             try:
@@ -44,6 +44,6 @@ def check_for_updates():
             except ValueError:
                 # print(f"Skipping invalid version: {version}")
                 pass
-        
+
         if newer_versions:
             print(f"{library.name}: {current_version} < {newer_versions}")

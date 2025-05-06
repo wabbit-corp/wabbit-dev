@@ -63,7 +63,7 @@ def get_latest_version(repo) -> Tuple[Version | None, git.Commit | None]:
     else:
         latest_version = None
         latest_version_commit = None
-    
+
     return latest_version, latest_version_commit
 
 ##############################################################################
@@ -104,7 +104,7 @@ def set_project_version_in_root_clj(project_name: str,
     import re
     re_project_type_no_name = re.compile(rf"\((?:{'|'.join(project_types)})\s+\"[^\"]+\"")
     re_project_type = re.compile(rf"\((?:{'|'.join(project_types)})\s+\"{project_name}\"")
-    
+
     # We'll walk through lines, and once we detect `(gradle "project_name"`,
     # we know we are in that block until the matching `)` or until we see next (gradle ...
     for i, line in enumerate(lines):
@@ -314,11 +314,11 @@ class PublishError(Exception):
 class Timer:
     def __init__(self, name: str = None):
         self.name = name
-        
+
     def __enter__(self):
         self.start_time = time.time()
         return self
-    
+
     def __exit__(self, exc_type, exc_value, traceback):
         elapsed_time = time.time() - self.start_time
         if self.name:
@@ -342,7 +342,7 @@ async def publish_single_project(proj: GradleProject, jitpack_api: JitPackAPI, r
     with Timer(f'Step 1: getting info for {proj.name}'):
         if proj.github_repo is None:
             raise PublishError(f"Project {proj.name} has no GitHub repository set.")
-        
+
         repo_info = repo_setup_context.known_github_repos.get(proj.github_repo)
 
         if repo_info is None:
@@ -382,7 +382,7 @@ async def publish_single_project(proj: GradleProject, jitpack_api: JitPackAPI, r
         config_version = proj.version
         if not config_version:
             raise PublishError(f"Project {proj.name} has no version set.")
-        
+
         info(f"Current config version for {proj.name}: {config_version}")
         if last_repo_version:
             info(f"Latest repo version for {proj.name}: {last_repo_version} at {last_repo_version_tag_commit}")
@@ -404,7 +404,7 @@ async def publish_single_project(proj: GradleProject, jitpack_api: JitPackAPI, r
             info(f"Version in config matches repo for {proj.name}.")
         elif not last_repo_version:
             info(f"No tags found for {proj.name}.")
-        
+
         # We set up the project again to ensure the new version is reflected in the build.gradle
         # This will also ensure that all changes up to this point are committed.
         setup_project(repo_setup_context, proj)
@@ -493,21 +493,21 @@ async def publish_single_project(proj: GradleProject, jitpack_api: JitPackAPI, r
         except Exception as e:
             error(f"Failed to push {proj.name}: {e}")
             return False
-    
+
     # Optional push to JitPack
     if repo_is_private:
         success(f"Skipped JitPack steps for private repository {proj.name}.")
         return True
-    
+
     if proj.publish is False:
         success(f"Skipping JitPack publish for {proj.name}.")
         return True
-    
 
-    if not isinstance(proj, GradleProject): 
+
+    if not isinstance(proj, GradleProject):
         warning(f"Skipping publishing to jitpack for {proj.name}: not a Gradle project.")
         return True
-        
+
 
     # Step 4: poll JitPack
     with Timer(f'Step 4: poll JitPack for {proj.name}'):
@@ -566,11 +566,11 @@ async def publish_single_project(proj: GradleProject, jitpack_api: JitPackAPI, r
             success(f"Polling JitPack for {group_id}:{artifact_id}:{tag_name} ...")
             await jitpack_api.force_build(group_id, artifact_id, tag_name)
             build_ok = await poll_jitpack_build_status(jitpack_api, group_id, artifact_id, tag_name)
-            
+
         if build_ok is True:
             success(f"JitPack build success for {proj.name}, version {tag_name}")
             return True
-        
+
         elif build_ok is False:
             log = await jitpack_api.get_build_log(group_id, artifact_id, tag_name)
             import termcolor
@@ -580,7 +580,7 @@ async def publish_single_project(proj: GradleProject, jitpack_api: JitPackAPI, r
                     print(f'  - {line}')
             error(f"JitPack build failed for {proj.name}, version {tag_name}")
             return False
-        
+
         else:
             error(f"JitPack timed out or not found for {proj.name}, version {tag_name}")
             return False

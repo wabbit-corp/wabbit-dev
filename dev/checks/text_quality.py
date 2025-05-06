@@ -37,9 +37,9 @@ def get_line_ending_counts(file: Path) -> Dict[LineEnding, int]:
             elif byte == b'\n': state = STATE_LF
             else: return
         elif state == STATE_CR:
-            if byte == b'\r': 
+            if byte == b'\r':
                 cr_count += 1
-            elif byte == b'\n': 
+            elif byte == b'\n':
                 crlf_count += 1
                 state = STATE_OUTSIDE
             else:
@@ -166,7 +166,7 @@ class TextQualityCheck(FileCheck):
         if not props.is_text:
             return []
 
-        
+
         content_bytes = file.read_bytes()
         if not content_bytes: return [] # Skip empty files
 
@@ -196,12 +196,12 @@ class TextQualityCheck(FileCheck):
         # Check Line Endings based on bytes (more robust than decoded text)
         if not props.is_crlf_native and b'\r\n' in content_bytes:
             issues.append(E_LINE_ENDINGS.at(file).fixable(lambda: fix_line_endings(file, LineEnding.LF)))
-        
+
         if props.is_crlf_native:
             line_ending_counts = get_line_ending_counts(file)
             if line_ending_counts[LineEnding.LF] > 0 or line_ending_counts[LineEnding.CR] > 0:
                 issues.append(E_LINE_ENDINGS.at(file).fixable(lambda: fix_line_endings(file, LineEnding.CRLF)))
-        
+
 
         ###################################################################
         # Decoding and String-based checks
@@ -240,7 +240,7 @@ class TextQualityCheck(FileCheck):
 
         if not content_bytes.endswith(b'\n') and (file.suffix not in ('.json')):
             issues.append(E_NO_NEWLINE.at(file).fixable(lambda: fix_no_newline(file)))
-            
+
 
         if text is not None:
             lines = text.splitlines() # Don't keep ends, use original line endings from bytes if needed
@@ -309,7 +309,7 @@ class TextQualityCheck(FileCheck):
                                 pass # Already reported as BOM
                             else:
                                 invisible_chars.add(char)
-                
+
                 if control_chars:
                     # Report all control characters found in the line
                     issues.append(E_UNEXPECTED_CONTROL_CHARACTER.make(control_chars=', '.join(repr(c) for c in control_chars)).at(file, line=line_nr))
@@ -317,6 +317,6 @@ class TextQualityCheck(FileCheck):
                 if invisible_chars:
                     # Report all invisible characters found in the line
                     issues.append(E_UNICODE_INVISIBLE.make(invisible_chars=', '.join(repr(c) for c in invisible_chars)).at(file, line=line_nr))
-                        
+
 
         return issues

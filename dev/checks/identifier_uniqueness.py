@@ -5,12 +5,12 @@ from pathlib import Path
 
 # Import necessary components from your new system
 from dev.checks.base import (
-    ProjectCheck, Issue, IssueType, Severity, FileLocation, 
+    ProjectCheck, Issue, IssueType, Severity, FileLocation,
     IntRangeSet, CoarseProjectType, CoarseFileScope, FileContext, IssueList # Assuming these are in base or similar
 )
 # Assuming get_expected_file_properties exists and helps identify text files
 # If not, we might need a simpler text file check.
-from dev.file_properties import get_expected_file_properties, ExpectedFileProperties 
+from dev.file_properties import get_expected_file_properties, ExpectedFileProperties
 # Assuming a walk_files utility exists or we implement one
 # from dev.io import walk_files # If you have this utility
 
@@ -47,7 +47,7 @@ E_DUPLICATE_IDENTIFIER = IssueType("7ac08480-1b54-43ca-ab8c-3e071eb098ff", "Dupl
 
 class UniqueIdentifiersCheck(ProjectCheck):
     """
-    Checks for duplicate UUIDs and ULIDs (enclosed in double quotes) across 
+    Checks for duplicate UUIDs and ULIDs (enclosed in double quotes) across
     all source files within a project.
     """
 
@@ -68,7 +68,7 @@ class UniqueIdentifiersCheck(ProjectCheck):
         """Check if a path should be ignored."""
         if path.name in self.ignore_files:
             return True
-        
+
         try:
             # Check if any part of the relative path is an ignored directory name
             relative_parts = path.relative_to(root_path).parts
@@ -77,8 +77,8 @@ class UniqueIdentifiersCheck(ProjectCheck):
                     return True
         except ValueError:
             # path might not be relative to root_path, shouldn't happen with rglob
-            pass 
-            
+            pass
+
         return False
 
     def check(self, path: Path, project: Any) -> List[Issue]:
@@ -93,7 +93,7 @@ class UniqueIdentifiersCheck(ProjectCheck):
         """
         if not path.is_dir():
             # Or raise ValueError? Returning empty list seems reasonable.
-            return [] 
+            return []
 
         seen_ulids: Dict[str, FileLocation] = {}
         seen_uuids: Dict[str, FileLocation] = {}
@@ -112,7 +112,7 @@ class UniqueIdentifiersCheck(ProjectCheck):
             # Check file extension - Skip non-source/text files
             if file_path.suffix.lower() not in SOURCE_FILE_EXTENSIONS:
                 continue
-                
+
             # Optional: Use get_expected_file_properties if available for a more robust text check
             # props = get_expected_file_properties(file_path) or ExpectedFileProperties()
             # if not props.is_text:
@@ -154,7 +154,7 @@ class UniqueIdentifiersCheck(ProjectCheck):
 
 # --- Example Usage (Conceptual) ---
 # checker = UniqueIdentifiersCheck()
-# project_root = Path("./my_gradle_project") 
+# project_root = Path("./my_gradle_project")
 # list_of_issues = checker.check(project_root)
 # for issue in list_of_issues:
 #     # Process issues (print, log, etc.)

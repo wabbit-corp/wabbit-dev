@@ -5,15 +5,15 @@ import dateparser
 
 def save_uri(uri, path):
     needs_download = True
-    
+
     if os.path.exists(path):
         if os.path.isdir(path):
             raise Exception(f"{path} is a directory.")
-        
+
         # Get the old modification time.
         old_mtime = os.path.getmtime(path)
         print(f'Old file modification time: {old_mtime}')
-        
+
         # Get the old ETag.
         old_etag = None
         if os.path.exists(path + '.etag'):
@@ -23,37 +23,37 @@ def save_uri(uri, path):
                 with open(path + '.etag', 'rt') as fin:
                     old_etag = fin.read().strip()
                 print(f'Old ETag: {old_etag}')
-        
+
         head_mtime  = None
         head_etag   = None
         head_status = None
-        
+
         try:
             response = requests.head(uri, headers={
                 'If-Modified-Since': time.strftime('%a, %d %b %Y %H:%M:%S GMT', time.gmtime(old_mtime))
             })
-            
+
             head_status = response.status_code
-            
+
             # Parse Last-Modified if it exists
             head_mtime = response.headers.get('Last-Modified', None)
             if head_mtime is not None:
                 head_mtime = dateparser.parse(head_mtime)
                 head_mtime = time.mktime(head_mtime.timetuple())
                 print(f'Last modification time: {head_mtime}')
-                
+
             head_etag = response.headers.get('ETag', None)
             if head_etag is not None:
                 head_etag = head_etag.strip()
-                print(f'New ETag: {head_etag}')               
+                print(f'New ETag: {head_etag}')
         except Exception as e:
             print(e)
-            print('Failed to query HEAD.')    
-    
+            print('Failed to query HEAD.')
+
         if head_status == 304:
             print("Server responded with 304.")
             needs_download = False
-            
+
         if head_etag == old_etag:
             print("Same ETag.")
             needs_download = False
@@ -61,15 +61,15 @@ def save_uri(uri, path):
         if head_mtime == old_mtime or (head_mtime is not None and head_mtime <= old_mtime):
             print("Modified at an earlier date.")
             needs_download = False
-            
+
         if head_etag is not None and head_etag != old_etag:
             with open(path + '.etag', 'wt+') as fout:
                     fout.write(head_etag)
-    
+
     if not needs_download:
         print(f'No need to download {uri} to {path}.')
         return
-    
+
     print(f'Downloading {uri} to {path}.')
     response = requests.get(uri)
     assert response.status_code == 200

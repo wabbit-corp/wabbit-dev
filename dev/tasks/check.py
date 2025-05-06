@@ -57,7 +57,7 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
     if project_or_dir_or_file.startswith(":"): # Definitely a project
         if config is None:
             raise ValueError("No config file found. Cannot resolve project paths.")
-        
+
         project_name = project_or_dir_or_file[1:]
         if project_name == "root":
             for project in config.defined_projects.values():
@@ -67,10 +67,10 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
                 raise ValueError(f"Unknown project: {project_name}")
             project = config.defined_projects[project_name]
             root_paths.append(project.path)
-        
+
     else: # Could be a project or a path
         root_paths.append(Path(project_or_dir_or_file))
-    
+
     for path in root_paths:
         if not path.exists():
             raise ValueError(f"Path does not exist: {path}")
@@ -80,9 +80,9 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
             for i in issue:
                 report(i)
             return
-        
+
         msg = ''
-        
+
         if issue.location is not None:
             msg += str(issue.location.path)
             if issue.location.lines:
@@ -94,7 +94,7 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
             msg += ' > '
         else:
             msg += '> '
-        
+
         msg += issue.issue_type.message.format(**(issue.data or {}))
 
         data_str = ', '.join(
@@ -117,7 +117,7 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
                 root=self.root,
                 ignore=self.ignore + ignore,
             )
-        
+
         @cached_property
         def spec(self) -> pathspec.PathSpec:
             """
@@ -203,15 +203,15 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
                 if issue.fix and fix:
                     info(f"Fixing")
                     issue.fix()
-        
+
     for path in root_paths: go(path)
 
     # if accumulated_issues:
     #     for issue in accumulated_issues:
-    
+
     # for fn in sorted(Path('.').iterdir()):
     #     if fn.is_dir():
-    #         if fn.name in ('.git', '.idea', '.llm', '.kotlin', 
+    #         if fn.name in ('.git', '.idea', '.llm', '.kotlin',
     #                         '.gradle', '.venv', '.vscode', 'build',
     #                         'tmp.jeeves'):
     #             continue
@@ -226,7 +226,7 @@ if __name__ == "__main__":
     parser.add_argument("project_or_dir_or_file", type=str, help="Project or directory or file to check.")
     parser.add_argument("--checks", nargs='+', default=[], help="List of checks to run.")
     parser.add_argument("--fix", action='store_true', help="Fix issues found during checks.")
-    
+
     args = parser.parse_args()
-    
+
     check_main(args.project_or_dir_or_file, args.checks, args.fix)

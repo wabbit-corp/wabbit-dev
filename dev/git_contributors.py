@@ -16,7 +16,7 @@ class GitContributor:
 
     def __repr__(self) -> str:
         return f"GitContributor(name={self.name}, email={self.email})"
-    
+
 
 def list_git_contributors(path: Path) -> Dict[GitContributor, int]:
     """
@@ -47,7 +47,7 @@ def list_git_contributors(path: Path) -> Dict[GitContributor, int]:
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
             return []
-        
+
         # Split the output into lines
         lines = output.strip().split("\n")
 
@@ -99,7 +99,7 @@ def get_git_user_name(path: Path) -> Optional[str]:
         return None
     finally:
         os.chdir(change_dir)
-    
+
 
 def get_git_user_email(path: Path) -> Optional[str]:
     """
@@ -128,7 +128,7 @@ def get_git_user_email(path: Path) -> Optional[str]:
         return None
     finally:
         os.chdir(change_dir)
-    
+
 
 def get_git_user() -> Optional[GitContributor]:
     """

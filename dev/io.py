@@ -23,18 +23,18 @@ def copy(from_: Path, to: Path) -> None:
     if not to.parent.exists():
         info(f"Creating directory {to.parent}")
         to.parent.mkdir(parents=True)
-    
+
     if to.exists():
         if from_.is_file() and not to.is_file():
             raise ValueError(f"Cannot copy file {from_} to non-file {to}")
         if from_.is_dir() and not to.is_dir():
             raise ValueError(f"Cannot copy directory {from_} to non-directory {to}")
-        
+
         if from_.is_file():
             # Now we need to check if the files are the same
             from_hash = hashlib.sha256(from_.read_bytes()).hexdigest()
             to_hash = hashlib.sha256(to.read_bytes()).hexdigest()
-            
+
             if from_hash == to_hash:
                 return
 

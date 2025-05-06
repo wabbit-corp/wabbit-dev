@@ -20,14 +20,14 @@ def build_dependency_graph(projects) -> Tuple[Dict[str, List[str]], Dict[str, in
     for name, proj in projects.items():
         graph[name] = []
 
-    for name, proj in projects.items(): 
+    for name, proj in projects.items():
         for dep in proj.resolved_dependencies:
             if dep.is_subproject:
                 dep_name = dep.name
                 # Edge: dep_name -> name
                 graph[dep_name].append(name)
                 in_degs[name] += 1
-    
+
     return dict(graph), in_degs
 
 def toposort_projects(projects, target_project=None):

@@ -38,13 +38,13 @@ class Version:
 
     def __str__(self) -> str:
         return f"{self.major}.{self.minor}.{self.patch}" + ("+dev-SNAPSHOT" if self.is_dev else "")
-    
+
     def next_major(self) -> 'Version':
         return Version(None, self.major + 1, 0, 0, False)
-    
+
     def next_minor(self) -> 'Version':
         return Version(None, self.major, self.minor + 1, 0, False)
-    
+
     def next_patch(self) -> 'Version':
         return Version(None, self.major, self.minor, self.patch + 1, False)
 
@@ -73,7 +73,7 @@ class Version:
         if not isinstance(other, Version):
             return NotImplemented
         return (self.major, self.minor, self.patch, self.is_dev) == (other.major, other.minor, other.patch, other.is_dev)
-    
+
     def __gt__(self, other: 'Version') -> bool:
         return other < self
     def __ge__(self, other: 'Version') -> bool:
@@ -211,7 +211,7 @@ class KotlinSerialization(Feature):
 
     def implied(self) -> List[Feature]:
         return [Kotlin()]
-    
+
 
 ################################################################################
 # Dependencies for Gradle-like resolution
@@ -283,14 +283,14 @@ class Dependency:
             case DependencyTarget.JarFile(path):
                 dirname, basename = os.path.split(path)
                 return f'{modifier}(fileTree(mapOf("dir" to "{dirname}", "include" to listOf("{basename}"))))'
-            
+
             case DependencyTarget.Project(project):
                 return f'{modifier}(project(":{project}"))'
-            
+
             case DependencyTarget.Maven(maven_repo, artifact):
                 # FIXME: repo is not used
                 return f'{modifier}("{artifact}")'
-            
+
 
 class DependencyTarget:
     JarFile: type['JarFileDependencyTarget'] = None # type: ignore
@@ -328,7 +328,7 @@ class Project:
 
     def get_coarse_file_scope(self, path: Path) -> CoarseFileScope:
         raise NotImplementedError(f"get_file_scope not implemented for {type(self)}")
-    
+
     @property
     def coarse_project_type(self) -> CoarseProjectType:
         raise NotImplementedError(f"coarse_project_type not implemented for {type(self)}")
@@ -371,10 +371,10 @@ class PythonProject(Project):
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
             raise ValueError(f"Path {path} is not contained in project path {self.path}")
-        
+
         rel_path = path.relative_to(self.path)
         return None
-    
+
     @property
     def coarse_project_type(self) -> Optional[CoarseProjectType]:
         return None
@@ -394,10 +394,10 @@ class PurescriptProject(Project):
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
             raise ValueError(f"Path {path} is not contained in project path {self.path}")
-        
+
         rel_path = path.relative_to(self.path)
         return None
-    
+
     @property
     def coarse_project_type(self) -> Optional[CoarseProjectType]:
         return None
@@ -417,10 +417,10 @@ class PremakeProject(Project):
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
             raise ValueError(f"Path {path} is not contained in project path {self.path}")
-        
+
         rel_path = path.relative_to(self.path)
         return None
-    
+
     @property
     def coarse_project_type(self) -> Optional[CoarseProjectType]:
         return None
@@ -440,10 +440,10 @@ class DataProject(Project):
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
             raise ValueError(f"Path {path} is not contained in project path {self.path}")
-        
+
         rel_path = path.relative_to(self.path)
         return None
-    
+
     @property
     def coarse_project_type(self) -> Optional[CoarseProjectType]:
         return CoarseProjectType.DATA
@@ -469,18 +469,18 @@ class GradleProject(Project):
     @property
     def artifact_name(self) -> str:
         return f"com.github.wabbit-corp:{self.name}:{self.version}"
-    
+
     @property
     def coarse_project_type(self) -> Optional[CoarseProjectType]:
         return None
-    
+
     def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
             raise ValueError(f"Path {path} is not contained in project path {self.path}")
-        
+
         rel_path = path.relative_to(self.path)
-        
+
         if rel_path.as_posix().startswith("src/main/"):
             return CoarseFileScope.MAIN
         if rel_path.as_posix().startswith("src/test/"):
@@ -627,7 +627,7 @@ def load_config() -> Config:
     def parse_gradle_dependency(dep: str | Dependency, modifier: str | None = None) -> List[Dependency]:
         if isinstance(dep, Dependency):
             return [dep]
-        
+
         if isinstance(dep, list):
             result = []
             for item in dep:
@@ -638,11 +638,11 @@ def load_config() -> Config:
                 else:
                     raise ValueError(f"Unknown dependency type: {item}")
             return result
-        
+
         assert isinstance(dep, str), f"Expected string or Dependency, got {type(dep)}"
 
         if modifier is not None:
-            assert modifier in ['test', 'implementation', 'api', 'compileOnly', 'runtimeOnly', 
+            assert modifier in ['test', 'implementation', 'api', 'compileOnly', 'runtimeOnly',
                                 'testImplementation', 'testCompileOnly', 'testRuntimeOnly'], f"Unknown modifier: {modifier}"
 
         if dep.startswith('.') or dep.startswith('/'):
@@ -676,7 +676,7 @@ def load_config() -> Config:
     def dep(name: str, modifier: str | None = None) -> List[Dependency]:
         if modifier is not None:
             assert isinstance(modifier, str), f"Expected string, got {type(modifier)}"
-            assert modifier in ['test', 'implementation', 'api', 'compileOnly', 'runtimeOnly', 
+            assert modifier in ['test', 'implementation', 'api', 'compileOnly', 'runtimeOnly',
                                 'testImplementation', 'testCompileOnly', 'testRuntimeOnly'], f"Unknown modifier: {modifier}"
         return parse_gradle_dependency(name, modifier)
 
@@ -702,7 +702,7 @@ def load_config() -> Config:
                         f"{dep_project.name}.quarantine = {dep_project.quarantine}" \
                         f"{project.name}.publish = {project.publish}, " \
                         f"{dep_project.name}.publish = {dep_project.publish}"
-                    
+
 
     @ctx.register(name='python')
     def python_project(
@@ -715,7 +715,7 @@ def load_config() -> Config:
     ) -> None:
         path = Path(f"./{name}")
         project_obj = PythonProject(
-            path=path, name=name, 
+            path=path, name=name,
             quarantine=quarantine,
             publish=publish,
             github_repo=repo,
@@ -737,7 +737,7 @@ def load_config() -> Config:
         path = Path(f"./{name}")
         project_obj = PurescriptProject(
             path=path, name=name,
-            quarantine=quarantine, 
+            quarantine=quarantine,
             publish=publish,
             github_repo=repo,
             ownership=ownership,
@@ -757,7 +757,7 @@ def load_config() -> Config:
     ) -> None:
         path = Path(f"./{name}")
         project_obj = DataProject(
-            path=path, name=name, 
+            path=path, name=name,
             quarantine=quarantine,
             publish=publish,
             github_repo=repo,
@@ -778,7 +778,7 @@ def load_config() -> Config:
     ) -> None:
         path = Path(f"./{name}")
         project_obj = PremakeProject(
-            path=path, name=name, 
+            path=path, name=name,
             github_repo=repo,
             quarantine=quarantine,
             publish=publish,

@@ -96,13 +96,13 @@ def find_installed_jvms_win32():
     # print(winreg.QueryInfoKey(root_key))
     for i in range(0, winreg.QueryInfoKey(root_key)[0]):
         key_name = winreg.EnumKey(root_key, i)
-        
+
         try:
             key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\JavaSoft\JDK\\{}".format(key_name))
             value, regtype = winreg.QueryValueEx(key, "JavaHome")
         except WindowsError:
             continue
-        
+
         has_java = os.path.exists(os.path.join(value, 'bin', 'java.exe'))
         has_javaw = os.path.exists(os.path.join(value, 'bin', 'javaw.exe'))
 
@@ -138,7 +138,7 @@ def find_installed_jvms_win32():
                 if test_dir == 'JetBrains':
                     for jetbrains_dir in os.listdir(os.path.join(drive, program_files_dir, test_dir)):
                         if os.path.exists(os.path.join(drive, program_files_dir, test_dir, jetbrains_dir, 'jbr')):
-                            
+
                             java_home = os.path.join(drive, program_files_dir, test_dir, jetbrains_dir, 'jbr')
                             has_java = os.path.exists(os.path.join(java_home, 'bin', 'java.exe'))
                             has_javaw = os.path.exists(os.path.join(java_home, 'bin', 'javaw.exe'))
@@ -208,7 +208,7 @@ def get_jvm_version(java_home):
                     version = version[2:].replace('_', '.')
 
                 version = tuple(int(x) for x in version.split('.'))
-                
+
                 #print("Found version {} in {}".format(version, jvm_home))
                 java_version = version
             elif line.startswith('IMPLEMENTOR='):
@@ -218,7 +218,7 @@ def get_jvm_version(java_home):
 
         if java_version is not None:
             return java_version, java_implementor
-    
+
 
 def parse_query(query):
     query = query.strip().lower()
@@ -226,7 +226,7 @@ def parse_query(query):
     query_version = query.pop(0)
 
     assert re.match(r'^\d+(\.\d+)*\+?$', query_version), "Invalid version: {}".format(query_version)
-    
+
     if '+' in query_version:
         query_version = query_version[:-1]
         query_version_range_lower = [int(x) for x in query_version.split('.')]
@@ -234,7 +234,7 @@ def parse_query(query):
     else:
         query_version_range_lower = [int(x) for x in query_version.split('.')]
         query_version_range_upper = query_version_range_lower + [math.inf]
-    
+
     query_version_range = (tuple(query_version_range_lower), tuple(query_version_range_upper))
 
     query_order = 'earliest'
@@ -263,9 +263,9 @@ def rank_remapping(values, zero, cmp=None, reverse=False):
 
     # remove consecutive duplicates
     mapping = [x for i, x in enumerate(mapping) if i == 0 or x != mapping[i-1]]
-    
+
     mapping = {score: (i + 1) / len(mapping) for i, score in enumerate(mapping)}
-    
+
     values = [mapping[score] if score != zero else 0 for score in values]
     return values
 
@@ -316,7 +316,7 @@ if __name__ == "__main__":
         java_implementor: str
         scores: Scores
         score_ranks: Scores
-    
+
 
     # query = '16+' # or '8 adopt' or '8+ adopt latest' or '8+ jetbrains earliest' or '8+ jetbrains latest' ...
     if True:
@@ -346,7 +346,7 @@ if __name__ == "__main__":
                     version_distance = version_signed_distance(java_version, max_version)
 
             # print("Distance score: {}".format(distance_score))
-            
+
             sd0 = version_signed_distance('0.0.0', java_version)
             if version_order == 'earliest':
                 order_score = tuple(-x for x in sd0)
@@ -356,7 +356,7 @@ if __name__ == "__main__":
                 order_score = None
 
             # print("Order score: {}".format(order_score))
-            
+
             keyword_score = sum(1 for keyword in version_keywords if java_implementor is not None and keyword in java_implementor.lower())
             keyword_score = len(version_keywords) - keyword_score
 
@@ -367,7 +367,7 @@ if __name__ == "__main__":
             scored_jvms.append(
                 QueryResult(jvm_home, java_version, java_implementor, all_scores, [0, 0, 0])
             )
-        
+
         # print(f"JVM Versions: {[qr.java_version for qr in scored_jvms]}")
         distance_scores = [qr.scores.version for qr in scored_jvms]
         # print(f"Distance scores: {distance_scores}")
@@ -397,12 +397,12 @@ if __name__ == "__main__":
             print(f"Best match: {'.'.join(str(x) for x in best.java_version)} {repr(best.java_implementor)} {best.jvm_path}", file=sys.stderr)
 
             print(f'export JAVA_HOME="{best.jvm_path}"')
-            print(f'export PATH="{best.jvm_path}/bin:$PATH"')     
+            print(f'export PATH="{best.jvm_path}/bin:$PATH"')
 
             # You can run it like this:
             # python3 choose-jvm.py 16+ latest amazon 2>/dev/null | source
             # or like this:
-            # eval $(python3 choose-jvm.py 16+ latest amazon 2>/dev/null)       
+            # eval $(python3 choose-jvm.py 16+ latest amazon 2>/dev/null)
         else:
             scored_jvms.sort(key=lambda qr: (qr.score_ranks.version, qr.score_ranks.keywords, qr.score_ranks.order))
             print("Best matches:", file=sys.stderr)

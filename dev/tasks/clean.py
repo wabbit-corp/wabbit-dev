@@ -16,12 +16,12 @@ def delete_dir(path):
 
     if not os.path.exists(path):
         return
-    
+
     if not os.path.isdir(path):
         print("Not a directory: %s" % path)
         return
 
-    if DRY_RUN: 
+    if DRY_RUN:
         print("Deleting %s" % path)
     else:
         def handleRemoveReadonly(func, path, exc):
@@ -149,7 +149,7 @@ def clean(paths):
         for dirpath, dirnames, filenames in os.walk(path):
             if 'build.sbt' in filenames:
                 clean_sbt_project(dirpath)
-            
+
             if 'gradle' in filenames or 'gradlew' in filenames or 'gradlew.bat' in filenames or 'gradle.properties' in filenames or 'build.gradle' in filenames or 'settings.gradle' in filenames or 'build.gradle.kts' in filenames or 'settings.gradle.kts' in filenames:
                 clean_gradle_project(dirpath)
 
@@ -173,10 +173,10 @@ def clean(paths):
 
             # if 'build.xml' in filenames:
             #     print("Possible ant project: %s" % dirpath)
-            
+
             # if 'build.sh' in filenames:
             #     print("Possible build.sh project: %s" % dirpath)
-            
+
 
 
 if __name__ == "__main__":

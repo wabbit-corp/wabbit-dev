@@ -28,7 +28,7 @@ def llmcopy(path: Path) -> None:
             path = Path(f"{root}/{file}")
 
             info(f"Adding {path}")
-            
+
             # print(path)
             buf.write(f'<contents path="{path}">\n')
             with open(path, 'rt', encoding='utf-8') as f:
@@ -38,7 +38,7 @@ def llmcopy(path: Path) -> None:
                     buf.write('\n')
             buf.write(f'</contents> (end of {path})\n')
             buf.write("\n\n")
-    
+
     # copy to clipboard
     pyperclip.copy(buf.getvalue())
     success("Copied to clipboard")
