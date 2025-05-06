@@ -812,7 +812,8 @@ def load_config() -> Config:
                 if implied_name not in resolved_features:
                     resolved_features[implied_name] = implied
                 else:
-                    assert resolved_features[implied_name] == implied, f"Implied feature {implied_name} is already defined with a different configuration {resolved_features[implied_name]} != {implied} for {name}"
+                    assert resolved_features[implied_name] == implied, \
+                        f"Implied feature {implied_name} is already defined with a different configuration {resolved_features[implied_name]} != {implied} for {name}"
 
         raw_dependencies: List[str | DependencyTarget | List[DependencyTarget]] = dependencies or []
         resolved_dependencies: List[DependencyTarget] = []

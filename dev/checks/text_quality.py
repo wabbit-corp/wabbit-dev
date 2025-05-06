@@ -294,7 +294,9 @@ class TextQualityCheck(FileCheck):
                     # if self.config.check_unicode_homoglyphs:
                     #      # Check if it's a letter ('L' category) and outside basic ASCII (<=127)
                     #      if category.startswith('L') and char_ord > 127:
-                    #          issues.append(Issue(Severity.WARNING, f"Line {line_nr}, Column {col_nr}: Contains non-ASCII letter '{char}' (U+{char_ord:04X}). Potential homoglyph or unintended character.", [file], line_nr=line_nr, col_nr=col_nr))
+                    #          issues.append(Issue(
+                    #              Severity.WARNING, f"Line {line_nr}, Column {col_nr}: Contains non-ASCII letter '{char}' (U+{char_ord:04X}). Potential homoglyph or unintended character.",
+                    #              [file], line_nr=line_nr, col_nr=col_nr))
 
                     # Check for Unicode Invisible/Formatting Characters
                     # Flag Format chars (Cf), non-standard spaces (Zs != ' '), Line/Para separators (Zl, Zp)

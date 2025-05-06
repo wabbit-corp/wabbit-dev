@@ -150,7 +150,8 @@ def clean(paths):
             if 'build.sbt' in filenames:
                 clean_sbt_project(dirpath)
 
-            if 'gradle' in filenames or 'gradlew' in filenames or 'gradlew.bat' in filenames or 'gradle.properties' in filenames or 'build.gradle' in filenames or 'settings.gradle' in filenames or 'build.gradle.kts' in filenames or 'settings.gradle.kts' in filenames:
+            GRADLE_NAMES = ['gradle', 'gradlew', 'gradlew.bat', 'gradle.properties', 'build.gradle', 'settings.gradle', 'build.gradle.kts', 'settings.gradle.kts']
+            if any(name in filenames for name in GRADLE_NAMES):
                 clean_gradle_project(dirpath)
 
             if 'pom.xml' in filenames:

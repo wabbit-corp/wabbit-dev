@@ -966,7 +966,8 @@ class GitTestBase(unittest.TestCase):
         self.assertEqual(target_diff.staged, expected_staged, f"Path {expected_path_key}: Staged flag mismatch")
         self.assertEqual(target_diff.unstaged, expected_unstaged, f"Path {expected_path_key}: Unstaged flag mismatch")
         self.assertEqual(target_diff.untracked, expected_untracked, f"Path {expected_path_key}: Untracked flag mismatch")
-        self.assertEqual(target_diff.partial_staging_suspected, expected_partial, f"Path {expected_path_key}: Partial flag mismatch (Code={target_diff.partial_staging_suspected}, Expected={expected_partial})")
+        self.assertEqual(target_diff.partial_staging_suspected, expected_partial,
+                         f"Path {expected_path_key}: Partial flag mismatch (Code={target_diff.partial_staging_suspected}, Expected={expected_partial})")
 
         return target_diff # Return the found diff for further assertions if needed
 
