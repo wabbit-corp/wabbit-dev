@@ -98,6 +98,7 @@ def _make_dependency_strings(ctx: RepoSetupContext, project: Project) -> Tuple[L
     
     return project_dependencies, other_dependencies
 
+
 def setup_project(ctx: RepoSetupContext, project: Project, interactive: bool=True) -> None:
     name = project.name
 
@@ -172,6 +173,41 @@ def setup_project(ctx: RepoSetupContext, project: Project, interactive: bool=Tru
         else:
             repo = None
 
+        # Check that username and email are set
+        if repo is not None:
+            config = repo.config_reader()
+            if config.has_section('user'):
+                current_email = config.get_value('user', 'email', default=None)
+                current_name = config.get_value('user', 'name', default=None)
+            else:
+                current_email = None
+                current_name = None
+            config.release()
+
+            if current_email != ctx.config.default_git_user_email:
+                warning(f"{project.name} has a different git user email: {current_email}")
+                repo.config_writer() \
+                    .set_value('user', 'email', ctx.config.default_git_user_email) \
+                    .release()
+            if current_name != ctx.config.default_git_user_name:
+                warning(f"{project.name} has a different git user name: {current_name}")
+                repo.config_writer() \
+                    .set_value('user', 'name', ctx.config.default_git_user_name) \
+                    .release()
+            
+            config = repo.config_reader()
+            if config.has_section('user'):
+                current_email = config.get_value('user', 'email', default=None)
+                current_name = config.get_value('user', 'name', default=None)
+            else:
+                current_email = None
+                current_name = None
+            config.release()
+            if current_email != ctx.config.default_git_user_email:
+                raise Exception(f"Git user email is not set to {ctx.config.default_git_user_email}")
+            if current_name != ctx.config.default_git_user_name:
+                raise Exception(f"Git user name is not set to {ctx.config.default_git_user_name}")
+
         # IF there are no commits, create an initial commit.
         if repo is not None:
             if not repo.head.is_valid():
@@ -193,7 +229,6 @@ def setup_project(ctx: RepoSetupContext, project: Project, interactive: bool=Tru
                 except ValueError:
                     origin_url = None
                     error(f"{project.name} does not have an origin remote")
-                    assert False
 
             if origin_url is None:
                 # Add remote
@@ -248,11 +283,11 @@ def setup_project(ctx: RepoSetupContext, project: Project, interactive: bool=Tru
 
 
 def setup_python_project(ctx: RepoSetupContext, project: PythonProject, interactive: bool=True) -> None:
-    dev.io.write_text_file(project.path / '.gitignore', ctx.gitignore_template.render() + "\n\n" + ctx.python_gitignore_template.render())
+    dev.io.write_text_file(project.path / '.gitignore', render_template(ctx.gitignore_template) + "\n" + render_template(ctx.python_gitignore_template))
 
 
 def setup_purescript_project(ctx: RepoSetupContext, project: PurescriptProject, interactive: bool=True) -> None:
-    dev.io.write_text_file(project.path / '.gitignore', ctx.gitignore_template.render() + "\n\n" + ctx.purescript_gitignore_template.render())
+    dev.io.write_text_file(project.path / '.gitignore', render_template(ctx.gitignore_template) + "\n" + render_template(ctx.purescript_gitignore_template))
 
 
 def setup_gradle_project(ctx: RepoSetupContext, project: GradleProject, interactive: bool=True) -> None:
@@ -265,7 +300,7 @@ def setup_gradle_project(ctx: RepoSetupContext, project: GradleProject, interact
     #     for dep in project.resolved_dependencies if dep.is_subproject
     # ]
 
-    result = ctx.subproject_build_template.render(
+    result = render_template(ctx.subproject_build_template,
         project_name=project.name,
         project_group=project.group_name,
         project_version=project.version,
@@ -288,6 +323,7 @@ def setup_gradle_project(ctx: RepoSetupContext, project: GradleProject, interact
     result = re.sub(r'\{\n\n', '{\n', result)
     result = re.sub(r'\n\n\}', '\n}', result)
     result = result.strip()
+    result = result + "\n"
     dev.io.write_text_file(project.path / 'build.gradle.kts', result)
 
     match ctx.mode:
@@ -297,20 +333,20 @@ def setup_gradle_project(ctx: RepoSetupContext, project: GradleProject, interact
             dev.io.delete_if_exists(project.path / '.is-dev-mode')
         
         case RepoSetupMode.DEV:
-            dev.io.write_text_file(project.path / 'settings.gradle.kts', ctx.settings_template.render(project_name=project.name))
+            dev.io.write_text_file(project.path / 'settings.gradle.kts', render_template(ctx.settings_template, project_name=project.name))
             dev.io.delete_if_exists(project.path / '.is-ij-mode')
             dev.io.touch(project.path / '.is-dev-mode')
 
         case RepoSetupMode.PROD:
-            dev.io.write_text_file(project.path / 'settings.gradle.kts', ctx.subproject_settings_template.render(project_name=project.name))
+            dev.io.write_text_file(project.path / 'settings.gradle.kts', render_template(ctx.subproject_settings_template, project_name=project.name))
             dev.io.delete_if_exists(project.path / '.is-ij-mode')
             dev.io.delete_if_exists(project.path / '.is-dev-mode')
 
     # dev.io.write_text_file(project.path / 'CLA.md', ctx.cla.render(
     #     company_name=ctx.config.company_name,
     # ))
-    dev.io.write_text_file(project.path / '.gitignore', ctx.gitignore_template.render() + "\n\n" + ctx.gradle_gitignore_template.render())
-    dev.io.write_text_file(project.path / 'gradle.properties', ctx.gradle_properties_template.render())
+    dev.io.write_text_file(project.path / '.gitignore', render_template(ctx.gitignore_template) + "\n" + render_template(ctx.gradle_gitignore_template))
+    dev.io.write_text_file(project.path / 'gradle.properties', render_template(ctx.gradle_properties_template))
     
     if project.ownership == OwnershipType.WABBIT:
         dev.io.write_text_file(project.path / 'LICENSE.md', ctx.licenses['AGPL'])
@@ -319,7 +355,6 @@ def setup_gradle_project(ctx: RepoSetupContext, project: GradleProject, interact
     dev.io.copy(ctx.repo_template / 'gradle-files'/ 'gradlew.bat', project.path / 'gradlew.bat')
     dev.io.copy(ctx.repo_template / 'gradle-files'/ 'gradle' / 'wrapper' / 'gradle-wrapper.jar', project.path / 'gradle' / 'wrapper' / 'gradle-wrapper.jar')
     dev.io.copy(ctx.repo_template / 'gradle-files'/ 'gradle' / 'wrapper' / 'gradle-wrapper.properties', project.path / 'gradle' / 'wrapper' / 'gradle-wrapper.properties')
-
 
 
 def commit_repo_changes(project: Project, repo: Repo, openai_key: str=None, interactive: bool=True) -> None:
@@ -585,10 +620,6 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
     assert config.github_token is not None, "Github token is not set"
     github = Github(login_or_token=config.github_token)
 
-    sir_wabbit_org = github.get_user('sir-wabbit')
-    wabbit_corp_org = github.get_organization('wabbit-corp')
-    corsaircraft_org = github.get_organization('corsaircraft')
-
     # list(wabbit_corp_org.get_repos()) + list(corsaircraft_org.get_repos()) +
     # list(sir_wabbit_org.get_repos()) + \
     all_repos = (list(github.get_user().get_repos()))
@@ -616,22 +647,28 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
             'AGPL': dev.io.read_text_file(repo_template / 'licenses' / 'AGPL.md'),
         },
 
-        gitignore_template           = dev.io.read_template(repo_template / 'gitignore.tmpl'),
+        gitignore_template           = dev.io.read_template(repo_template / 'gitignore.jinja2'),
         cla                          = dev.io.read_template(repo_template / 'CLA.md'),
         cla_explanations             = dev.io.read_template(repo_template / 'CLA_EXPLANATIONS.md'),
         contributor_privacy_policy   = dev.io.read_template(repo_template / 'CONTRIBUTOR_PRIVACY.md'),
 
-        gradle_gitignore_template     = dev.io.read_template(repo_template / 'gradle-files' / 'gitignore.tmpl'),
-        settings_template             = dev.io.read_template(repo_template / 'gradle-files' / 'settings.gradle.kts.tmpl'),
-        subproject_settings_template  = dev.io.read_template(repo_template / 'gradle-files' / 'subproject-settings.gradle.kts.tmpl'),
-        build_template                = dev.io.read_template(repo_template / 'gradle-files' / 'build.gradle.kts.tmpl'),
-        subproject_build_template     = dev.io.read_template(repo_template / 'gradle-files' / 'subproject-build.gradle.kts.tmpl'),
-        gradle_properties_template    = dev.io.read_template(repo_template / 'gradle-files' / 'gradle.properties.tmpl'),
-        python_gitignore_template     = dev.io.read_template(repo_template / 'python-files' / 'gitignore.tmpl'),
-        purescript_gitignore_template = dev.io.read_template(repo_template / 'purescript-files' / 'gitignore.tmpl'),
+        gradle_gitignore_template     = dev.io.read_template(repo_template / 'gradle-files' / 'gitignore.jinja2'),
+        settings_template             = dev.io.read_template(repo_template / 'gradle-files' / 'settings.gradle.kts.jinja2'),
+        subproject_settings_template  = dev.io.read_template(repo_template / 'gradle-files' / 'subproject-settings.gradle.kts.jinja2'),
+        build_template                = dev.io.read_template(repo_template / 'gradle-files' / 'build.gradle.kts.jinja2'),
+        subproject_build_template     = dev.io.read_template(repo_template / 'gradle-files' / 'subproject-build.gradle.kts.jinja2'),
+        gradle_properties_template    = dev.io.read_template(repo_template / 'gradle-files' / 'gradle.properties.jinja2'),
+        python_gitignore_template     = dev.io.read_template(repo_template / 'python-files' / 'gitignore.jinja2'),
+        purescript_gitignore_template = dev.io.read_template(repo_template / 'purescript-files' / 'gitignore.jinja2'),
 
         mode=mode,
     )
+
+
+def render_template(template: jinja2.Template, **kwargs) -> str:
+    result = template.render(**kwargs)
+    result = result.rstrip() + "\n"
+    return result
 
 
 def setup(mode: RepoSetupMode) -> None:
@@ -644,11 +681,11 @@ def setup(mode: RepoSetupMode) -> None:
     # if any Gradle projects exist. Then we handle each project individually.
     any_gradle = any(isinstance(p, GradleProject) for p in config.defined_projects.values())
     if any_gradle:
-        gradle_build = ctx.build_template.render()
+        gradle_build = render_template(ctx.build_template)
         dev.io.write_text_file(Path('build.gradle.kts'), gradle_build)
         
         gradle_subprojects = [p.name for p in config.defined_projects.values() if isinstance(p, GradleProject)]
-        result = ctx.settings_template.render(subprojects=gradle_subprojects)
+        result = render_template(ctx.settings_template, subprojects=gradle_subprojects)
         dev.io.write_text_file(Path('settings.gradle.kts'), result)
 
     defined_projects = config.defined_projects

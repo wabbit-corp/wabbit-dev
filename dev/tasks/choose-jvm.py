@@ -6,10 +6,14 @@ import enum
 import math
 
 
-VersionComparison = enum.Enum('VersionComparison', 'LT EQ GT')
-# VERSION_LT = object() # e.g. 8.0.1 < 8.0.2 or 8.0.1 < 8.1.0
-# EQ = object() # e.g. 8.0.1 == 8.0.1 and 8 == 8.0 but not 8.0.1 == 8.0.1.2
-# GT = object() # e.g. 8.0.2 > 8.0.1 or 8.1.0 > 8.0.2
+class VersionComparison(enum.Enum):
+    """
+    Enum for version comparison results.
+    """
+    LT = -1  # e.g. 8.0.1 < 8.0.2 or 8.0.1 < 8.1.0
+    EQ = 0   # e.g. 8.0.1 == 8.0.1 and 8 == 8.0 but not 8.0.1 == 8.0.1.2
+    GT = 1   # e.g. 8.0.2 > 8.0.1 or 8.1.0 > 8.0.2
+
 
 def compare_versions(a, b):
     a = [int(x) for x in a.split('.')] if isinstance(a, str) else list(a)
@@ -297,10 +301,22 @@ if __name__ == "__main__":
 
         JVMS.append((jvm_home, jvm_version, java_implementor))
 
-    from recordclass import recordclass as namedlist
+    from dataclasses import dataclass
 
-    QueryResult = namedlist('QueryResult', ['jvm_path', 'java_version', 'java_implementor', 'scores', 'score_ranks'])
-    Scores = namedlist('Scores', ['version', 'keywords', 'order'])
+    @dataclass
+    class Scores:
+        version: tuple
+        keywords: int
+        order: tuple
+
+    @dataclass
+    class QueryResult:
+        jvm_path: str
+        java_version: tuple
+        java_implementor: str
+        scores: Scores
+        score_ranks: Scores
+    
 
     # query = '16+' # or '8 adopt' or '8+ adopt latest' or '8+ jetbrains earliest' or '8+ jetbrains latest' ...
     if True:

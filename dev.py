@@ -119,6 +119,9 @@ async def main() -> None:
         cmd.add_argument('project', type=str, nargs='?', default='.')
 
     with commands('check') as cmd:
+        cmd.add_argument('project_or_dir_or_file', type=str, nargs='?', default='.')
+        cmd.add_argument('checks', type=str, nargs='*', help='List of checks to perform. If not provided, all checks will be performed.')
+        cmd.add_argument('--fix', action='store_true', help='Attempt to fix issues found during the check.')
         pass
 
     with commands('trufflehog') as cmd:
@@ -179,45 +182,87 @@ async def main() -> None:
         # TODO: review commands below
 
         case 'clean':
-            from dev.review.clean import clean
+            from dev.tasks.clean import clean
             clean(args.project)
 
         case 'status':
-            from dev.review.status import status
+            from dev.tasks.status import status
             project_name = args.project[0]
             path = Path(project_name)
             status(project_name, path)
 
         case 'commit':
-            from dev.review.commit import commit        
+            from dev.tasks.commit import commit        
             project_name = args.project[0]
             message = args.message[0]
             commit(project_name, message)
 
         case 'push':
-            from dev.review.push import push
+            from dev.tasks.push import push
             project_name = args.project
             push(project_name)
             project_name = args.project[0]
 
         case 'check':
-            # from dev.review.check import check_unique_identifiers, check
-            # check_unique_identifiers()
-
-            for fn in sorted(Path('.').iterdir()):
-                if fn.is_dir():
-                    if fn.name in ('.git', '.idea', '.llm', '.kotlin', 
-                                   '.gradle', '.venv', '.vscode', 'build',
-                                   'tmp.jeeves'):
-                        continue
-                    # print(f'Checking {fn}')
-                    if not (fn / '.git').exists():
-                        print(f'Not a git repository: {fn}')
-                        continue
+            from dev.tasks.check import check_main
+            project_or_dir_or_file = args.project_or_dir_or_file
+            checks = args.checks
+            if not checks:
+                checks = None
+            fix = args.fix
+            check_main(project_or_dir_or_file, checks, fix)
             
         case 'trufflehog':
-            from dev.review.check import trufflehog
+            from dev.tasks.check import trufflehog
             trufflehog()
+
+        case 'test':
+            from dev.config import load_config
+            from dev.git_contributors import list_git_contributors, get_git_user_email, get_git_user_name
+
+
+            config = load_config()
+            for project in config.defined_projects.values():
+                path = project.path
+
+                # print(f"Checking {path}...")
+
+                if not path.is_dir():
+                    # print(f"Path {path} is not a valid directory.")
+                    continue
+                if not (path / ".git").exists():
+                    # print(f"Path {path} is not a valid git repository.")
+                    continue
+                contributors = list_git_contributors(path)
+                configured_email = get_git_user_email(path)
+                configured_name = get_git_user_name(path)
+
+                expected_email = config.default_git_user_email
+                expected_name = config.default_git_user_name
+
+                # if configured_email != expected_email or configured_name != expected_name:
+                #     print(f"Configured git user in {path}:")
+                #     print(f"  Name: {configured_name}")
+                #     print(f"  Email: {configured_email}")
+                #     print(f"Expected:")
+                #     print(f"  Name: {expected_name}")
+                #     print(f"  Email: {expected_email}")
+                #     print()
+
+                contributors = { k : v for k, v in contributors.items() if k.email != expected_email or k.name != expected_name }
+
+                if contributors:
+                    print(f"Contributors in {path} are bad")
+                    # for contributor, commit_count in sorted(
+                    #     contributors.items(), key=lambda x: x[1], reverse=True
+                    # ):
+                    #     print(f"  {contributor}: {commit_count} commits")
+                    # print()
+                else:
+                    # print(f"  No contributors found in {path}.")
+                    pass 
+
+                # print()
 
         case _:
             raise ValueError(f"Unknown command: {args.command}")

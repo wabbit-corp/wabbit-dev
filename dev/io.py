@@ -87,6 +87,10 @@ def touch(path: Path) -> None:
 
 def write_text_file(path: Path, content: str) -> None:
     assert isinstance(path, Path), f"Expected Path, got {type(path)}"
+    assert '\r\n' not in content, "Windows line endings detected"
+    assert content.endswith('\n'), "Content should end with a newline"
+    assert not content.endswith('\n\n'), "Content should not end with two newlines"
+    assert content, "Content should not be empty"
 
     if not path.parent.exists():
         info(f"Creating directory {path.parent}")

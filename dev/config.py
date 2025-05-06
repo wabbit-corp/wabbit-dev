@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 from dev.maven import MavenCoordinate, is_valid_maven_coordinate
+from dev.checks.base import CoarseFileScope, CoarseProjectType
 
 from mu.types import SAtom, SStr, SDoc
 from mu.parser import sexpr
@@ -325,6 +326,13 @@ class Project:
     ownership: OwnershipType
     resolved_dependencies: List[Dependency]
 
+    def get_coarse_file_scope(self, path: Path) -> CoarseFileScope:
+        raise NotImplementedError(f"get_file_scope not implemented for {type(self)}")
+    
+    @property
+    def coarse_project_type(self) -> CoarseProjectType:
+        raise NotImplementedError(f"coarse_project_type not implemented for {type(self)}")
+
 @dataclass
 class PythonDependency:
     """
@@ -339,6 +347,7 @@ class PythonDependency:
         if self.version_spec:
             return f"{self.package}{self.version_spec}"
         return self.package
+
 
 @dataclass
 class PythonProject(Project):
@@ -358,6 +367,18 @@ class PythonProject(Project):
     # (We keep a list of `Dependency` too if you want to unify anything across projects,
     #  but typically a pure Python project won't rely on Gradle dependencies.)
 
+    def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
+        # Check that path is contained in the project path
+        if not path.is_relative_to(self.path):
+            raise ValueError(f"Path {path} is not contained in project path {self.path}")
+        
+        rel_path = path.relative_to(self.path)
+        return None
+    
+    @property
+    def coarse_project_type(self) -> Optional[CoarseProjectType]:
+        return None
+
 @dataclass
 class PurescriptProject(Project):
     path: Path
@@ -368,6 +389,18 @@ class PurescriptProject(Project):
     ownership: OwnershipType
     version: Version | None
     resolved_dependencies: List[Dependency]
+
+    def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
+        # Check that path is contained in the project path
+        if not path.is_relative_to(self.path):
+            raise ValueError(f"Path {path} is not contained in project path {self.path}")
+        
+        rel_path = path.relative_to(self.path)
+        return None
+    
+    @property
+    def coarse_project_type(self) -> Optional[CoarseProjectType]:
+        return None
 
 @dataclass
 class PremakeProject(Project):
@@ -380,6 +413,18 @@ class PremakeProject(Project):
     version: Version | None
     resolved_dependencies: List[Dependency]
 
+    def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
+        # Check that path is contained in the project path
+        if not path.is_relative_to(self.path):
+            raise ValueError(f"Path {path} is not contained in project path {self.path}")
+        
+        rel_path = path.relative_to(self.path)
+        return None
+    
+    @property
+    def coarse_project_type(self) -> Optional[CoarseProjectType]:
+        return None
+
 @dataclass
 class DataProject(Project):
     path: Path
@@ -390,6 +435,18 @@ class DataProject(Project):
     ownership: OwnershipType
     version: Version | None
     resolved_dependencies: List[Dependency]
+
+    def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
+        # Check that path is contained in the project path
+        if not path.is_relative_to(self.path):
+            raise ValueError(f"Path {path} is not contained in project path {self.path}")
+        
+        rel_path = path.relative_to(self.path)
+        return None
+    
+    @property
+    def coarse_project_type(self) -> Optional[CoarseProjectType]:
+        return CoarseProjectType.DATA
 
 @dataclass
 class GradleProject(Project):
@@ -412,6 +469,26 @@ class GradleProject(Project):
     @property
     def artifact_name(self) -> str:
         return f"com.github.wabbit-corp:{self.name}:{self.version}"
+    
+    @property
+    def coarse_project_type(self) -> Optional[CoarseProjectType]:
+        return None
+    
+    def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
+        # Check that path is contained in the project path
+        if not path.is_relative_to(self.path):
+            raise ValueError(f"Path {path} is not contained in project path {self.path}")
+        
+        rel_path = path.relative_to(self.path)
+        
+        if rel_path.as_posix().startswith("src/main/"):
+            return CoarseFileScope.MAIN
+        if rel_path.as_posix().startswith("src/test/"):
+            return CoarseFileScope.TEST
+        if rel_path.as_posix().startswith("build/"):
+            return CoarseFileScope.BUILD_TEMP
+        if rel_path.as_posix().startswith("kotlin-js-store/"):
+            return CoarseFileScope.BUILD_TEMP
 
 ##################################################################################################
 # Config
@@ -474,13 +551,14 @@ def load_config() -> Config:
     def default_maven_project_group(group: str):
         config.default_maven_project_group = group
 
-    @ctx.register(name="default-git-user-email")
-    def default_git_user_email(email: str):
+    @ctx.register(name="git-user")
+    def git_user(name: str, email: str):
+        config.default_git_user_name = name
         config.default_git_user_email = email
 
-    @ctx.register(name="default-git-user-name")
-    def default_git_user_name(name: str):
-        config.default_git_user_name = name
+    @ctx.register(name="git-censor")
+    def git_censor(name: str | None = None, email: str | None = None):
+        pass
 
     @ctx.register(name="anthropic-key")
     def anthropic_key(key: str):
