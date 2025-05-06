@@ -357,6 +357,8 @@ def setup_gradle_project(ctx: RepoSetupContext, project: GradleProject, interact
     dev.io.copy(ctx.repo_template / 'gradle-files'/ 'gradle' / 'wrapper' / 'gradle-wrapper.properties', project.path / 'gradle' / 'wrapper' / 'gradle-wrapper.properties')
 
 
+USED_COMMIT_MESSAGES = {}
+
 def commit_repo_changes(project: Project, repo: Repo, openai_key: str=None, interactive: bool=True) -> None:
     """
     Example function that:
@@ -511,6 +513,7 @@ def commit_repo_changes(project: Project, repo: Repo, openai_key: str=None, inte
 
         # --- Process the assembled diff text ---
         final_diff_text = buf.getvalue()
+        buf.close()
 
         # Assuming tiktoken is installed and available
         try:
@@ -523,70 +526,74 @@ def commit_repo_changes(project: Project, repo: Repo, openai_key: str=None, inte
             num_tokens = len(final_diff_text) // 4 # Rough estimate
             print(f"Estimated token count: ~{num_tokens}")
 
-
-        if num_tokens > 100000: # Example token limit
-            # Spawn editor
-            editor = os.environ.get('EDITOR', 'vim') # Use vim as fallback
-            # Use a more robust temp file location if possible, or ensure .git dir exists
-            commit_file_path = Path(repo.working_dir) / '.git' / 'COMMIT_EDITMSG'
-            commit_file_path.parent.mkdir(exist_ok=True) # Ensure .git dir exists
-
-            # Create a temporary commit message file
-            commit_file_text = f"\n\n# Commit changes for {project.name}\n# Changes detected:\n"
-            # Add a summary of changed files to the commit message template
-            for diff_item in final_diffs:
-                if diff_item.change_type != ChangeType.UNCHANGED:
-                    commit_file_text += f"#  {diff_item.change_type.name}: {diff_item.path}\n"
-
-            try:
-                with open(commit_file_path, 'w', encoding='utf-8') as f:
-                    f.write(commit_file_text)
-
-                # Use full path for editor command
-                status = os.system(f'{editor} "{str(commit_file_path)}"') # Quote path
-                if status != 0:
-                    warning(f"Editor '{editor}' exited with status {status}. Commit message might not be saved.")
-
-                with open(commit_file_path, 'r', encoding='utf-8') as f:
-                    # Read the commit message from the file and strip it
-                    # of leading/trailing whitespace and comments
-                    commit_name = f.read().strip()
-                    # Remove comment lines more carefully
-                    commit_lines = [
-                        line for line in commit_name.splitlines()
-                        if not line.strip().startswith('#')
-                    ]
-                    commit_name = "\n".join(commit_lines).strip()
-
-                if not commit_name:
-                    warning("Commit message is empty after editing. Aborting commit.")
-                    # Handle empty commit message case (e.g., raise error, return None)
-                    commit_name = None # Or raise an exception
-                else:
-                    print(f"Using commit message from editor:\n---\n{commit_name}\n---")
-
-
-            except Exception as e:
-                warning(f"Error handling commit message editing: {e}")
-                commit_name = f"Error processing commit message for {project.name}" # Fallback
-
-            finally:
-                # Clean up commit message file if it still exists
-                if commit_file_path.exists():
-                    try:
-                        commit_file_path.unlink()
-                    except OSError as e:
-                        warning(f"Could not remove temporary commit file {commit_file_path}: {e}")
-
-
+        import hashlib
+        h = hashlib.md5(final_diff_text.encode('utf-8')).hexdigest()
+        if h in USED_COMMIT_MESSAGES:
+            commit_name = USED_COMMIT_MESSAGES[h]
         else:
-            print("--- Generated Diff Summary ---")
-            print(final_diff_text)
-            print("--- End Diff Summary ---")
-            # Suggest a commit message using the assembled patch content
-            # Ensure suggest_commit_name handles potential errors
-            commit_name = suggest_commit_name(final_diff_text, api_key=openai_key)
-            print(f"Suggested commit message: {commit_name}")
+            if num_tokens > 100000: # Example token limit
+                # Spawn editor
+                editor = os.environ.get('EDITOR', 'vim') # Use vim as fallback
+                # Use a more robust temp file location if possible, or ensure .git dir exists
+                commit_file_path = Path(repo.working_dir) / '.git' / 'COMMIT_EDITMSG'
+                commit_file_path.parent.mkdir(exist_ok=True) # Ensure .git dir exists
+
+                # Create a temporary commit message file
+                commit_file_text = f"\n\n# Commit changes for {project.name}\n# Changes detected:\n"
+                # Add a summary of changed files to the commit message template
+                for diff_item in final_diffs:
+                    if diff_item.change_type != ChangeType.UNCHANGED:
+                        commit_file_text += f"#  {diff_item.change_type.name}: {diff_item.path}\n"
+
+                try:
+                    with open(commit_file_path, 'w', encoding='utf-8') as f:
+                        f.write(commit_file_text)
+
+                    # Use full path for editor command
+                    status = os.system(f'{editor} "{str(commit_file_path)}"') # Quote path
+                    if status != 0:
+                        warning(f"Editor '{editor}' exited with status {status}. Commit message might not be saved.")
+
+                    with open(commit_file_path, 'r', encoding='utf-8') as f:
+                        # Read the commit message from the file and strip it
+                        # of leading/trailing whitespace and comments
+                        commit_name = f.read().strip()
+                        # Remove comment lines more carefully
+                        commit_lines = [
+                            line for line in commit_name.splitlines()
+                            if not line.strip().startswith('#')
+                        ]
+                        commit_name = "\n".join(commit_lines).strip()
+
+                    if not commit_name:
+                        warning("Commit message is empty after editing. Aborting commit.")
+                        # Handle empty commit message case (e.g., raise error, return None)
+                        commit_name = None # Or raise an exception
+                    else:
+                        print(f"Using commit message from editor:\n---\n{commit_name}\n---")
+
+
+                except Exception as e:
+                    warning(f"Error handling commit message editing: {e}")
+                    commit_name = f"Error processing commit message for {project.name}" # Fallback
+
+                finally:
+                    # Clean up commit message file if it still exists
+                    if commit_file_path.exists():
+                        try:
+                            commit_file_path.unlink()
+                        except OSError as e:
+                            warning(f"Could not remove temporary commit file {commit_file_path}: {e}")
+
+
+            else:
+                print("--- Generated Diff Summary ---")
+                print(final_diff_text)
+                print("--- End Diff Summary ---")
+                # Suggest a commit message using the assembled patch content
+                # Ensure suggest_commit_name handles potential errors
+                commit_name = suggest_commit_name(final_diff_text, api_key=openai_key)
+                print(f"Suggested commit message: {commit_name}")
 
         # Optionally commit if user agrees
 
@@ -595,6 +602,7 @@ def commit_repo_changes(project: Project, repo: Repo, openai_key: str=None, inte
                 info(f"Commit message: {commit_name}")
                 r = ask(f"Commit changes on master for {project.name}?", result_type="yne")
                 if r == 'y':
+                    USED_COMMIT_MESSAGES[h] = commit_name
                     repo.git.add(all=True)
                     repo.index.commit(commit_name)
                     break
