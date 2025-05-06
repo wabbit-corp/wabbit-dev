@@ -321,6 +321,16 @@ class JitPackAPI:
                 cookies["sessionId"] = self.session_cookie
         return cookies
 
+    def build_log_url(self, group: str, project: str, version: str) -> str:
+        # We can get the build log by sending a GET to the build log URL.
+        # https://jitpack.io/com/github/wabbit-corp/kotlin-base58/1.1.0-SNAPSHOT/build.log
+
+        assert group.startswith("com.github."), "Group must start with 'com.github.'"
+        group = group[len("com.github."):]
+
+        path = f"/com/github/{group}/{project}/{version}/build.log"
+        return f"{self.base_url}{path}"
+
     async def get_build_log(self, group: str, project: str, version: str) -> str:
         # We can get the build log by sending a GET to the build log URL.
         # https://jitpack.io/com/github/wabbit-corp/kotlin-base58/1.1.0-SNAPSHOT/build.log
