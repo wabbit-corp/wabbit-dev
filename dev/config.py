@@ -869,14 +869,16 @@ def load_config() -> Config:
 
     @ctx.register(name="python")
     def python_project(
-        name: str,
+        dir_name: str,
         version: Quoted[SStr],
+        name: Optional[str] = None,
         quarantine: bool = False,
         publish: bool = True,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
     ) -> None:
-        path = Path(f"./{name}")
+        path = Path(f"./{dir_name}")
+        name = name or dir_name
         project_obj = PythonProject(
             path=path,
             name=name,
@@ -892,14 +894,16 @@ def load_config() -> Config:
 
     @ctx.register(name="purescript")
     def purescript_project(
-        name: str,
+        dir_name: str,
         version: Quoted[SStr],
+        name: Optional[str] = None,
         quarantine: bool = False,
         publish: bool = True,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
     ) -> None:
-        path = Path(f"./{name}")
+        path = Path(f"./{dir_name}")
+        name = name or dir_name
         project_obj = PurescriptProject(
             path=path,
             name=name,
@@ -915,14 +919,16 @@ def load_config() -> Config:
 
     @ctx.register(name="data")
     def data_project(
-        name: str,
+        dir_name: str,
         version: Quoted[SStr],
+        name: Optional[str] = None,
         quarantine: bool = False,
         publish: bool = True,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
     ) -> None:
-        path = Path(f"./{name}")
+        path = Path(f"./{dir_name}")
+        name = name or dir_name
         project_obj = DataProject(
             path=path,
             name=name,
@@ -938,14 +944,16 @@ def load_config() -> Config:
 
     @ctx.register(name="premake")
     def premake_project(
-        name: str,
+        dir_name: str,
         version: Quoted[SStr],
+        name: Optional[str] = None,
         quarantine: bool = False,
         publish: bool = True,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
     ) -> None:
-        path = Path(f"./{name}")
+        path = Path(f"./{dir_name}")
+        name = name or dir_name
         project_obj = PremakeProject(
             path=path,
             name=name,
@@ -961,8 +969,9 @@ def load_config() -> Config:
 
     @ctx.register(name="gradle")
     def gradle_project(
-        name: str,
+        dir_name: str,
         version: Quoted[SStr],
+        name: Optional[str] = None,
         quarantine: bool = False,
         publish: bool = True,
         dependencies: (
@@ -975,6 +984,8 @@ def load_config() -> Config:
         # This makes no sense from typechecking perspective, but it's necessary since we're using eval_sexpr
         if isinstance(ownership, str):
             ownership = OwnershipType(ownership)
+
+        name = name or dir_name
 
         # assert repo is not None, f"Repository is required for Gradle project {name}"
 
@@ -1014,7 +1025,7 @@ def load_config() -> Config:
                     maven_repositories.append(maven_repo)
 
         project_obj = GradleProject(
-            path=Path(f"./{name}"),
+            path=Path(f"./{dir_name}"),
             group_name=config.default_maven_project_group,
             name=name,
             version=Version.parse(version) if version else None,
