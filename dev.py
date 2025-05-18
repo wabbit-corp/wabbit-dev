@@ -93,8 +93,7 @@ async def main() -> None:
 
     with commands('dep/graph') as cmd:
         cmd.add_argument('project', type=str, nargs='?', default='.')
-        cmd.add_argument('--projects', action='store_true')
-        cmd.add_argument('--graph', action='store_true')
+        cmd.add_argument('--artifacts', action='store_true', default=False, help='Include artifacts in the graph')
 
     with commands('publish') as cmd:
         cmd.add_argument('project', type=str, nargs='?')
@@ -169,9 +168,8 @@ async def main() -> None:
             elif args.subcommand == 'graph':
                 from dev.tasks.dep_graph import get_project_dependencies
                 get_project_dependencies(
-                    project_name=args.project,
-                    only_projects=args.projects,
-                    include_graph=args.graph)
+                    focus_project_name=args.project if args.project != '.' else None,
+                    include_artifacts=args.artifacts,)
             else:
                 raise ValueError(f"Unknown subcommand: {args.subcommand}")
 
