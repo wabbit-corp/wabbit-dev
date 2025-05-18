@@ -20,6 +20,7 @@ from dev.config import (
     GradleProject, Project, PythonProject, PurescriptProject, DataProject, PremakeProject,
     Version, Config, Dependency, DependencyTarget, OwnershipType
 )
+from dev.banner import create_banner
 from dev.base import Scope
 from dev.ai import suggest_commit_name
 
@@ -356,6 +357,17 @@ def setup_gradle_project(ctx: RepoSetupContext, project: GradleProject, interact
     dev.io.copy(ctx.repo_template / 'gradle-files'/ 'gradle' / 'wrapper' / 'gradle-wrapper.jar', project.path / 'gradle' / 'wrapper' / 'gradle-wrapper.jar')
     dev.io.copy(ctx.repo_template / 'gradle-files'/ 'gradle' / 'wrapper' / 'gradle-wrapper.properties', project.path / 'gradle' / 'wrapper' / 'gradle-wrapper.properties')
 
+    create_banner(
+        image_path=ctx.repo_template / 'banner4c.png',
+        font_path=ctx.repo_template / 'CooperHewitt-Light.otf',
+        main_text=project.name,
+        subtitle_text=None,
+        background_color=(0, 0, 0, 0),
+        output_path=project.path / '.banner.png',
+        font_size=60,
+        subtitle_font_size=None,
+        padding=40
+    )
 
 USED_COMMIT_MESSAGES = {}
 
@@ -652,13 +664,13 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
         known_github_repos = known_github_repos,
         repo_template = repo_template,
         licenses={
-            'AGPL': dev.io.read_text_file(repo_template / 'licenses' / 'AGPL.md'),
+            'AGPL': dev.io.read_text_file(repo_template / 'legal' / 'licenses' / 'AGPL.md'),
         },
 
         gitignore_template           = dev.io.read_template(repo_template / 'gitignore.jinja2'),
-        cla                          = dev.io.read_template(repo_template / 'CLA.md'),
-        cla_explanations             = dev.io.read_template(repo_template / 'CLA_EXPLANATIONS.md'),
-        contributor_privacy_policy   = dev.io.read_template(repo_template / 'CONTRIBUTOR_PRIVACY.md'),
+        cla                          = dev.io.read_template(repo_template / 'legal' / 'cla' / 'v1.0.0' / 'CLA.md'),
+        cla_explanations             = dev.io.read_template(repo_template / 'legal' / 'cla' / 'v1.0.0' / 'CLA_EXPLANATIONS.md'),
+        contributor_privacy_policy   = dev.io.read_template(repo_template / 'legal' / 'contributor-privacy' / 'v1.0.0' / 'CONTRIBUTOR_PRIVACY.md'),
 
         gradle_gitignore_template     = dev.io.read_template(repo_template / 'gradle-files' / 'gitignore.jinja2'),
         settings_template             = dev.io.read_template(repo_template / 'gradle-files' / 'settings.gradle.kts.jinja2'),
