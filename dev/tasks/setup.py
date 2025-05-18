@@ -14,6 +14,7 @@ import github
 import jinja2
 
 import dev.io
+from dev.caching import cache
 from dev.messages import info, error, warning, ask
 from dev.config import (
     load_config,
@@ -67,6 +68,7 @@ class RepoSetupContext:
     repo_template: Path
 
     licenses: Dict[str, str]
+    coc: str
 
     gitignore_template: jinja2.Template
     cla: jinja2.Template
@@ -334,13 +336,19 @@ def setup_python_project(
         + render_template(ctx.python_gitignore_template),
     )
 
-    dev.io.write_text_file(project.path / "CLA.md", render_template(ctx.cla))
-    dev.io.write_text_file(
-        project.path / "CLA_EXPLANATIONS.md", render_template(ctx.cla_explanations)
-    )
-
     if project.ownership == OwnershipType.WABBIT:
         dev.io.write_text_file(project.path / "LICENSE.md", ctx.licenses["AGPL"])
+        dev.io.write_text_file(project.path / "CLA.md", render_template(ctx.cla))
+        dev.io.write_text_file(
+            project.path / "CLA_EXPLANATIONS.md", render_template(ctx.cla_explanations)
+        )
+        dev.io.write_text_file(
+            project.path / "CONTRIBUTOR_PRIVACY.md",
+            render_template(ctx.contributor_privacy_policy),
+        )
+        dev.io.write_text_file(
+            project.path / "CODE_OF_CONDUCT.md", ctx.coc
+        )
 
     create_banner(
         image_path=ctx.repo_template / "banner4c.png",
@@ -790,6 +798,22 @@ def commit_repo_changes(
             repo.index.commit(commit_name)
 
 
+@cache(path=".dev.cache.db", ttl=7 * 24 * 3600)
+def get_coc_file() -> str:
+    import requests
+    # https://raw.githubusercontent.com/wabbit-corp/code-of-excellence/refs/heads/master/CODE_OF_CONDUCT.md
+    coc_url = "https://raw.githubusercontent.com/wabbit-corp/code-of-excellence/refs/heads/master/CODE_OF_CONDUCT.md"
+    response = requests.get(coc_url)
+    if response.status_code == 200:
+        return response.text
+    else:
+        error(f"Failed to fetch CoC file: {response.status_code}")
+        raise Exception(
+            f"Failed to fetch CoC file: {response.status_code}"
+        )
+
+
+
 def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupContext:
     from github import Github
 
@@ -816,6 +840,8 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
 
     repo_template = Path("data-repo-template")
 
+    coc = get_coc_file()
+
     return RepoSetupContext(
         config=config,
         known_repo_names=known_repo_names,
@@ -831,6 +857,7 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
         cla_explanations=dev.io.read_template(
             repo_template / "legal" / "cla" / "v1.0.0" / "CLA_EXPLANATIONS.md"
         ),
+        coc=coc,
         contributor_privacy_policy=dev.io.read_template(
             repo_template
             / "legal"
