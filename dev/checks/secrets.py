@@ -1,3 +1,21 @@
+'''
+* [x] Check for Hardcoded Secrets: Look for hardcoded secrets in scripts, configuration files,
+      or source code. This includes API keys, passwords, and other sensitive information.
+      Implemented by checking that there are no high-entropy strings that look like secrets.
+* [ ] Check for Hardcoded Absolute Paths: Look for hardcoded absolute file paths in scripts,
+      configuration files, or source code (e.g., starting with C:\, /home/, /Users/).
+      These often break portability and should usually be replaced with relative paths,
+      environment variables, or configuration lookups. /absolute/path/to/danger
+* [ ] Check for Hardcoded URLs: Look for hardcoded URLs in scripts, configuration files,
+      or source code. This includes URLs to external services, APIs, and other resources.
+* [ ] Check for Hardcoded Credentials: Look for hardcoded credentials in scripts, configuration files,
+      or source code. This includes usernames, passwords, and other sensitive information.
+* [ ] Check for Hardcoded Internal Hostnames/IPs: Scan configuration files, scripts, and
+      documentation for hardcoded internal network details like specific server hostnames
+      (e.g., internal-db.prod.local) or private IP address ranges that shouldn't be exposed
+      or hardcoded.
+'''
+
 import re
 import math
 import os

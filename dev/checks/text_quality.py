@@ -1,4 +1,24 @@
 # -*- coding: utf-8 -*-
+
+'''
+* [x] Check for Merge Artifacts: As a hygiene rule, verify that no merge conflict strings
+      like <<<<<<< HEAD or >>>>>> exist in the repository files.
+* [x] Check for BOM (Byte Order Mark): Ensure that no files start with a BOM, as it can cause issues
+      with some compilers or interpreters. This is especially important for UTF-8 files.
+* [x] Check for UTF-8 Encoding: Ensure that all files are valid UTF-8 encoded. This is crucial for
+      cross-platform compatibility and to avoid issues with text processing.
+* [x] Check for Trailing Whitespace: Ensure that no lines end with trailing whitespace.
+* [x] Check for Mixed Spaces and Tabs: Ensure that no lines use both spaces and tabs for indentation.
+* [x] Check for Long Lines: Ensure that no lines exceed a certain length (e.g., 80 or 120 characters).
+* [x] Check for Inconsistent Line Endings: Ensure that all files use the same line ending style (LF or CRLF).
+* [x] Check for Invisible Characters: Ensure that no lines contain invisible characters that can cause issues
+      in some environments.
+* [x] Check for Unicode Homoglyphs: Ensure that no lines contain characters that look similar to ASCII characters
+      but are actually different Unicode characters. This can help prevent confusion and potential security issues.
+* [x] Check for Unicode Control Characters: Ensure that no lines contain control characters that can cause issues
+      in some environments.
+'''
+
 from dev.checks.base import FileCheck, Issue, Severity, IssueType, FileContext, CoarseFileScope, IssueList, CoarseProjectType
 from dataclasses import dataclass, field # Added field
 from typing import List, Optional, Dict, Any
@@ -307,10 +327,7 @@ class TextQualityCheck(FileCheck):
                         category == 'Zp' or \
                         char in self._explicit_invisible_chars:
                             # Avoid double-reporting BOM if already caught by byte check
-                            if char == '\uFEFF' and j == 0 and self.config.check_bom and content_bytes.startswith(b"\xEF\xBB\xBF"):
-                                pass # Already reported as BOM
-                            else:
-                                invisible_chars.add(char)
+                            invisible_chars.add(char)
 
                 if control_chars:
                     # Report all control characters found in the line

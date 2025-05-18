@@ -167,7 +167,7 @@ class RepoCheck(abc.ABC):
 
 class ProjectCheck(abc.ABC):
     @abc.abstractmethod
-    def check(self, path: Path) -> List[Issue]:
+    def check(self, path: Path, project: Any) -> List[Issue]:
         raise NotImplementedError()
 
 

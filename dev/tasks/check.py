@@ -22,6 +22,7 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
     from dev.checks.text_quality import TextQualityCheck
     from dev.checks.identifier_uniqueness import UniqueIdentifiersCheck
     from dev.checks.file_paths import FilenameLengthCheck, SensitiveFilenameCheck, FilenamePropertiesCheck, NamingConventionCheck, SymlinkTargetCheck, CaseConflictCheck
+    from dev.checks.project_files import GenericProjectStructureCheck
 
     all_checks: Dict[str, RepoCheck] = {
         "text_quality": TextQualityCheck(),
@@ -32,6 +33,7 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
         "naming_convention": NamingConventionCheck(),
         "symlink_target": SymlinkTargetCheck(),
         "case_conflict": CaseConflictCheck(),
+        "project_structure": GenericProjectStructureCheck(),
     }
     for check_name in enabled_checks or []:
         if check_name not in all_checks:
@@ -150,11 +152,14 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
             # It could be a project
             # print(f"path: {repr(path)} -> {path in projects_by_path}")
             if not project:
-                project = projects_by_path.get(path)
-            if project is not None:
+                project_at_path = projects_by_path.get(path)
+            else:
+                project_at_path = None
+            if project_at_path is not None:
                 for check in project_checks:
-                    issues = check.check(path, project)
+                    issues = check.check(path, project_at_path)
                     report(issues)
+                project = project_at_path
 
             # It could be a repo
             if (path / ".git").exists():
@@ -205,20 +210,6 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
                     issue.fix()
 
     for path in root_paths: go(path)
-
-    # if accumulated_issues:
-    #     for issue in accumulated_issues:
-
-    # for fn in sorted(Path('.').iterdir()):
-    #     if fn.is_dir():
-    #         if fn.name in ('.git', '.idea', '.llm', '.kotlin',
-    #                         '.gradle', '.venv', '.vscode', 'build',
-    #                         'tmp.jeeves'):
-    #             continue
-    #         # print(f'Checking {fn}')
-    #         if not (fn / '.git').exists():
-    #             print(f'Not a git repository: {fn}')
-    #             continue
 
 
 if __name__ == "__main__":

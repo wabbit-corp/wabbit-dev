@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+'''
+* [x] Check that there are no unnecessary executable file modes.
+'''
+
 import os
 import stat
 import argparse

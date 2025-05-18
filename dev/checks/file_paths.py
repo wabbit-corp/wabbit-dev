@@ -1,3 +1,30 @@
+'''
+* [x] Check for Excessively Long File Paths: Identify file paths exceeding a certain length (e.g., ~100 characters),
+      as extremely long paths can cause issues on some operating systems (particularly Windows).
+* [x] Check for Sensitive Filenames: Identify filenames that may contain sensitive information (e.g., private keys,
+      credentials, or tokens) based on common patterns (e.g., "private_key", "id_rsa", ".env").
+* [x] Check for Problematic Characters in Filenames: Identify filenames containing problematic characters
+      (e.g., shell metacharacters, spaces, etc.) that could cause issues in certain environments.
+* [x] Check for Non-ASCII Characters in Filenames: Identify filenames containing non-ASCII characters,
+      which may cause compatibility issues across different systems.
+* [x] Check for Reserved Filenames: Identify filenames that are reserved on certain operating systems (e.g., Windows)
+      and should not be used.
+* [x] Check for Case-Conflicting Filenames: Identify files within the same directory that differ only by case,
+      which can cause issues on case-insensitive filesystems (e.g., Windows).
+* [x] Check for Symbolic Links: Identify symbolic links that point to absolute paths or broken targets,
+      which can cause issues in certain environments.
+* [x] Check for Naming Conventions: Ensure filenames follow specific naming conventions based on file type/extension
+      (e.g., snake_case for Python files, PascalCase for Java/Kotlin files).
+* [x] Check for Leading/Trailing Spaces or Dots: Identify filenames with leading or trailing spaces or dots,
+      which can cause issues in certain environments. **Never end a filename with a space or dot**: Windows will
+      strip these, causing checkout errors (e.g. a file named `example.txt` with a trailing space may fail to clone
+      on Windows with “invalid path”.
+* [x] Check Symbolic Link Targets: Examine symbolic links within the repository. Ensure they point to targets
+      that also exist within the repository structure. Links pointing outside the repo (e.g., absolute paths
+      like /etc/passwd or relative paths like ../../../some/external/dir) can cause portability issues and may
+      represent security risks.
+'''
+
 import re
 import os
 import platform
