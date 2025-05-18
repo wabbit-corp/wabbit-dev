@@ -21,8 +21,29 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
     from dev.checks.base import RepoCheck, FileCheck, DirectoryCheck
     from dev.checks.text_quality import TextQualityCheck
     from dev.checks.identifier_uniqueness import UniqueIdentifiersCheck
-    from dev.checks.file_paths import FilenameLengthCheck, SensitiveFilenameCheck, FilenamePropertiesCheck, NamingConventionCheck, SymlinkTargetCheck, CaseConflictCheck
+    from dev.checks.file_paths import (
+        FilenameLengthCheck,
+        SensitiveFilenameCheck,
+        FilenamePropertiesCheck,
+        NamingConventionCheck,
+        SymlinkTargetCheck,
+        CaseConflictCheck,
+    )
     from dev.checks.project_files import GenericProjectStructureCheck
+    from dev.checks.code_linting import (
+        PythonFormattingCheck,
+        KotlinFormattingCheck,
+        CppFormattingCheck,
+        PurescriptFormattingCheck,
+        CSharpFormattingCheck,
+    )
+    from dev.checks.code_stale import StaleCodeCheck
+    # from dev.checks.dependency_updates import RequirementsPinnedCheck
+    # from dev.checks.file_duplicates import DuplicateFileCheck
+    # from dev.checks.large_files import LargeFileCheck
+    # from dev.checks.repo_contributors import ContributorEmailCheck
+    # from dev.checks.repo_properties import DefaultBranchCheck
+    from dev.checks.secrets import HighEntropyStringCheck
 
     all_checks: Dict[str, RepoCheck] = {
         "text_quality": TextQualityCheck(),
@@ -34,6 +55,18 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
         "symlink_target": SymlinkTargetCheck(),
         "case_conflict": CaseConflictCheck(),
         "project_structure": GenericProjectStructureCheck(),
+        "python_formatting": PythonFormattingCheck(),
+        "kotlin_formatting": KotlinFormattingCheck(),
+        "cpp_formatting": CppFormattingCheck(),
+        "purescript_formatting": PurescriptFormattingCheck(),
+        "csharp_formatting": CSharpFormattingCheck(),
+        "stale_code": StaleCodeCheck(),
+        # "requirements_pinned": RequirementsPinnedCheck(),
+        # "duplicate_files": DuplicateFileCheck(),
+        # "large_files": LargeFileCheck(),
+        # "contributor_emails": ContributorEmailCheck(),
+        # "default_branch": DefaultBranchCheck(),
+        "secrets": HighEntropyStringCheck(),
     }
     for check_name in enabled_checks or []:
         if check_name not in all_checks:

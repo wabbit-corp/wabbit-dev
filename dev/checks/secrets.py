@@ -54,6 +54,11 @@ DEFAULT_URL_REGEX = re.compile(
 
 E_HIGH_ENTROPY_STRING = IssueType("70090355-d433-443d-ab92-121a7ffe8125", "Found potential secret (Type: {type}, Entropy: {entropy:.3f}) in '{filename}'.")
 
+E_ENTROPY_CHECK_READ_ERROR = IssueType(
+    "367b0401-9f24-478b-a509-3de67d9efab4",
+    "Could not read '{filename}' during entropy check: {error}.",
+)
+
 # --- FileCheck Implementation ---
 
 class HighEntropyStringCheck(FileCheck):
