@@ -274,7 +274,7 @@ def get_cashier_instance(path: str) -> Cashier:
 
     with _registry_lock:
         if abs_path not in _global_cashier_registry:
-            logger.info("Creating new shared Cashier instance for path: %s", abs_path)
+            logger.debug("Creating new shared Cashier instance for path: %s", abs_path)
             try:
                 instance = Cashier(path=abs_path)
                 _global_cashier_registry[abs_path] = instance
@@ -316,14 +316,14 @@ def unregister_cashier_globally(abs_path: str):
 
 def _cleanup_all_cashiers():
     """Function called by atexit to close all managed cashier connections."""
-    logger.info("Closing all registered Cashier database connections via atexit...")
+    logger.debug("Closing all registered Cashier database connections via atexit...")
     # Create a copy of instances to close, as closing modifies the registry
     instances_to_close = []
     with _registry_lock:
         instances_to_close = list(_global_cashier_registry.values())
 
     if not instances_to_close:
-        logger.info("No active Cashier instances to close.")
+        logger.debug("No active Cashier instances to close.")
         return
 
     for instance in instances_to_close:
@@ -338,7 +338,7 @@ def _cleanup_all_cashiers():
                 e,
                 exc_info=True,
             )
-    logger.info("Finished closing Cashier connections via atexit.")
+    logger.debug("Finished closing Cashier connections via atexit.")
 
 
 ###############################################################################
@@ -600,7 +600,7 @@ def cache(
 
         def clear_cache_for_this_fn():
             """Clears all cache entries associated with this specific function."""
-            logger.info("Clearing cache for function %s (path=%s)", fqn, path)
+            logger.debug("Clearing cache for function %s (path=%s)", fqn, path)
             try:
                 # Need to get the correct cashier instance
                 instance = get_cashier_instance(path=path)
