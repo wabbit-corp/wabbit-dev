@@ -229,7 +229,7 @@ def create_banner(
     # 8. Save the final banner
     try:
         banner.save(output_path)
-        print(f"Banner created and saved to {output_path}")
+        # print(f"Banner created and saved to {output_path}")
     except Exception as e:
         print(f"Error saving banner: {e}")
 

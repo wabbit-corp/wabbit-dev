@@ -378,7 +378,7 @@ class JitPackAPI:
 
         path = f"/com/github/{group}/{project}/{version}/build.log"
 
-        print(
+        logger.info(
             f"Getting build log for: group={group}, project={project}, version={version}"
         )
 
@@ -436,7 +436,6 @@ class JitPackAPI:
             data = await self._request("GET", path)
         except JitPackNotFoundError:
             return None
-        # print(data)
 
         # The JS code suggests possible fields:
         # { "status": "ok|Building|...", "ci": bool, "buildUrl": "...", "deletable": bool, ...}

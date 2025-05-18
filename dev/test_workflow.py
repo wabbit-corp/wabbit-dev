@@ -10,7 +10,6 @@ import os
 import shutil
 from typing import Callable, Generator, Any
 from collections import namedtuple, defaultdict
-from namedlist import namedlist
 
 
 def digest(func, args, kwargs):
