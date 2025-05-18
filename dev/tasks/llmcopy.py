@@ -3,17 +3,16 @@ from pathlib import Path
 from dev.messages import error, success, info
 import pyperclip
 
-IGNORE_FILES = set([
-    '.DS_Store',
-    'Thumbs.db',
-    'desktop.ini',
-])
+IGNORE_FILES = set(
+    [
+        ".DS_Store",
+        "Thumbs.db",
+        "desktop.ini",
+    ]
+)
 
-IGNORE_DIRS = set([
-    '.git',
-    '.idea',
-    '__pycache__'
-])
+IGNORE_DIRS = set([".git", ".idea", "__pycache__"])
+
 
 def llmcopy(path: Path) -> None:
     buf = io.StringIO()
@@ -31,12 +30,12 @@ def llmcopy(path: Path) -> None:
 
             # print(path)
             buf.write(f'<contents path="{path}">\n')
-            with open(path, 'rt', encoding='utf-8') as f:
+            with open(path, "rt", encoding="utf-8") as f:
                 data = f.read()
                 buf.write(data)
-                if not data.endswith('\n'):
-                    buf.write('\n')
-            buf.write(f'</contents> (end of {path})\n')
+                if not data.endswith("\n"):
+                    buf.write("\n")
+            buf.write(f"</contents> (end of {path})\n")
             buf.write("\n\n")
 
     # copy to clipboard

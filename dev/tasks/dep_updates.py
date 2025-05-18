@@ -5,9 +5,9 @@ from dev.maven import fetch_metadata, MavenVersion
 import time
 
 MAVEN_CENTRAL = MavenRepositoryDefinition(
-    name="Maven Central",
-    url="https://repo1.maven.org/maven2/"
+    name="Maven Central", url="https://repo1.maven.org/maven2/"
 )
+
 
 def check_for_updates():
     config = load_config()

@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 
-'''
+"""
 * [x] Check that there are no unnecessary executable file modes.
-'''
+"""
 
 import os
 import stat
 import argparse
-import sys # Added for stderr
+import sys  # Added for stderr
 
 # --- Configuration ---
 
 # --- Helper Functions ---
+
 
 def has_shebang(filepath):
     """
@@ -19,14 +20,15 @@ def has_shebang(filepath):
     Returns False if the file can't be read or is empty.
     """
     try:
-        with open(filepath, 'rb') as f:
-            return f.read(2) == b'#!'
+        with open(filepath, "rb") as f:
+            return f.read(2) == b"#!"
     except (IOError, OSError):
         # print(f"Warning: Could not read {filepath} to check for shebang.", file=sys.stderr)
         return False
     except Exception as e:
         # print(f"Warning: Error reading {filepath}: {e}", file=sys.stderr)
         return False
+
 
 def is_elf_exe_mach(filepath):
     """
@@ -37,19 +39,19 @@ def is_elf_exe_mach(filepath):
     or None if it does not match these known file types.
     """
     try:
-        with open(filepath, 'rb') as f:
+        with open(filepath, "rb") as f:
             # Read first 4 bytes
             magic = f.read(4)
 
         # -- Check ELF --
         # ELF files start with 0x7F, 'E', 'L', 'F'
-        if magic == b'\x7fELF':
+        if magic == b"\x7fELF":
             return "elf"
 
         # -- Check Windows EXE (PE) --
         # Windows EXEs normally start with 'MZ' (0x4D, 0x5A)
         # Usually followed by other header bytes, but 'MZ' is the key signature
-        if magic.startswith(b'MZ'):
+        if magic.startswith(b"MZ"):
             return "exe"
 
         # -- Check Mach-O (Darwin) --
@@ -58,12 +60,12 @@ def is_elf_exe_mach(filepath):
         # On arm64 Macs, you’ll typically see the 64-bit Mach-O magic (0xFEEDFACF).
         # We can check for any known Mach-O “magic” or “fat” magic.
         mach_o_signatures = {
-            b'\xFE\xED\xFA\xCE',  # 0xFEEDFACE  (32-bit big-endian)
-            b'\xCE\xFA\xED\xFE',  # 0xCEFAEDFE  (32-bit little-endian)
-            b'\xFE\xED\xFA\xCF',  # 0xFEEDFACF  (64-bit big-endian)
-            b'\xCF\xFA\xED\xFE',  # 0xCFFAEDFE  (64-bit little-endian)
-            b'\xCA\xFE\xBA\xBE',  # Fat/universal binaries
-            b'\xBE\xBA\xFE\xCA',
+            b"\xfe\xed\xfa\xce",  # 0xFEEDFACE  (32-bit big-endian)
+            b"\xce\xfa\xed\xfe",  # 0xCEFAEDFE  (32-bit little-endian)
+            b"\xfe\xed\xfa\xcf",  # 0xFEEDFACF  (64-bit big-endian)
+            b"\xcf\xfa\xed\xfe",  # 0xCFFAEDFE  (64-bit little-endian)
+            b"\xca\xfe\xba\xbe",  # Fat/universal binaries
+            b"\xbe\xba\xfe\xca",
         }
         if magic in mach_o_signatures:
             return "mach-o"
@@ -74,7 +76,9 @@ def is_elf_exe_mach(filepath):
     except Exception:
         return None
 
+
 assert is_elf_exe_mach("trufflehog")
+
 
 def is_executable(filepath):
     """
@@ -85,6 +89,7 @@ def is_executable(filepath):
         return bool(mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH))
     except OSError:
         return False
+
 
 def remove_execute_permission(filepath):
     """
@@ -104,9 +109,11 @@ def remove_execute_permission(filepath):
             return True
         else:
             # No execute permission was set initially
-            return True # Considered success as the state is correct
+            return True  # Considered success as the state is correct
     except OSError as e:
-        print(f"Error: Could not change permissions for {filepath}: {e}", file=sys.stderr)
+        print(
+            f"Error: Could not change permissions for {filepath}: {e}", file=sys.stderr
+        )
         return False
     except Exception as e:
         print(f"Error: Unexpected error fixing {filepath}: {e}", file=sys.stderr)
@@ -124,19 +131,25 @@ def find_and_process_files(root_dir, fix_files=False):
 
     print(f"Scanning directory: {os.path.abspath(root_dir)}")
     if fix_files:
-        print("Fix mode enabled: Attempting to remove execute permissions from suspicious files.")
+        print(
+            "Fix mode enabled: Attempting to remove execute permissions from suspicious files."
+        )
     print("-" * 30)
 
     # trufflehog git file://./kotlin-base58
 
     for dirpath, dirnames, filenames in os.walk(root_dir, topdown=True):
         # Optional: Skip directories like .git, venv, etc.
-        dirnames[:] = [d for d in dirnames if d not in ['.git', '.svn', 'venv', '__pycache__', 'node_modules']]
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in [".git", ".svn", "venv", "__pycache__", "node_modules"]
+        ]
 
         for filename in filenames:
             filepath = os.path.join(dirpath, filename)
 
-            if filename == '.DS_Store':
+            if filename == ".DS_Store":
                 os.remove(filepath)
                 print(f"Removed: {filepath} (macOS system file)")
                 continue
@@ -150,9 +163,15 @@ def find_and_process_files(root_dir, fix_files=False):
 
                         # Check if extension is non-executable and file lacks shebang
                         # (filename in NON_EXECUTABLE_EXTENSIONS or ext_lower in NON_EXECUTABLE_EXTENSIONS) and
-                        if not (has_shebang(filepath) or is_elf_exe_mach(filepath) is not None or ext_lower in EXECUTABLE_EXTENSIONS):
+                        if not (
+                            has_shebang(filepath)
+                            or is_elf_exe_mach(filepath) is not None
+                            or ext_lower in EXECUTABLE_EXTENSIONS
+                        ):
                             suspicious_files_found.append(filepath)
-                            print(f"Suspicious: {filepath} (Extension: {ext}, Executable, No Shebang)")
+                            print(
+                                f"Suspicious: {filepath} (Extension: {ext}, Executable, No Shebang)"
+                            )
 
                             # If fix mode is enabled, attempt to remove execute permission
                             if fix_files:
@@ -173,10 +192,14 @@ def find_and_process_files(root_dir, fix_files=False):
             except OSError as e:
                 print(f"Warning: Could not access {filepath}: {e}", file=sys.stderr)
             except Exception as e:
-                print(f"Warning: Unexpected error processing {filepath}: {e}", file=sys.stderr)
+                print(
+                    f"Warning: Unexpected error processing {filepath}: {e}",
+                    file=sys.stderr,
+                )
 
     print("-" * 30)
     return suspicious_files_found, fixed_count, error_count
+
 
 # --- Main Execution ---
 
@@ -192,7 +215,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--fix",
-        action="store_true", # Makes it a boolean flag
+        action="store_true",  # Makes it a boolean flag
         help="Attempt to remove execute permissions from suspicious files.",
     )
     args = parser.parse_args()
@@ -204,8 +227,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     suspicious_files, fixed_count, error_count = find_and_process_files(
-        target_directory,
-        fix_files=args.fix
+        target_directory, fix_files=args.fix
     )
 
     print("\n--- Summary ---")
@@ -216,7 +238,7 @@ if __name__ == "__main__":
             print(f"  - Successfully fixed: {fixed_count}")
             print(f"  - Errors encountered: {error_count}")
             if error_count > 0:
-                 print("  (Check error messages above for details)")
+                print("  (Check error messages above for details)")
     else:
         print("No suspicious files found.")
 

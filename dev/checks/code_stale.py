@@ -1,4 +1,4 @@
-'''
+"""
 * [x] Remove Dead or Debug Code: Regularly purge any commented-out code, leftover debug print statements,
       or temporary test fragments before merging. These clutter the repository and can confuse new contributors.
       This rule can be partially automated by scanning for specific keywords (TODO, FIXME, console.log, etc.)
@@ -7,7 +7,7 @@
 * [x] Check for Very Old TODO/FIXME Comments: Identify TODO, FIXME, or similar marker
       comments that haven't been modified in a very long time (e.g., several years),
       as they might indicate forgotten tasks, dead code references, or obsolete information.
-'''
+"""
 
 from __future__ import annotations
 
@@ -56,20 +56,24 @@ class StaleCodeCheck(FileCheck):
                 for ln, line in enumerate(f, 1):
                     if self.debug_re.search(line):
                         issues.append(
-                            E_DEBUG_CODE.make(snippet=line.strip()[:40]).at(path, line=ln)
+                            E_DEBUG_CODE.make(snippet=line.strip()[:40]).at(
+                                path, line=ln
+                            )
                         )
                     if self.todo_re.search(line):
                         if mtime is not None:
-                            age_days = (
-                                datetime.now().timestamp() - mtime
-                            ) / 86400.0
+                            age_days = (datetime.now().timestamp() - mtime) / 86400.0
                             if age_days >= self.todo_age_days:
                                 issues.append(
-                                    E_STALE_TODO.make(snippet=line.strip()[:40]).at(path, line=ln)
+                                    E_STALE_TODO.make(snippet=line.strip()[:40]).at(
+                                        path, line=ln
+                                    )
                                 )
                         else:
                             issues.append(
-                                E_STALE_TODO.make(snippet=line.strip()[:40]).at(path, line=ln)
+                                E_STALE_TODO.make(snippet=line.strip()[:40]).at(
+                                    path, line=ln
+                                )
                             )
         except OSError:
             pass

@@ -20,13 +20,16 @@ from mu.exec import ExecutionContext, Quoted, eval_sexpr
 # Ownership Type
 ################################################################################
 
+
 class OwnershipType(Enum):
-    WABBIT = 'wabbit'
-    IMPORTED = 'imported'
+    WABBIT = "wabbit"
+    IMPORTED = "imported"
+
 
 ################################################################################
 # Version
 ################################################################################
+
 
 @dataclass
 class Version:
@@ -37,21 +40,23 @@ class Version:
     is_dev: bool
 
     def __str__(self) -> str:
-        return f"{self.major}.{self.minor}.{self.patch}" + ("+dev-SNAPSHOT" if self.is_dev else "")
+        return f"{self.major}.{self.minor}.{self.patch}" + (
+            "+dev-SNAPSHOT" if self.is_dev else ""
+        )
 
-    def next_major(self) -> 'Version':
+    def next_major(self) -> "Version":
         return Version(None, self.major + 1, 0, 0, False)
 
-    def next_minor(self) -> 'Version':
+    def next_minor(self) -> "Version":
         return Version(None, self.major, self.minor + 1, 0, False)
 
-    def next_patch(self) -> 'Version':
+    def next_patch(self) -> "Version":
         return Version(None, self.major, self.minor, self.patch + 1, False)
 
     @classmethod
-    def parse_or_null(cls, version: Quoted[SStr] | str) -> Union['Version', None]:
+    def parse_or_null(cls, version: Quoted[SStr] | str) -> Union["Version", None]:
         value = version.value.value if isinstance(version, Quoted) else version
-        match = re.match(r'(\d+)\.(\d+)\.(\d+)(\+dev-SNAPSHOT)?', value)
+        match = re.match(r"(\d+)\.(\d+)\.(\d+)(\+dev-SNAPSHOT)?", value)
         if not match:
             return None
 
@@ -59,72 +64,99 @@ class Version:
         return cls(version, int(major), int(minor), int(patch), bool(is_dev))
 
     @classmethod
-    def parse(cls, version: Quoted[SStr] | str) -> 'Version':
+    def parse(cls, version: Quoted[SStr] | str) -> "Version":
         result = cls.parse_or_null(version)
-        assert result is not None, f"Invalid version: {version.value.value if isinstance(version, Quoted) else version}"
+        assert (
+            result is not None
+        ), f"Invalid version: {version.value.value if isinstance(version, Quoted) else version}"
         return result
 
-    def __lt__(self, other: 'Version') -> bool:
+    def __lt__(self, other: "Version") -> bool:
         self_dev_val = 1 if self.is_dev else 0
         other_dev_val = 1 if other.is_dev else 0
-        return (self.major, self.minor, self.patch, self_dev_val) < (other.major, other.minor, other.patch, other_dev_val)
+        return (self.major, self.minor, self.patch, self_dev_val) < (
+            other.major,
+            other.minor,
+            other.patch,
+            other_dev_val,
+        )
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, Version):
             return NotImplemented
-        return (self.major, self.minor, self.patch, self.is_dev) == (other.major, other.minor, other.patch, other.is_dev)
+        return (self.major, self.minor, self.patch, self.is_dev) == (
+            other.major,
+            other.minor,
+            other.patch,
+            other.is_dev,
+        )
 
-    def __gt__(self, other: 'Version') -> bool:
+    def __gt__(self, other: "Version") -> bool:
         return other < self
-    def __ge__(self, other: 'Version') -> bool:
+
+    def __ge__(self, other: "Version") -> bool:
         return not self < other
-    def __le__(self, other: 'Version') -> bool:
+
+    def __le__(self, other: "Version") -> bool:
         return not other < self
+
 
 ###############################################################################################
 # Features
 ###############################################################################################
 
+
 class Feature:
     __feature_name__: str
-    def implied(self) -> List['Feature']:
+
+    def implied(self) -> List["Feature"]:
         return []
+
 
 @dataclass
 class Kotlin(Feature):
-    __feature_name__ = 'kotlin'
+    __feature_name__ = "kotlin"
+
 
 @dataclass
 class Scala(Feature):
-    __feature_name__ = 'scala'
+    __feature_name__ = "scala"
+
 
 @dataclass
 class Jvm(Feature):
-    __feature_name__ = 'jvm'
+    __feature_name__ = "jvm"
     jarName: Optional[str] = None
+
 
 @dataclass
 class ShadowJar(Feature):
-    __feature_name__ = 'shadow-jar'
+    __feature_name__ = "shadow-jar"
     jarName: Optional[str] = None
+
     def implied(self) -> List[Feature]:
         return [Jvm()]
 
+
 @dataclass
 class JvmKotlinLibrary(Feature):
-    __feature_name__ = 'jvm-kotlin-library'
+    __feature_name__ = "jvm-kotlin-library"
+
     def implied(self) -> List[Feature]:
         return [Kotlin(), Jvm()]
 
+
 @dataclass
 class JvmScalaLibrary(Feature):
-    __feature_name__ = 'jvm-scala-library'
+    __feature_name__ = "jvm-scala-library"
+
     def implied(self) -> List[Feature]:
         return [Scala(), Jvm()]
 
+
 @dataclass
 class JvmKotlinApplication(Feature):
-    __feature_name__ = 'jvm-kotlin-application'
+    __feature_name__ = "jvm-kotlin-application"
     main: str
     jarName: Optional[str] = None
     shadedJarName: Optional[str] = None
@@ -132,20 +164,32 @@ class JvmKotlinApplication(Feature):
 
     def __post_init__(self):
         if self.jarName:
-            assert isinstance(self.jarName, str), f"Expected string, got {type(self.jarName)}"
-            assert self.jarName.endswith('.jar'), f"Expected .jar file, got {self.jarName}"
+            assert isinstance(
+                self.jarName, str
+            ), f"Expected string, got {type(self.jarName)}"
+            assert self.jarName.endswith(
+                ".jar"
+            ), f"Expected .jar file, got {self.jarName}"
             base, _ = os.path.splitext(self.jarName)
             self.shadedJarName = self.jarName
             self.unshadedJarName = f"{base}-unshaded.jar"
         elif self.shadedJarName:
-            assert isinstance(self.shadedJarName, str), f"Expected string, got {type(self.shadedJarName)}"
-            assert self.shadedJarName.endswith('.jar'), f"Expected .jar file, got {self.shadedJarName}"
+            assert isinstance(
+                self.shadedJarName, str
+            ), f"Expected string, got {type(self.shadedJarName)}"
+            assert self.shadedJarName.endswith(
+                ".jar"
+            ), f"Expected .jar file, got {self.shadedJarName}"
             base, _ = os.path.splitext(self.shadedJarName)
             self.jarName = self.shadedJarName
             self.unshadedJarName = f"{base}-unshaded.jar"
         elif self.unshadedJarName:
-            assert isinstance(self.unshadedJarName, str), f"Expected string, got {type(self.unshadedJarName)}"
-            assert self.unshadedJarName.endswith('.jar'), f"Expected .jar file, got {self.unshadedJarName}"
+            assert isinstance(
+                self.unshadedJarName, str
+            ), f"Expected string, got {type(self.unshadedJarName)}"
+            assert self.unshadedJarName.endswith(
+                ".jar"
+            ), f"Expected .jar file, got {self.unshadedJarName}"
             base, _ = os.path.splitext(self.unshadedJarName)
             self.jarName = self.unshadedJarName
             self.shadedJarName = f"{base}-shaded.jar"
@@ -154,25 +198,28 @@ class JvmKotlinApplication(Feature):
         return [
             Kotlin(),
             Jvm(jarName=self.unshadedJarName),
-            ShadowJar(jarName=self.shadedJarName)
+            ShadowJar(jarName=self.shadedJarName),
         ]
+
 
 @dataclass
 class PaperPlugin(Feature):
-    __feature_name__ = 'paper-plugin'
+    __feature_name__ = "paper-plugin"
     main: str
     name: str
     apiVersion: str
+
     def implied(self) -> List[Feature]:
         return [
             Kotlin(),
             Jvm(jarName=f"{self.name}-unshaded.jar"),
-            ShadowJar(jarName=f"{self.name}.jar")
+            ShadowJar(jarName=f"{self.name}.jar"),
         ]
+
 
 @dataclass
 class JvmKotlinAgent(Feature):
-    __feature_name__ = 'jvm-kotlin-agent'
+    __feature_name__ = "jvm-kotlin-agent"
     main: str
     jarName: Optional[str] = None
     shadedJarName: Optional[str] = None
@@ -180,20 +227,32 @@ class JvmKotlinAgent(Feature):
 
     def __post_init__(self):
         if self.jarName:
-            assert isinstance(self.jarName, str), f"Expected string, got {type(self.jarName)}"
-            assert self.jarName.endswith('.jar'), f"Expected .jar file, got {self.jarName}"
+            assert isinstance(
+                self.jarName, str
+            ), f"Expected string, got {type(self.jarName)}"
+            assert self.jarName.endswith(
+                ".jar"
+            ), f"Expected .jar file, got {self.jarName}"
             base, _ = os.path.splitext(self.jarName)
             self.shadedJarName = self.jarName
             self.unshadedJarName = f"{base}-unshaded.jar"
         elif self.shadedJarName:
-            assert isinstance(self.shadedJarName, str), f"Expected string, got {type(self.shadedJarName)}"
-            assert self.shadedJarName.endswith('.jar'), f"Expected .jar file, got {self.shadedJarName}"
+            assert isinstance(
+                self.shadedJarName, str
+            ), f"Expected string, got {type(self.shadedJarName)}"
+            assert self.shadedJarName.endswith(
+                ".jar"
+            ), f"Expected .jar file, got {self.shadedJarName}"
             base, _ = os.path.splitext(self.shadedJarName)
             self.jarName = self.shadedJarName
             self.unshadedJarName = f"{base}-unshaded.jar"
         elif self.unshadedJarName:
-            assert isinstance(self.unshadedJarName, str), f"Expected string, got {type(self.unshadedJarName)}"
-            assert self.unshadedJarName.endswith('.jar'), f"Expected .jar file, got {self.unshadedJarName}"
+            assert isinstance(
+                self.unshadedJarName, str
+            ), f"Expected string, got {type(self.unshadedJarName)}"
+            assert self.unshadedJarName.endswith(
+                ".jar"
+            ), f"Expected .jar file, got {self.unshadedJarName}"
             base, _ = os.path.splitext(self.unshadedJarName)
             self.jarName = self.unshadedJarName
             self.shadedJarName = f"{base}-shaded.jar"
@@ -202,12 +261,13 @@ class JvmKotlinAgent(Feature):
         return [
             Kotlin(),
             Jvm(jarName=self.unshadedJarName),
-            ShadowJar(jarName=self.shadedJarName)
+            ShadowJar(jarName=self.shadedJarName),
         ]
+
 
 @dataclass
 class KotlinSerialization(Feature):
-    __feature_name__ = 'kotlin-serialization'
+    __feature_name__ = "kotlin-serialization"
 
     def implied(self) -> List[Feature]:
         return [Kotlin()]
@@ -217,16 +277,19 @@ class KotlinSerialization(Feature):
 # Dependencies for Gradle-like resolution
 ################################################################################
 
+
 @dataclass
 class KotlinPluginDefinition:
     name: str
     version: str
     repo: str | None = None
 
+
 @dataclass
 class MavenRepositoryDefinition:
     name: str
     url: str
+
 
 @dataclass
 class MavenLibraryDefinition:
@@ -234,24 +297,27 @@ class MavenLibraryDefinition:
     maven_urn: MavenCoordinate
     repo: str | None = None
 
+
 # In general a dependency looks like:
 #   scope@artifact
 #   scope can be omitted, in which case it defaults to 'implementation'
 
+
 class GradleDependencyScope(Enum):
-    TEST = 'test'
-    API = 'api'
-    IMPLEMENTATION = 'implementation'
-    COMPILE_ONLY = 'compileOnly'
-    RUNTIME_ONLY = 'runtimeOnly'
-    TEST_IMPLEMENTATION = 'testImplementation'
-    TEST_COMPILE_ONLY = 'testCompileOnly'
-    TEST_RUNTIME_ONLY = 'testRuntimeOnly'
+    TEST = "test"
+    API = "api"
+    IMPLEMENTATION = "implementation"
+    COMPILE_ONLY = "compileOnly"
+    RUNTIME_ONLY = "runtimeOnly"
+    TEST_IMPLEMENTATION = "testImplementation"
+    TEST_COMPILE_ONLY = "testCompileOnly"
+    TEST_RUNTIME_ONLY = "testRuntimeOnly"
+
 
 @dataclass
 class Dependency:
     scope: str | None
-    target: 'DependencyTarget'
+    target: "DependencyTarget"
 
     @property
     def name(self) -> str:
@@ -268,8 +334,12 @@ class Dependency:
         return isinstance(self.target, ProjectDependencyTarget)
 
     def __post_init__(self):
-        assert isinstance(self.scope, str) or self.scope is None, f"Expected GradleDependencyScope or None, got {type(self.scope)}"
-        assert isinstance(self.target, DependencyTarget), f"Expected DependencyTarget, got {type(self.target)}"
+        assert (
+            isinstance(self.scope, str) or self.scope is None
+        ), f"Expected GradleDependencyScope or None, got {type(self.scope)}"
+        assert isinstance(
+            self.target, DependencyTarget
+        ), f"Expected DependencyTarget, got {type(self.target)}"
 
     def __str__(self):
         return self.as_string()
@@ -277,7 +347,7 @@ class Dependency:
     def as_string(self):
         modifier = self.scope
         if modifier is None:
-            modifier = 'implementation'
+            modifier = "implementation"
 
         match self.target:
             case DependencyTarget.JarFile(path):
@@ -293,29 +363,39 @@ class Dependency:
 
 
 class DependencyTarget:
-    JarFile: type['JarFileDependencyTarget'] = None # type: ignore
-    Project: type['ProjectDependencyTarget'] = None # type: ignore
-    Maven: type['MavenDependencyTarget'] = None # type: ignore
+    JarFile: type["JarFileDependencyTarget"] = None  # type: ignore
+    Project: type["ProjectDependencyTarget"] = None  # type: ignore
+    Maven: type["MavenDependencyTarget"] = None  # type: ignore
+
 
 @dataclass
 class JarFileDependencyTarget(DependencyTarget):
     path: Path
+
+
 DependencyTarget.JarFile = JarFileDependencyTarget
+
 
 @dataclass
 class ProjectDependencyTarget(DependencyTarget):
     project: str
+
+
 DependencyTarget.Project = ProjectDependencyTarget
+
 
 @dataclass
 class MavenDependencyTarget(DependencyTarget):
     maven_repo: str | None = None
     artifact: str | None = None
+
+
 DependencyTarget.Maven = MavenDependencyTarget
 
 ################################################################################
 # Project base + Gradle/Python subtypes
 ################################################################################
+
 
 class Project:
     path: Path
@@ -331,7 +411,10 @@ class Project:
 
     @property
     def coarse_project_type(self) -> CoarseProjectType:
-        raise NotImplementedError(f"coarse_project_type not implemented for {type(self)}")
+        raise NotImplementedError(
+            f"coarse_project_type not implemented for {type(self)}"
+        )
+
 
 @dataclass
 class PythonDependency:
@@ -339,6 +422,7 @@ class PythonDependency:
     Simple container for Python dependency info: name, version spec, optional extras,
     a scope (main/dev/test), etc.
     """
+
     package: str
     version_spec: str | None = None
     scope: str = "main"  # or dev/test/extras?
@@ -370,7 +454,9 @@ class PythonProject(Project):
     def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
-            raise ValueError(f"Path {path} is not contained in project path {self.path}")
+            raise ValueError(
+                f"Path {path} is not contained in project path {self.path}"
+            )
 
         rel_path = path.relative_to(self.path)
         return None
@@ -378,6 +464,7 @@ class PythonProject(Project):
     @property
     def coarse_project_type(self) -> Optional[CoarseProjectType]:
         return None
+
 
 @dataclass
 class PurescriptProject(Project):
@@ -393,7 +480,9 @@ class PurescriptProject(Project):
     def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
-            raise ValueError(f"Path {path} is not contained in project path {self.path}")
+            raise ValueError(
+                f"Path {path} is not contained in project path {self.path}"
+            )
 
         rel_path = path.relative_to(self.path)
         return None
@@ -401,6 +490,7 @@ class PurescriptProject(Project):
     @property
     def coarse_project_type(self) -> Optional[CoarseProjectType]:
         return None
+
 
 @dataclass
 class PremakeProject(Project):
@@ -416,7 +506,9 @@ class PremakeProject(Project):
     def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
-            raise ValueError(f"Path {path} is not contained in project path {self.path}")
+            raise ValueError(
+                f"Path {path} is not contained in project path {self.path}"
+            )
 
         rel_path = path.relative_to(self.path)
         return None
@@ -424,6 +516,7 @@ class PremakeProject(Project):
     @property
     def coarse_project_type(self) -> Optional[CoarseProjectType]:
         return None
+
 
 @dataclass
 class DataProject(Project):
@@ -439,7 +532,9 @@ class DataProject(Project):
     def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
-            raise ValueError(f"Path {path} is not contained in project path {self.path}")
+            raise ValueError(
+                f"Path {path} is not contained in project path {self.path}"
+            )
 
         rel_path = path.relative_to(self.path)
         return None
@@ -447,6 +542,7 @@ class DataProject(Project):
     @property
     def coarse_project_type(self) -> Optional[CoarseProjectType]:
         return CoarseProjectType.DATA
+
 
 @dataclass
 class GradleProject(Project):
@@ -477,7 +573,9 @@ class GradleProject(Project):
     def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
-            raise ValueError(f"Path {path} is not contained in project path {self.path}")
+            raise ValueError(
+                f"Path {path} is not contained in project path {self.path}"
+            )
 
         rel_path = path.relative_to(self.path)
 
@@ -490,12 +588,14 @@ class GradleProject(Project):
         if rel_path.as_posix().startswith("kotlin-js-store/"):
             return CoarseFileScope.BUILD_TEMP
 
+
 ##################################################################################################
 # Config
 ##################################################################################################
 
-CONFIG_FILE = 'root.clj'
-CONFIG_PRIVATE_FILE = 'root.private.clj'
+CONFIG_FILE = "root.clj"
+CONFIG_PRIVATE_FILE = "root.private.clj"
+
 
 @dataclass
 class Config:
@@ -510,16 +610,27 @@ class Config:
     default_git_user_email: str | None = None
     default_git_user_name: str | None = None
 
-    repositories: OrderedDict[str, MavenRepositoryDefinition] = dataclasses.field(default_factory=OrderedDict)
-    plugins: OrderedDict[str, KotlinPluginDefinition] = dataclasses.field(default_factory=OrderedDict)
-    libraries: OrderedDict[str, MavenLibraryDefinition] = dataclasses.field(default_factory=OrderedDict)
-    library_groups: OrderedDict[str, List[str]] = dataclasses.field(default_factory=OrderedDict)
-    defined_projects: OrderedDict[str, Project] = dataclasses.field(default_factory=OrderedDict)
+    repositories: OrderedDict[str, MavenRepositoryDefinition] = dataclasses.field(
+        default_factory=OrderedDict
+    )
+    plugins: OrderedDict[str, KotlinPluginDefinition] = dataclasses.field(
+        default_factory=OrderedDict
+    )
+    libraries: OrderedDict[str, MavenLibraryDefinition] = dataclasses.field(
+        default_factory=OrderedDict
+    )
+    library_groups: OrderedDict[str, List[str]] = dataclasses.field(
+        default_factory=OrderedDict
+    )
+    defined_projects: OrderedDict[str, Project] = dataclasses.field(
+        default_factory=OrderedDict
+    )
+
 
 def load_config() -> Config:
-    with open(CONFIG_FILE, 'rt', encoding='utf-8') as f:
+    with open(CONFIG_FILE, "rt", encoding="utf-8") as f:
         root = sexpr(f.read())
-    with open(CONFIG_PRIVATE_FILE, 'rt', encoding='utf-8') as f:
+    with open(CONFIG_PRIVATE_FILE, "rt", encoding="utf-8") as f:
         root_private = sexpr(f.read())
 
     config = Config(raw=root)
@@ -573,7 +684,9 @@ def load_config() -> Config:
         return JvmScalaLibrary()
 
     @ctx.register(name="jvm-kotlin-application")
-    def jvm_kotlin_application(main: str, jar: str | None = None) -> JvmKotlinApplication:
+    def jvm_kotlin_application(
+        main: str, jar: str | None = None
+    ) -> JvmKotlinApplication:
         return JvmKotlinApplication(main, jar)
 
     @ctx.register(name="paper-plugin")
@@ -600,31 +713,43 @@ def load_config() -> Config:
     def plugin_dep(name: str, value: str, repo: str | None = None):
         assert isinstance(name, str), f"Expected string, got {type(name)}"
         assert isinstance(value, str), f"Expected string, got {type(value)}"
-        assert isinstance(repo, str) or repo is None, f"Expected string or None, got {type(repo)}"
+        assert (
+            isinstance(repo, str) or repo is None
+        ), f"Expected string or None, got {type(repo)}"
         assert name not in config.plugins, f"Plugin {name} already exists"
-        assert ':' in value, f"Invalid plugin definition: {value}"
-        artifact_name, version = value.split(':')
+        assert ":" in value, f"Invalid plugin definition: {value}"
+        artifact_name, version = value.split(":")
         config.plugins[name] = KotlinPluginDefinition(artifact_name, version, repo)
 
     @ctx.register(name="define-maven-library")
     def library(name: str, maven_urn: str, repo: str | None = None) -> None:
         assert isinstance(name, str), f"Expected string, got {type(name)}"
         assert isinstance(maven_urn, str), f"Expected string, got {type(maven_urn)}"
-        assert is_valid_maven_coordinate(maven_urn), f"Invalid Maven coordinate: {maven_urn}"
+        assert is_valid_maven_coordinate(
+            maven_urn
+        ), f"Invalid Maven coordinate: {maven_urn}"
         assert name not in config.libraries, f"Library {name} already exists"
         coord = MavenCoordinate.parse(maven_urn)
         config.libraries[name] = MavenLibraryDefinition(name, coord, repo)
 
-    @ctx.register(name='define-maven-library-group')
-    def library_group(name: str, children: List[str | Dependency | List[Dependency]]) -> None:
+    @ctx.register(name="define-maven-library-group")
+    def library_group(
+        name: str, children: List[str | Dependency | List[Dependency]]
+    ) -> None:
         assert isinstance(name, str), f"Expected string, got {type(name)}"
         assert name not in config.library_groups, f"Library group {name} already exists"
-        assert isinstance(children, list), f"Expected list of libraries, got {type(children)}"
+        assert isinstance(
+            children, list
+        ), f"Expected list of libraries, got {type(children)}"
         # assert all(isinstance(lib, str) or isinstance(lib, Dependency) for lib in children), f"Expected list of strings, got {children}"
-        assert all(lib in children for lib in children), f"Unknown libraries: {children}"
+        assert all(
+            lib in children for lib in children
+        ), f"Unknown libraries: {children}"
         config.library_groups[name] = children
 
-    def parse_gradle_dependency(dep: str | Dependency, modifier: str | None = None) -> List[Dependency]:
+    def parse_gradle_dependency(
+        dep: str | Dependency, modifier: str | None = None
+    ) -> List[Dependency]:
         if isinstance(dep, Dependency):
             return [dep]
 
@@ -642,19 +767,35 @@ def load_config() -> Config:
         assert isinstance(dep, str), f"Expected string or Dependency, got {type(dep)}"
 
         if modifier is not None:
-            assert modifier in ['test', 'implementation', 'api', 'compileOnly', 'runtimeOnly',
-                                'testImplementation', 'testCompileOnly', 'testRuntimeOnly'], f"Unknown modifier: {modifier}"
+            assert modifier in [
+                "test",
+                "implementation",
+                "api",
+                "compileOnly",
+                "runtimeOnly",
+                "testImplementation",
+                "testCompileOnly",
+                "testRuntimeOnly",
+            ], f"Unknown modifier: {modifier}"
 
-        if dep.startswith('.') or dep.startswith('/'):
+        if dep.startswith(".") or dep.startswith("/"):
             path = Path(dep)
             # FIXME: Check if file exists
             # assert path.exists(), f"File {path} does not exist"
-            return [Dependency(scope=modifier, target=JarFileDependencyTarget(path=path))]
+            return [
+                Dependency(scope=modifier, target=JarFileDependencyTarget(path=path))
+            ]
 
-        if dep.startswith(':'):
+        if dep.startswith(":"):
             project_name = dep[1:]
-            assert project_name in config.defined_projects, f"Project {project_name} is not defined"
-            return [Dependency(scope=modifier, target=ProjectDependencyTarget(project=project_name))]
+            assert (
+                project_name in config.defined_projects
+            ), f"Project {project_name} is not defined"
+            return [
+                Dependency(
+                    scope=modifier, target=ProjectDependencyTarget(project=project_name)
+                )
+            ]
 
         if dep in config.library_groups:
             result = []
@@ -665,19 +806,36 @@ def load_config() -> Config:
         if dep in config.libraries:
             maven_urn = config.libraries[dep].maven_urn.__str__()
             maven_repo = config.libraries[dep].repo
-            return [Dependency(scope=modifier, target=MavenDependencyTarget(artifact=maven_urn, maven_repo=maven_repo))]
+            return [
+                Dependency(
+                    scope=modifier,
+                    target=MavenDependencyTarget(
+                        artifact=maven_urn, maven_repo=maven_repo
+                    ),
+                )
+            ]
 
         if is_valid_maven_coordinate(dep):
-            return [Dependency(scope=modifier, target=MavenDependencyTarget(artifact=dep))]
+            return [
+                Dependency(scope=modifier, target=MavenDependencyTarget(artifact=dep))
+            ]
 
         raise ValueError(f"Unknown library or library group: {dep}")
 
-    @ctx.register(name='dep')
+    @ctx.register(name="dep")
     def dep(name: str, modifier: str | None = None) -> List[Dependency]:
         if modifier is not None:
             assert isinstance(modifier, str), f"Expected string, got {type(modifier)}"
-            assert modifier in ['test', 'implementation', 'api', 'compileOnly', 'runtimeOnly',
-                                'testImplementation', 'testCompileOnly', 'testRuntimeOnly'], f"Unknown modifier: {modifier}"
+            assert modifier in [
+                "test",
+                "implementation",
+                "api",
+                "compileOnly",
+                "runtimeOnly",
+                "testImplementation",
+                "testCompileOnly",
+                "testRuntimeOnly",
+            ], f"Unknown modifier: {modifier}"
         return parse_gradle_dependency(name, modifier)
 
     ###############################################################################################
@@ -686,7 +844,11 @@ def load_config() -> Config:
 
     def verify_project(project: Project) -> None:
         def is_publishable(project: Project) -> bool:
-            return project.publish and project.github_repo is not None and (not project.quarantine)
+            return (
+                project.publish
+                and project.github_repo is not None
+                and (not project.quarantine)
+            )
 
         # Verify that IF there is a github_repo (project is publishable),
         # then ALL projects in the dependency chain are also publishable.
@@ -694,17 +856,18 @@ def load_config() -> Config:
             if isinstance(dep.target, ProjectDependencyTarget):
                 dep_project = config.defined_projects[dep.target.project]
                 if is_publishable(project):
-                    assert is_publishable(dep_project), f"Project {project.name} depends on {dep_project.name}. " \
-                        f"Project {dep_project.name} is not publishable, but {project.name} is publishable. " \
-                        f"{project.name}.github_repo = {project.github_repo}, " \
-                        f"{dep_project.name}.github_repo = {dep_project.github_repo}, " \
-                        f"{project.name}.quarantine = {project.quarantine}, " \
-                        f"{dep_project.name}.quarantine = {dep_project.quarantine}" \
-                        f"{project.name}.publish = {project.publish}, " \
+                    assert is_publishable(dep_project), (
+                        f"Project {project.name} depends on {dep_project.name}. "
+                        f"Project {dep_project.name} is not publishable, but {project.name} is publishable. "
+                        f"{project.name}.github_repo = {project.github_repo}, "
+                        f"{dep_project.name}.github_repo = {dep_project.github_repo}, "
+                        f"{project.name}.quarantine = {project.quarantine}, "
+                        f"{dep_project.name}.quarantine = {dep_project.quarantine}"
+                        f"{project.name}.publish = {project.publish}, "
                         f"{dep_project.name}.publish = {dep_project.publish}"
+                    )
 
-
-    @ctx.register(name='python')
+    @ctx.register(name="python")
     def python_project(
         name: str,
         version: Quoted[SStr],
@@ -715,17 +878,19 @@ def load_config() -> Config:
     ) -> None:
         path = Path(f"./{name}")
         project_obj = PythonProject(
-            path=path, name=name,
+            path=path,
+            name=name,
             quarantine=quarantine,
             publish=publish,
             github_repo=repo,
             ownership=ownership,
             version=Version.parse(version) if version else None,
-            resolved_dependencies=[])
+            resolved_dependencies=[],
+        )
         verify_project(project_obj)
         config.defined_projects[name] = project_obj
 
-    @ctx.register(name='purescript')
+    @ctx.register(name="purescript")
     def purescript_project(
         name: str,
         version: Quoted[SStr],
@@ -736,17 +901,19 @@ def load_config() -> Config:
     ) -> None:
         path = Path(f"./{name}")
         project_obj = PurescriptProject(
-            path=path, name=name,
+            path=path,
+            name=name,
             quarantine=quarantine,
             publish=publish,
             github_repo=repo,
             ownership=ownership,
             version=Version.parse(version) if version else None,
-            resolved_dependencies=[])
+            resolved_dependencies=[],
+        )
         verify_project(project_obj)
         config.defined_projects[name] = project_obj
 
-    @ctx.register(name='data')
+    @ctx.register(name="data")
     def data_project(
         name: str,
         version: Quoted[SStr],
@@ -757,17 +924,19 @@ def load_config() -> Config:
     ) -> None:
         path = Path(f"./{name}")
         project_obj = DataProject(
-            path=path, name=name,
+            path=path,
+            name=name,
             quarantine=quarantine,
             publish=publish,
             github_repo=repo,
             ownership=ownership,
             version=Version.parse(version) if version else None,
-            resolved_dependencies=[])
+            resolved_dependencies=[],
+        )
         verify_project(project_obj)
         config.defined_projects[name] = project_obj
 
-    @ctx.register(name='premake')
+    @ctx.register(name="premake")
     def premake_project(
         name: str,
         version: Quoted[SStr],
@@ -778,23 +947,27 @@ def load_config() -> Config:
     ) -> None:
         path = Path(f"./{name}")
         project_obj = PremakeProject(
-            path=path, name=name,
+            path=path,
+            name=name,
             github_repo=repo,
             quarantine=quarantine,
             publish=publish,
             ownership=ownership,
             version=Version.parse(version) if version else None,
-            resolved_dependencies=[])
+            resolved_dependencies=[],
+        )
         verify_project(project_obj)
         config.defined_projects[name] = project_obj
 
-    @ctx.register(name='gradle')
+    @ctx.register(name="gradle")
     def gradle_project(
         name: str,
         version: Quoted[SStr],
         quarantine: bool = False,
         publish: bool = True,
-        dependencies: List[str | DependencyTarget | List[DependencyTarget]] | None = None,
+        dependencies: (
+            List[str | DependencyTarget | List[DependencyTarget]] | None
+        ) = None,
         features: List[Feature] | None = None,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
@@ -805,17 +978,22 @@ def load_config() -> Config:
 
         # assert repo is not None, f"Repository is required for Gradle project {name}"
 
-        resolved_features : Dict[str, Feature] = { type(feature).__feature_name__: feature for feature in (features or []) }
+        resolved_features: Dict[str, Feature] = {
+            type(feature).__feature_name__: feature for feature in (features or [])
+        }
         for feature in list(resolved_features.values()):
             for implied in feature.implied():
                 implied_name = type(implied).__feature_name__
                 if implied_name not in resolved_features:
                     resolved_features[implied_name] = implied
                 else:
-                    assert resolved_features[implied_name] == implied, \
-                        f"Implied feature {implied_name} is already defined with a different configuration {resolved_features[implied_name]} != {implied} for {name}"
+                    assert (
+                        resolved_features[implied_name] == implied
+                    ), f"Implied feature {implied_name} is already defined with a different configuration {resolved_features[implied_name]} != {implied} for {name}"
 
-        raw_dependencies: List[str | DependencyTarget | List[DependencyTarget]] = dependencies or []
+        raw_dependencies: List[str | DependencyTarget | List[DependencyTarget]] = (
+            dependencies or []
+        )
         resolved_dependencies: List[DependencyTarget] = []
         for dep in raw_dependencies:
             if isinstance(dep, list):
@@ -823,7 +1001,9 @@ def load_config() -> Config:
             elif isinstance(dep, str):
                 resolved_dependencies.extend(parse_gradle_dependency(dep))
             else:
-                assert isinstance(dep, DependencyTarget), f"Expected string or Dependency, got {type(dep)}"
+                assert isinstance(
+                    dep, DependencyTarget
+                ), f"Expected string or Dependency, got {type(dep)}"
                 resolved_dependencies.append(dep)
 
         maven_repositories: List[MavenRepositoryDefinition] = []
@@ -846,7 +1026,7 @@ def load_config() -> Config:
             resolved_maven_repositories=maven_repositories,
             resolved_features=resolved_features,
             resolved_dependencies=resolved_dependencies,
-            ownership=ownership
+            ownership=ownership,
         )
 
         verify_project(project_obj)

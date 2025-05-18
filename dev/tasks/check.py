@@ -6,15 +6,30 @@ import pathspec
 from functools import cached_property
 from argparse import ArgumentParser
 
-from dev.checks.base import RepoCheck, FileCheck, DirectoryCheck, ProjectCheck, Issue, IssueType, FileContext, IssueList
+from dev.checks.base import (
+    RepoCheck,
+    FileCheck,
+    DirectoryCheck,
+    ProjectCheck,
+    Issue,
+    IssueType,
+    FileContext,
+    IssueList,
+)
 from dev.config import load_config, Config, Project
 from dev.messages import error, info, warning
 
 E_GITIGNORE_WITHOUT_REPO = IssueType(
     "bc9220ba-b4f1-4062-81bd-36b65e91d7ad",
-    "Gitignore file found without a git repository.")
+    "Gitignore file found without a git repository.",
+)
 
-def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = None, fix: bool = False) -> None:
+
+def check_main(
+    project_or_dir_or_file: str,
+    enabled_checks: List[str] | None = None,
+    fix: bool = False,
+) -> None:
     """
     Main function to run checks on the project.
     """
@@ -38,6 +53,7 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
         CSharpFormattingCheck,
     )
     from dev.checks.code_stale import StaleCodeCheck
+
     # from dev.checks.dependency_updates import RequirementsPinnedCheck
     # from dev.checks.file_duplicates import DuplicateFileCheck
     # from dev.checks.large_files import LargeFileCheck
@@ -73,15 +89,17 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
             raise ValueError(f"Unknown check: {check_name}")
     check_set = set(enabled_checks) if enabled_checks else set(all_checks.keys())
 
-    all_checks     = {k: v for k, v in all_checks.items() if k in check_set}
-    repo_checks    = [v for k, v in all_checks.items() if isinstance(v, RepoCheck)]
+    all_checks = {k: v for k, v in all_checks.items() if k in check_set}
+    repo_checks = [v for k, v in all_checks.items() if isinstance(v, RepoCheck)]
     project_checks = [v for k, v in all_checks.items() if isinstance(v, ProjectCheck)]
-    file_checks    = [v for k, v in all_checks.items() if isinstance(v, FileCheck)]
-    dir_checks     = [v for k, v in all_checks.items() if isinstance(v, DirectoryCheck)]
+    file_checks = [v for k, v in all_checks.items() if isinstance(v, FileCheck)]
+    dir_checks = [v for k, v in all_checks.items() if isinstance(v, DirectoryCheck)]
 
     config = load_config() if Path("./root.clj").exists() else None
     if config is None:
-        warning("No config file found. Some checks may not have sufficient context to run.")
+        warning(
+            "No config file found. Some checks may not have sufficient context to run."
+        )
 
     projects_by_path: Dict[Path, Project] = {}
     if config is not None:
@@ -89,7 +107,7 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
             projects_by_path[project.path] = project
 
     root_paths: List[Path] = []
-    if project_or_dir_or_file.startswith(":"): # Definitely a project
+    if project_or_dir_or_file.startswith(":"):  # Definitely a project
         if config is None:
             raise ValueError("No config file found. Cannot resolve project paths.")
 
@@ -103,7 +121,7 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
             project = config.defined_projects[project_name]
             root_paths.append(project.path)
 
-    else: # Could be a project or a path
+    else:  # Could be a project or a path
         root_paths.append(Path(project_or_dir_or_file))
 
     for path in root_paths:
@@ -116,25 +134,27 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
                 report(i)
             return
 
-        msg = ''
+        msg = ""
 
         if issue.location is not None:
             msg += str(issue.location.path)
             if issue.location.lines:
-                msg += ':'
-                msg += ','.join(
+                msg += ":"
+                msg += ",".join(
                     f"{line[0]}-{line[1]}" if line[0] != line[1] else str(line[0])
                     for line in issue.location.lines.ranges
                 )
-            msg += ' > '
+            msg += " > "
         else:
-            msg += '> '
+            msg += "> "
 
         msg += issue.issue_type.message.format(**(issue.data or {}))
 
-        data_str = ', '.join(
-            f"{k}={v}" for k, v in issue.data.items() if v is not None
-        ) if issue.data else ''
+        data_str = (
+            ", ".join(f"{k}={v}" for k, v in issue.data.items() if v is not None)
+            if issue.data
+            else ""
+        )
         if data_str:
             msg += f" ({data_str})"
 
@@ -171,11 +191,17 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
         Reads the .gitignore file and returns a list of patterns to ignore.
         """
         with path.open() as f:
-            return [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+            return [
+                line.strip()
+                for line in f
+                if line.strip() and not line.strip().startswith("#")
+            ]
 
     # print(f"project_paths: {projects_by_path.keys()}")
 
-    def go(path: Path, project: Project | None = None, repo: RepoContext | None = None) -> None:
+    def go(
+        path: Path, project: Project | None = None, repo: RepoContext | None = None
+    ) -> None:
         if repo is not None:
             if repo.spec.match_file(path.relative_to(repo.root)):
                 # info(f"Skipping {path} due to .gitignore")
@@ -226,14 +252,14 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
         else:
             file_scope = project.get_coarse_file_scope(path) if project else None
             project_type = project.coarse_project_type if project else None
-            ctx=FileContext(
+            ctx = FileContext(
                 project_type=project_type,
                 file_scope=file_scope,
             )
 
             accumulated_issues = IssueList()
             for check in file_checks:
-                #print(f"Checking {path} with {check} {ctx}")
+                # print(f"Checking {path} with {check} {ctx}")
                 issues = check.check(path, ctx=ctx)
                 accumulated_issues.extend(issues)
             for issue in accumulated_issues:
@@ -242,14 +268,23 @@ def check_main(project_or_dir_or_file: str, enabled_checks: List[str] | None = N
                     info(f"Fixing")
                     issue.fix()
 
-    for path in root_paths: go(path)
+    for path in root_paths:
+        go(path)
 
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Run checks on the project.")
-    parser.add_argument("project_or_dir_or_file", type=str, help="Project or directory or file to check.")
-    parser.add_argument("--checks", nargs='+', default=[], help="List of checks to run.")
-    parser.add_argument("--fix", action='store_true', help="Fix issues found during checks.")
+    parser.add_argument(
+        "project_or_dir_or_file",
+        type=str,
+        help="Project or directory or file to check.",
+    )
+    parser.add_argument(
+        "--checks", nargs="+", default=[], help="List of checks to run."
+    )
+    parser.add_argument(
+        "--fix", action="store_true", help="Fix issues found during checks."
+    )
 
     args = parser.parse_args()
 

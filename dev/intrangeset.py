@@ -1,13 +1,12 @@
 from typing import List, Tuple, Union as TypingUnion, ClassVar
 
 
-
 class IntRangeSet:
     # Invariant: A list of sorted tuples (start, end) where start <= end,
     # and for any two adjacent ranges (s1, e1), (s2, e2), we have e1 < s2 - 1.
     ranges: List[Tuple[int, int]]
 
-    empty: ClassVar['IntRangeSet'] # type: ignore
+    empty: ClassVar["IntRangeSet"]  # type: ignore
 
     def __init__(self, values: List[TypingUnion[int, Tuple[int, int]]]):
         """
@@ -21,12 +20,16 @@ class IntRangeSet:
             elif isinstance(value, tuple) and len(value) == 2:
                 start, end = value
                 if not isinstance(start, int) or not isinstance(end, int):
-                     raise TypeError(f"Range endpoints must be integers: {value}")
+                    raise TypeError(f"Range endpoints must be integers: {value}")
                 if start > end:
-                    raise ValueError(f"Invalid range: start ({start}) cannot be greater than end ({end}) in {value}")
+                    raise ValueError(
+                        f"Invalid range: start ({start}) cannot be greater than end ({end}) in {value}"
+                    )
                 processed_ranges.append(value)
             else:
-                raise TypeError(f"Invalid value type: {value}. Must be int or tuple[int, int].")
+                raise TypeError(
+                    f"Invalid value type: {value}. Must be int or tuple[int, int]."
+                )
 
         # Sort ranges primarily by start, secondarily by end for merging logic
         processed_ranges.sort()
@@ -48,19 +51,21 @@ class IntRangeSet:
         self.ranges = merged_ranges
         # The invariant should now hold due to the sorting and merging logic.
 
-    def union(self, other: 'IntRangeSet') -> 'IntRangeSet':
+    def union(self, other: "IntRangeSet") -> "IntRangeSet":
         """
         Returns a new IntRangeSet that is the union of this and another IntRangeSet.
         This method directly merges the ranges, preserving the invariant.
         """
         merged_ranges: List[Tuple[int, int]] = []
-        i = 0 # Pointer for self.ranges
-        j = 0 # Pointer for other.ranges
+        i = 0  # Pointer for self.ranges
+        j = 0  # Pointer for other.ranges
 
         # Iterate while there are ranges in either list
         while i < len(self.ranges) or j < len(other.ranges):
             # Determine the next range to consider (one with the smaller start)
-            if i < len(self.ranges) and (j == len(other.ranges) or self.ranges[i][0] <= other.ranges[j][0]):
+            if i < len(self.ranges) and (
+                j == len(other.ranges) or self.ranges[i][0] <= other.ranges[j][0]
+            ):
                 # Next range is from self
                 current_start, current_end = self.ranges[i]
                 i += 1
@@ -69,8 +74,8 @@ class IntRangeSet:
                 current_start, current_end = other.ranges[j]
                 j += 1
             else:
-                 # Should not be reached if loop condition is correct
-                 break
+                # Should not be reached if loop condition is correct
+                break
 
             # Now, merge this 'current' range with the last one in merged_ranges if necessary
             if not merged_ranges:
@@ -89,20 +94,20 @@ class IntRangeSet:
         # Create a new instance and directly assign the correctly merged ranges
         # This bypasses the __init__'s merging logic, which is desirable here
         # as we've already done the work correctly.
-        new_set = IntRangeSet([]) # Create an empty set instance
-        new_set.ranges = merged_ranges # Directly assign the calculated ranges
+        new_set = IntRangeSet([])  # Create an empty set instance
+        new_set.ranges = merged_ranges  # Directly assign the calculated ranges
         return new_set
 
-    def __add__(self, other: 'IntRangeSet') -> 'IntRangeSet':
+    def __add__(self, other: "IntRangeSet") -> "IntRangeSet":
         """
         Returns a new IntRangeSet that is the union of this and another IntRangeSet.
         Overloads the '+' operator.
         """
         if not isinstance(other, IntRangeSet):
-             return NotImplemented
-        return self.union(other) # Calls the corrected union method
+            return NotImplemented
+        return self.union(other)  # Calls the corrected union method
 
-    def intersection(self, other: 'IntRangeSet') -> 'IntRangeSet':
+    def intersection(self, other: "IntRangeSet") -> "IntRangeSet":
         """Return a new ``IntRangeSet`` with values present in both sets."""
         result: List[Tuple[int, int]] = []
         i = 0
@@ -126,7 +131,7 @@ class IntRangeSet:
         new_set.ranges = result
         return new_set
 
-    def __and__(self, other: 'IntRangeSet') -> 'IntRangeSet':
+    def __and__(self, other: "IntRangeSet") -> "IntRangeSet":
         if not isinstance(other, IntRangeSet):
             return NotImplemented
         return self.intersection(other)
@@ -145,10 +150,9 @@ class IntRangeSet:
                 return True
             elif value < start:
                 high = mid - 1
-            else: # value > end
+            else:  # value > end
                 low = mid + 1
         return False
-
 
     def __iter__(self):
         """Iterates over all individual integers contained in the ranges."""
@@ -161,24 +165,22 @@ class IntRangeSet:
         # Create a more canonical representation usable with __init__
         range_strs = []
         for s, e in self.ranges:
-             if s == e:
-                 range_strs.append(str(s))
-             else:
-                 range_strs.append(f"({s}, {e})")
+            if s == e:
+                range_strs.append(str(s))
+            else:
+                range_strs.append(f"({s}, {e})")
         return f"IntRangeSet([{', '.join(range_strs)}])"
-
 
     def __str__(self) -> str:
         """Returns a user-friendly string representation."""
         # Could be simplified, e.g., "{1-3, 5, 7-9}"
         range_strs = []
         for s, e in self.ranges:
-             if s == e:
-                 range_strs.append(str(s))
-             else:
-                 range_strs.append(f"{s}-{e}") # Use hyphen for ranges
+            if s == e:
+                range_strs.append(str(s))
+            else:
+                range_strs.append(f"{s}-{e}")  # Use hyphen for ranges
         return f"{{{', '.join(range_strs)}}}"
-
 
     def __eq__(self, other: object) -> bool:
         """Checks if two IntRangeSets are equal (contain the same ranges)."""
@@ -188,7 +190,8 @@ class IntRangeSet:
 
     def __hash__(self) -> int:
         """Returns a hash based on the ranges, making the set hashable."""
-        return hash(tuple(self.ranges)) # ranges list -> tuple for hashing
+        return hash(tuple(self.ranges))  # ranges list -> tuple for hashing
+
 
 # Initialize the class variable 'empty' after the class definition
 IntRangeSet.empty = IntRangeSet([])

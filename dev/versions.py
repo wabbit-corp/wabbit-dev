@@ -3,9 +3,9 @@ from typing import List, Tuple, Union, Optional, Any
 from enum import Enum
 
 
-
 class VersionSpecifier:
-    Latest : type['LatestVersionSpecifier'] = None # type: ignore
+    Latest: type["LatestVersionSpecifier"] = None  # type: ignore
+
 
 @dataclass
 class GithubReference(VersionSpecifier):
@@ -14,19 +14,23 @@ class GithubReference(VersionSpecifier):
     repo: str
     ref: str
 
+
 @dataclass
 class TarballReference(VersionSpecifier):
     # "https://example.com/mytarball.tar.gz"
     url: str
+
 
 @dataclass
 class LocalReference(VersionSpecifier):
     # "file:///path/to/myproject"
     path: str
 
+
 @dataclass
 class LatestVersionSpecifier(VersionSpecifier):
     pass
+
 
 @dataclass
 class VersionRangeSpecifier(VersionSpecifier):

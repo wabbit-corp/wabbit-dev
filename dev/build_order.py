@@ -9,6 +9,7 @@ from collections import deque, defaultdict
 from typing import List, Dict, Tuple
 from dev.config import Project
 
+
 def build_dependency_graph(projects) -> Tuple[Dict[str, List[str]], Dict[str, int]]:
     """
     Creates adjacency lists for subproject dependencies {project: [depends_on...]}.
@@ -29,6 +30,7 @@ def build_dependency_graph(projects) -> Tuple[Dict[str, List[str]], Dict[str, in
                 in_degs[name] += 1
 
     return dict(graph), in_degs
+
 
 def toposort_projects(projects, target_project=None):
     """
@@ -68,7 +70,7 @@ def toposort_projects(projects, target_project=None):
         graph, in_degs = sub_graph, sub_in
 
     # Standard Kahn's algorithm
-    queue = deque([p for p,deg in in_degs.items() if deg == 0])
+    queue = deque([p for p, deg in in_degs.items() if deg == 0])
     order = []
     while queue:
         cur = queue.popleft()

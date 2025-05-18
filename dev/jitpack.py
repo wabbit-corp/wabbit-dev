@@ -1,4 +1,3 @@
-
 # https://medium.com/geekculture/publish-your-android-library-on-jitpack-for-better-reachability-1c978dde726e
 # https://developerlife.com/2021/02/06/publish-kotlin-library-as-gradle-dep/
 
@@ -48,16 +47,19 @@ logger.setLevel(logging.INFO)
 #
 class JitPackAPIError(Exception):
     """Base exception for JitPack API errors."""
+
     pass
 
 
 class JitPackAuthError(JitPackAPIError):
     """Raised if authentication or permissions fail (401/403)."""
+
     pass
 
 
 class JitPackNotFoundError(JitPackAPIError):
     """Raised if a requested resource was not found (404)."""
+
     pass
 
 
@@ -70,7 +72,7 @@ class BuildStatus(Enum):
     QUEUED = "Queued"
     ERROR = "Error"
     TAG_NOT_FOUND = "tagNotFound"
-    UNKNOWN = "unknown"    # Fallback if the API returns an unknown status
+    UNKNOWN = "unknown"  # Fallback if the API returns an unknown status
 
 
 #
@@ -96,6 +98,7 @@ class Version:
     deletable: bool | None
     version: str
     date: str | None
+
 
 @dataclass
 class Build:
@@ -156,7 +159,9 @@ class JitPackAPI:
         self._session: Optional[ClientSession] = None
 
     async def __aenter__(self) -> "JitPackAPI":
-        self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout))
+        self._session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=self.timeout)
+        )
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -184,7 +189,9 @@ class JitPackAPI:
         :raises JitPackAPIError: for non-2xx responses
         """
         if not self._session:
-            raise RuntimeError("ClientSession not initialized. Use `async with JitPackAPI(...) as api:`")
+            raise RuntimeError(
+                "ClientSession not initialized. Use `async with JitPackAPI(...) as api:`"
+            )
 
         url = f"{self.base_url}{path}"
 
@@ -205,7 +212,14 @@ class JitPackAPI:
                 # Fallback: if there's a parse error, treat the entire string as sessionId
                 cookies["sessionId"] = self.session_cookie
 
-        logger.debug("Request: %s %s cookies=%s params=%s json_data=%s", method, url, cookies, params, json_data)
+        logger.debug(
+            "Request: %s %s cookies=%s params=%s json_data=%s",
+            method,
+            url,
+            cookies,
+            params,
+            json_data,
+        )
 
         async with self._session.request(
             method,
@@ -236,7 +250,9 @@ class JitPackAPI:
                 f"Authentication/permission error (HTTP {status}). Response body: {body}"
             )
         elif status == 404:
-            raise JitPackNotFoundError(f"Resource not found (HTTP 404). Response body: {body}")
+            raise JitPackNotFoundError(
+                f"Resource not found (HTTP 404). Response body: {body}"
+            )
         else:
             raise JitPackAPIError(f"HTTP {status} error. Body: {body}")
 
@@ -279,7 +295,7 @@ class JitPackAPI:
         # https://jitpack.io/com/github/wabbit-corp/kotlin-base58/1.1.0-SNAPSHOT/kotlin-base58-1.1.0-SNAPSHOT.pom
 
         assert group.startswith("com.github."), "Group must start with 'com.github.'"
-        group = group[len("com.github."):]
+        group = group[len("com.github.") :]
 
         path = f"/com/github/{group}/{project}/{version}/{project}-{version}.pom"
         # We need it to timeout quickly, so we don't wait for the response.
@@ -292,14 +308,36 @@ class JitPackAPI:
             ) as resp:
                 # We don't need to check the status, just log it.
                 await self._raise_for_status(resp)
-                logger.info("Forced build for: group=%s, project=%s, version=%s", group, project, version)
+                logger.info(
+                    "Forced build for: group=%s, project=%s, version=%s",
+                    group,
+                    project,
+                    version,
+                )
                 time.sleep(5)
         except asyncio.TimeoutError:
-            logger.warning("Timeout while forcing build for: group=%s, project=%s, version=%s", group, project, version)
+            logger.warning(
+                "Timeout while forcing build for: group=%s, project=%s, version=%s",
+                group,
+                project,
+                version,
+            )
         except aiohttp.ClientError as e:
-            logger.error("Client error while forcing build for: group=%s, project=%s, version=%s. Error: %s", group, project, version, e)
+            logger.error(
+                "Client error while forcing build for: group=%s, project=%s, version=%s. Error: %s",
+                group,
+                project,
+                version,
+                e,
+            )
         except Exception as e:
-            logger.error("Unexpected error while forcing build for: group=%s, project=%s, version=%s. Error: %s", group, project, version, e)
+            logger.error(
+                "Unexpected error while forcing build for: group=%s, project=%s, version=%s. Error: %s",
+                group,
+                project,
+                version,
+                e,
+            )
             raise
 
     def _get_cookies(self) -> Dict[str, str]:
@@ -326,7 +364,7 @@ class JitPackAPI:
         # https://jitpack.io/com/github/wabbit-corp/kotlin-base58/1.1.0-SNAPSHOT/build.log
 
         assert group.startswith("com.github."), "Group must start with 'com.github.'"
-        group = group[len("com.github."):]
+        group = group[len("com.github.") :]
 
         path = f"/com/github/{group}/{project}/{version}/build.log"
         return f"{self.base_url}{path}"
@@ -336,11 +374,13 @@ class JitPackAPI:
         # https://jitpack.io/com/github/wabbit-corp/kotlin-base58/1.1.0-SNAPSHOT/build.log
 
         assert group.startswith("com.github."), "Group must start with 'com.github.'"
-        group = group[len("com.github."):]
+        group = group[len("com.github.") :]
 
         path = f"/com/github/{group}/{project}/{version}/build.log"
 
-        print(f"Getting build log for: group={group}, project={project}, version={version}")
+        print(
+            f"Getting build log for: group={group}, project={project}, version={version}"
+        )
 
         async with self._session.request(
             "GET",
@@ -351,7 +391,9 @@ class JitPackAPI:
             await self._raise_for_status(resp)
             return await resp.text()
 
-    async def get_commits(self, group: str, project: str, branch: Optional[str] = None) -> List[Commit]:
+    async def get_commits(
+        self, group: str, project: str, branch: Optional[str] = None
+    ) -> List[Commit]:
         """
         GET /api/commits/{group}/{project}?branch=<branch>
 
@@ -376,7 +418,9 @@ class JitPackAPI:
 
         return commits
 
-    async def get_build_info(self, group: str, artifact: str, version: str) -> Build | None:
+    async def get_build_info(
+        self, group: str, artifact: str, version: str
+    ) -> Build | None:
         """
         GET /api/builds/{group}/{artifact}/{version}
         Retrieve info about a single build.
@@ -424,9 +468,13 @@ class JitPackAPI:
         """
         path = f"/api/builds/{group}/{artifact}/{version}"
         await self._request("DELETE", path)
-        logger.info("Deleted build: group=%s, artifact=%s, version=%s", group, artifact, version)
+        logger.info(
+            "Deleted build: group=%s, artifact=%s, version=%s", group, artifact, version
+        )
 
-    async def get_versions(self, group: str, project: str, query: Optional[str] = None) -> List[Version]:
+    async def get_versions(
+        self, group: str, project: str, query: Optional[str] = None
+    ) -> List[Version]:
         """
         GET /api/versions/{group}/{project}?{query}
 
@@ -460,14 +508,16 @@ class JitPackAPI:
             except ValueError:
                 status = BuildStatus.UNKNOWN
 
-            versions.append(Version(
-                status=status,
-                isTag=v.get("isTag"),
-                commit=v.get("commit"),
-                deletable=v.get("deletable"),
-                version=v["version"],
-                date=v.get("date"),
-            ))
+            versions.append(
+                Version(
+                    status=status,
+                    isTag=v.get("isTag"),
+                    commit=v.get("commit"),
+                    deletable=v.get("deletable"),
+                    version=v["version"],
+                    date=v.get("date"),
+                )
+            )
         return versions
 
     async def get_settings(self, group: str, project: str) -> Settings:
@@ -492,11 +542,13 @@ class JitPackAPI:
             collaborators=data.get("collaborators", []),
             environment=data.get("environment", []),
             extra_tokens=data.get("extraTokens", []),
-            raw=data
+            raw=data,
         )
         return s
 
-    async def put_settings(self, group: str, project: str, new_settings: Dict[str, Any]) -> Settings:
+    async def put_settings(
+        self, group: str, project: str, new_settings: Dict[str, Any]
+    ) -> Settings:
         """
         PUT /api/settings/{group}/{project}
 
@@ -517,10 +569,12 @@ class JitPackAPI:
             collaborators=data.get("collaborators", []),
             environment=data.get("environment", []),
             extra_tokens=data.get("extraTokens", []),
-            raw=data
+            raw=data,
         )
 
-    async def post_trial(self, git_owner_url: str, login: str, plan: str) -> Dict[str, Any]:
+    async def post_trial(
+        self, git_owner_url: str, login: str, plan: str
+    ) -> Dict[str, Any]:
         """
         POST /api/service/trial?gitOwnerUrl=...&login=...&plan=...
 

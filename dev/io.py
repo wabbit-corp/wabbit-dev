@@ -14,6 +14,7 @@ from dev.messages import info, error
 # File Reading/Writing
 ##################################################################################################
 
+
 def copy(from_: Path, to: Path) -> None:
     assert isinstance(from_, Path), f"Expected Path, got {type(from_)}"
     assert isinstance(to, Path), f"Expected Path, got {type(to)}"
@@ -61,7 +62,7 @@ def list_files(path: Path) -> List[Path]:
 def read_text_file(path: Path) -> str:
     assert isinstance(path, Path), f"Expected Path, got {type(path)}"
     assert path.exists(), f"File {path} does not exist"
-    with open(path, 'rt', encoding='utf-8') as f:
+    with open(path, "rt", encoding="utf-8") as f:
         return f.read()
 
 
@@ -87,53 +88,62 @@ def touch(path: Path) -> None:
 
 def write_text_file(path: Path, content: str) -> None:
     assert isinstance(path, Path), f"Expected Path, got {type(path)}"
-    assert '\r\n' not in content, "Windows line endings detected"
-    assert content.endswith('\n'), "Content should end with a newline"
-    assert not content.endswith('\n\n'), "Content should not end with two newlines"
+    assert "\r\n" not in content, "Windows line endings detected"
+    assert content.endswith("\n"), "Content should end with a newline"
+    assert not content.endswith("\n\n"), "Content should not end with two newlines"
     assert content, "Content should not be empty"
 
     if not path.parent.exists():
         info(f"Creating directory {path.parent}")
         path.parent.mkdir(parents=True)
 
-    content_bytes = content.encode('utf-8')
-    assert '\r\n' not in content, "Windows line endings detected"
+    content_bytes = content.encode("utf-8")
+    assert "\r\n" not in content, "Windows line endings detected"
 
     if path.exists():
         # if size is not the same, we are definitely overwriting
         old_content = path.read_text()
-        assert '\r\n' not in old_content, "Windows line endings detected"
+        assert "\r\n" not in old_content, "Windows line endings detected"
 
         # print("size: ", path.stat().st_size, len(content_bytes))
         old_content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
         new_content_hash = hashlib.sha256(content_bytes).hexdigest()
         # print("hash: ", old_content_hash, new_content_hash)
 
-        if (path.stat().st_size != len(content_bytes)) or (old_content_hash != new_content_hash):
+        if (path.stat().st_size != len(content_bytes)) or (
+            old_content_hash != new_content_hash
+        ):
 
             # Compute diff:
             from difflib import unified_diff
-            diff = unified_diff(old_content.splitlines(), content.splitlines(), lineterm='')
+
+            diff = unified_diff(
+                old_content.splitlines(), content.splitlines(), lineterm=""
+            )
             total_added = 0
             total_removed = 0
             for line in diff:
-                if line.startswith('+'):
+                if line.startswith("+"):
                     total_added += 1
-                elif line.startswith('-'):
+                elif line.startswith("-"):
                     total_removed += 1
 
-            info(f'Modifying {path}: {total_removed} lines removed, {total_added} lines added')
-            with open(path, 'wb+') as f:
+            info(
+                f"Modifying {path}: {total_removed} lines removed, {total_added} lines added"
+            )
+            with open(path, "wb+") as f:
                 f.write(content_bytes)
         else:
             return
     else:
-        info(f'Writing to {path}')
-        with open(path, 'wb+') as f:
+        info(f"Writing to {path}")
+        with open(path, "wb+") as f:
             f.write(content_bytes)
 
 
-def walk_files(path: Path, predicate: Callable[[Path], bool] | None = None) -> Generator[Path, None, None]:
+def walk_files(
+    path: Path, predicate: Callable[[Path], bool] | None = None
+) -> Generator[Path, None, None]:
     assert isinstance(path, Path), f"Expected Path, got {type(path)}"
     if predicate is not None and not predicate(path):
         return
@@ -156,7 +166,10 @@ class FileSet:
         self.positive = positive
         self.negative = negative
 
-        self.path_spec = pathspec.PathSpec.from_lines(pathspec.patterns.GitWildMatchPattern, list(positive) + ['!' + n for n in negative])
+        self.path_spec = pathspec.PathSpec.from_lines(
+            pathspec.patterns.GitWildMatchPattern,
+            list(positive) + ["!" + n for n in negative],
+        )
 
     def __call__(self, path: Path) -> bool:
         # Use ignore list using globbing
@@ -168,16 +181,17 @@ class FileSet:
 
         # return is_positive and not is_negative
 
-        rel_path = '/' + path.relative_to(self.base_path).as_posix()
+        rel_path = "/" + path.relative_to(self.base_path).as_posix()
 
         # print(f"Checking {rel_path} against {self.positive} and {self.negative}: {self.path_spec.match_file(rel_path)}")
         return self.path_spec.match_file(rel_path)
 
-    def __add__(self, other: 'FileSet') -> 'FileSet':
+    def __add__(self, other: "FileSet") -> "FileSet":
         return FileSet(
             self.base_path,
             self.positive + other.positive,
-            self.negative + other.negative)
+            self.negative + other.negative,
+        )
 
 
 def read_ignore_file(path: Path, extra_positive: List[str] | None = None) -> FileSet:
@@ -186,7 +200,7 @@ def read_ignore_file(path: Path, extra_positive: List[str] | None = None) -> Fil
     if not path.exists():
         return FileSet(path.parent, [], [])
 
-    with open(path, 'rt', encoding='utf-8') as f:
+    with open(path, "rt", encoding="utf-8") as f:
         ignore = f.readlines()
         ignore = [i.strip() for i in ignore]
         ignore = [i for i in ignore if not i.startswith("#")]

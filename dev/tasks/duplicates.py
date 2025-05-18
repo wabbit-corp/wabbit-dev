@@ -17,10 +17,10 @@ import codecs
 sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
 
 
-IGNORE_DIRS = {'.git', '.svn', '.hg', '.idea', '.vscode', '__pycache__'}
-IGNORE_FILES = {'Thumbs.db', 'desktop.ini', '.DS_Store'}
+IGNORE_DIRS = {".git", ".svn", ".hg", ".idea", ".vscode", "__pycache__"}
+IGNORE_FILES = {"Thumbs.db", "desktop.ini", ".DS_Store"}
 
-FileGroup = namedtuple('FileGroup', 'total_size total_count files')
+FileGroup = namedtuple("FileGroup", "total_size total_count files")
 
 
 def is_ignored_dir(path):
@@ -31,7 +31,7 @@ def is_ignored_dir(path):
 
 
 def chunk_reader(fobj, chunk_size=1024):
-    """ Generator that reads a file in chunks of bytes """
+    """Generator that reads a file in chunks of bytes"""
     while True:
         chunk = fobj.read(chunk_size)
         if not chunk:
@@ -50,10 +50,12 @@ def get_hash(filename, first_chunk_only=False, hash_algo=hashlib.sha1):
     return hashobj.digest()
 
 
-def check_for_duplicates(paths, exclude_filters, include_filters, min_size, no_default_excludes):
-    files_by_size       = defaultdict(list)
+def check_for_duplicates(
+    paths, exclude_filters, include_filters, min_size, no_default_excludes
+):
+    files_by_size = defaultdict(list)
     files_by_small_hash = defaultdict(list)
-    files_by_full_hash  = defaultdict(list)
+    files_by_full_hash = defaultdict(list)
 
     processed = 0
 
@@ -136,10 +138,11 @@ def check_for_duplicates(paths, exclude_filters, include_filters, min_size, no_d
 
             file_groups.append(FileGroup(total_size, total_count, files))
 
-
     file_groups.sort(key=lambda x: x.total_size, reverse=True)
     for file_group in file_groups:
-        print(f"Total size: {file_group.total_size} bytes, Total count: {file_group.total_count}")
+        print(
+            f"Total size: {file_group.total_size} bytes, Total count: {file_group.total_count}"
+        )
         for filename in file_group.files:
             print("  ", filename)
         print()
@@ -149,23 +152,40 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('folders', nargs='+', help='Folders to check for duplicates')
+    parser.add_argument("folders", nargs="+", help="Folders to check for duplicates")
 
     # -e, --exclude <filter>  Exclude files matching the filter (-e '*.bak' -e '*.tmp')
     # -f, --filter <filter>   Include only files matching the filter (-f '*.txt' -f '*.doc')
     # -s, --size <size>       Minimum file size to consider (default: 1)
     # -no-default-excludes    Do not exclude common files and directories
 
-    parser.add_argument('-e', '--exclude', type=str, default='', help='Exclude files matching the filter', nargs='+')
-    parser.add_argument('-f', '--filter', type=str, default='', help='Include only files matching the filter', nargs='+')
-    parser.add_argument('-s', '--size', type=int, default=1, help='Minimum file size to consider')
-    parser.add_argument('--no-default-excludes', action='store_true', help='Do not exclude common files and directories')
+    parser.add_argument(
+        "-e",
+        "--exclude",
+        type=str,
+        default="",
+        help="Exclude files matching the filter",
+        nargs="+",
+    )
+    parser.add_argument(
+        "-f",
+        "--filter",
+        type=str,
+        default="",
+        help="Include only files matching the filter",
+        nargs="+",
+    )
+    parser.add_argument(
+        "-s", "--size", type=int, default=1, help="Minimum file size to consider"
+    )
+    parser.add_argument(
+        "--no-default-excludes",
+        action="store_true",
+        help="Do not exclude common files and directories",
+    )
 
     args = parser.parse_args()
 
     check_for_duplicates(
-        args.folders,
-        args.exclude,
-        args.filter,
-        args.size,
-        args.no_default_excludes)
+        args.folders, args.exclude, args.filter, args.size, args.no_default_excludes
+    )

@@ -13,7 +13,7 @@ from dev.caching import cache
 from dev.io import read_text_file, read_ignore_file, walk_files
 
 SUGGEST_COMMIT_PROMPT = textwrap.dedent(
-"""
+    """
 I have made some changes to a repository.
 
 Modified files:
@@ -57,38 +57,47 @@ Finally, at the end of the commit message, explicitly include a line stating the
 """
 ).strip()
 
+
 @cache(path=".dev.cache.db", ttl=7 * 24 * 3600)
 def suggest_commit_name(modified: str, /, api_key: str) -> str:
     assert modified.strip(), "No modified files"
     client = openai.Client(api_key=api_key)
 
     h = hashlib.sha256()
-    h.update(json.dumps({
-        'modified': modified,
-        'prompt': SUGGEST_COMMIT_PROMPT
-    }, sort_keys=True).encode('utf-8'))
+    h.update(
+        json.dumps(
+            {"modified": modified, "prompt": SUGGEST_COMMIT_PROMPT}, sort_keys=True
+        ).encode("utf-8")
+    )
     key = h.hexdigest()
 
     response = client.chat.completions.create(
         messages=[
-            { "role": "user", "content": SUGGEST_COMMIT_PROMPT.replace("{modified}", modified) }
+            {
+                "role": "user",
+                "content": SUGGEST_COMMIT_PROMPT.replace("{modified}", modified),
+            }
         ],
         model="o3-mini",
         reasoning_effort="high",
         # max_tokens=8192,
         # temperature=1.0,
         # top_p=0.90,
-        response_format={"type": "json_object"}
+        response_format={"type": "json_object"},
     )
 
     # we are going to save a log of the response
     os.makedirs(".llm/logs/suggest_commit_name", exist_ok=True)
     with open(f".llm/logs/suggest_commit_name/{key}.json", "w") as f:
-        json.dump({
-            "prompt": SUGGEST_COMMIT_PROMPT,
-            "modified": modified,
-            "response": response.choices[0].message.content
-        }, f, indent=2)
+        json.dump(
+            {
+                "prompt": SUGGEST_COMMIT_PROMPT,
+                "modified": modified,
+                "response": response.choices[0].message.content,
+            },
+            f,
+            indent=2,
+        )
 
     obj = json.loads(response.choices[0].message.content)
     if isinstance(obj, dict) and "full_commit_message" in obj:
@@ -96,8 +105,9 @@ def suggest_commit_name(modified: str, /, api_key: str) -> str:
     else:
         return "Unknown"
 
+
 SUGGEST_VERSION_NUMBER = textwrap.dedent(
-"""
+    """
 Since the last release {last_version}, here are the commit messages:
 
 {commits}
@@ -137,34 +147,46 @@ Respond with a JSON object like:
     // The new version number based on "rationale", "commit_rationales", and "last_version".
     "version": "<new version number>"
 }
-""").strip()
+"""
+).strip()
+
 
 @cache(path=".dev.cache.db", ttl=7 * 24 * 3600)
-def suggest_version_number(commits: List[str], last_version: str, /, api_key: str) -> tuple[str, str, List[str]]:
+def suggest_version_number(
+    commits: List[str], last_version: str, /, api_key: str
+) -> tuple[str, str, List[str]]:
     assert commits, "No commits"
     client = openai.Client(api_key=api_key)
 
-    commits_str = "\n\n".join('```\n' + commit + '\n```' for commit in commits)
+    commits_str = "\n\n".join("```\n" + commit + "\n```" for commit in commits)
 
     h = hashlib.sha256()
-    h.update(json.dumps({
-        'prompt': SUGGEST_VERSION_NUMBER,
-        'commits': commits,
-        'last_version': last_version
-    }, sort_keys=True).encode('utf-8'))
+    h.update(
+        json.dumps(
+            {
+                "prompt": SUGGEST_VERSION_NUMBER,
+                "commits": commits,
+                "last_version": last_version,
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    )
     key = h.hexdigest()
 
     response = client.chat.completions.create(
         messages=[
             {
-                "role": "user", "content": SUGGEST_VERSION_NUMBER.replace("{commits}", commits_str).replace("{last_version}", str(last_version))
+                "role": "user",
+                "content": SUGGEST_VERSION_NUMBER.replace(
+                    "{commits}", commits_str
+                ).replace("{last_version}", str(last_version)),
             }
         ],
         model="o1",
         # max_tokens=1024,
         # temperature=1.0,
         # top_p=0.90,
-        response_format={"type": "json_object"}
+        response_format={"type": "json_object"},
     )
 
     obj = json.loads(response.choices[0].message.content)
@@ -175,12 +197,16 @@ def suggest_version_number(commits: List[str], last_version: str, /, api_key: st
 
     os.makedirs(".llm/logs/suggest_version_number", exist_ok=True)
     with open(f".llm/logs/suggest_version_number/{key}.json", "w") as f:
-        json.dump({
-            "prompt": SUGGEST_VERSION_NUMBER,
-            "last_version": last_version,
-            "commits": commits,
-            "response": response.choices[0].message.content
-        }, f, indent=2)
+        json.dump(
+            {
+                "prompt": SUGGEST_VERSION_NUMBER,
+                "last_version": last_version,
+                "commits": commits,
+                "response": response.choices[0].message.content,
+            },
+            f,
+            indent=2,
+        )
 
     return obj["version"], obj["rationale"], obj["commit_rationales"]
 
@@ -213,13 +239,18 @@ def suggest_version_number(commits: List[str], last_version: str, /, api_key: st
 # """).strip()
 
 
-
-def answer_about_file(paths: List[Path], question: str, /, api_key: str | None = None, client: openai.Client | None = None) -> str:
+def answer_about_file(
+    paths: List[Path],
+    question: str,
+    /,
+    api_key: str | None = None,
+    client: openai.Client | None = None,
+) -> str:
     if client is None:
         assert api_key is not None, "API key is required"
         client = openai.Client(api_key=api_key)
 
-    prompt = ''
+    prompt = ""
     for path in paths:
         assert os.path.isfile(path), f"File {path} does not exist"
         prompt += f"<file path='{path}'>\n"
@@ -231,9 +262,12 @@ def answer_about_file(paths: List[Path], question: str, /, api_key: str | None =
 
     response = client.chat.completions.create(
         messages=[
-            { "role": "system", "content":
-                "You are a 10x software developer, matching in skill and experience to John Carmack." },
-            { "role": "user", "content": prompt } ],
+            {
+                "role": "system",
+                "content": "You are a 10x software developer, matching in skill and experience to John Carmack.",
+            },
+            {"role": "user", "content": prompt},
+        ],
         model="gpt-4o",
         max_tokens=8000,
         temperature=1.0,
@@ -242,62 +276,76 @@ def answer_about_file(paths: List[Path], question: str, /, api_key: str | None =
 
     return response.choices[0].message.content
 
-def agent_call(root: Path, task: str, /, api_key: str | None = None, client: openai.Client | None = None) -> str:
+
+def agent_call(
+    root: Path,
+    task: str,
+    /,
+    api_key: str | None = None,
+    client: openai.Client | None = None,
+) -> str:
     if client is None:
         assert api_key is not None, "API key is required"
         client = openai.Client(api_key=api_key)
 
     tools = [
         {
-            'type': 'function',
-            'function': {
-                'name': 'request_to_developer',
-                'description': 'Request your subordinate software developer to perform an analysis a set of files in the repository.',
-                'parameters': {
-                    'type': 'object',
-                    'properties': {
-                        'paths': {
-                            'type': 'array',
-                            'items': {
-                                'type': 'string'
-                            },
-                            'description': 'A short list of file paths to ask questions about.'
+            "type": "function",
+            "function": {
+                "name": "request_to_developer",
+                "description": "Request your subordinate software developer to perform an analysis a set of files in the repository.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "A short list of file paths to ask questions about.",
                         },
-                        'task_or_question': {
-                            'type': 'string',
-                            'description': 'What has to be done. Has to be extremely detailed: provide ALL the context you have.'
-                        }
+                        "task_or_question": {
+                            "type": "string",
+                            "description": "What has to be done. Has to be extremely detailed: provide ALL the context you have.",
+                        },
                     },
-                    'required': ['paths', 'question']
-                }
-            }
+                    "required": ["paths", "question"],
+                },
+            },
         },
         {
-            'type': 'function',
-            'function': {
-                'name': 'answer',
-                'description': 'Once you are ready, provide the final result of the task.',
-                'parameters': {
-                    'type': 'object',
-                    'properties': {
-                        'result': {
-                            'type': 'string',
-                            'description': 'A complete and detailed answer to the originally posed task.'
+            "type": "function",
+            "function": {
+                "name": "answer",
+                "description": "Once you are ready, provide the final result of the task.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "result": {
+                            "type": "string",
+                            "description": "A complete and detailed answer to the originally posed task.",
                         }
                     },
-                    'required': ['result']
-                }
-            }
-        }
+                    "required": ["result"],
+                },
+            },
+        },
     ]
 
     def list_files(root: Path) -> List[str]:
         if not root.is_dir():
             return []
-        ignore = read_ignore_file(root / '.gitignore', extra_positive=[
-            '.git', '*.jar',
-            '/gradle/', '/gradlew.bat', '/gradlew',
-            '.gitignore', 'LICENSE.md', 'gradle.properties'])
+        ignore = read_ignore_file(
+            root / ".gitignore",
+            extra_positive=[
+                ".git",
+                "*.jar",
+                "/gradle/",
+                "/gradlew.bat",
+                "/gradlew",
+                ".gitignore",
+                "LICENSE.md",
+                "gradle.properties",
+            ],
+        )
         files = []
         for path in walk_files(root, predicate=lambda t: not ignore(t)):
             files.append(path.relative_to(root).as_posix())
@@ -308,7 +356,7 @@ def agent_call(root: Path, task: str, /, api_key: str | None = None, client: ope
     def answer(paths: List[str], question: str) -> str:
         paths = [path for path in paths if path]
         if not paths:
-            return { "error": "No file were provided" }
+            return {"error": "No file were provided"}
 
         non_existent_files = [path for path in paths if not (root / path).exists()]
         if non_existent_files:
@@ -322,22 +370,30 @@ def agent_call(root: Path, task: str, /, api_key: str | None = None, client: ope
                 "error": f"Paths are directories: {non_file_paths}. Please provide paths to files, not directories."
             }
 
-        return answer_about_file([root / path for path in paths], question, api_key=api_key, client=client)
+        return answer_about_file(
+            [root / path for path in paths], question, api_key=api_key, client=client
+        )
 
-    initial_prompt = ''
+    initial_prompt = ""
     initial_prompt += "You are given a repository with the following files:\n"
     initial_prompt += f"<existing-files>{json.dumps(known_files)}</existing-files>\n\n"
-    initial_prompt += "Solve the task by asking questions about the files in the repository.\n"
-    initial_prompt += "There is no limit to the number of questions you can ask, so make sure to "
+    initial_prompt += (
+        "Solve the task by asking questions about the files in the repository.\n"
+    )
+    initial_prompt += (
+        "There is no limit to the number of questions you can ask, so make sure to "
+    )
     initial_prompt += "ask as many questions as you need to clarify everything.\n\n"
     initial_prompt += f"<task>{task}</task>\n\n"
 
     logging.info(f"Initial prompt: {initial_prompt}")
 
     messages = [
-        { "role": "system", "content":
-            "You are a 10x software developer, matching in skill and experience to John Carmack." },
-        { "role": "user", "content": initial_prompt }
+        {
+            "role": "system",
+            "content": "You are a 10x software developer, matching in skill and experience to John Carmack.",
+        },
+        {"role": "user", "content": initial_prompt},
     ]
 
     while True:
@@ -348,28 +404,32 @@ def agent_call(root: Path, task: str, /, api_key: str | None = None, client: ope
             temperature=1.0,
             top_p=0.95,
             tools=tools,
-            tool_choice='required'
+            tool_choice="required",
         )
 
         message = response.choices[0].message
         finish_reason = response.choices[0].finish_reason
-        assert finish_reason == 'tool_calls'
+        assert finish_reason == "tool_calls"
         messages.append(message)
 
         if message.tool_calls:
             for tool_call in message.tool_calls:
-                assert tool_call.type == 'function', f"Unknown tool call type: {tool_call.type}"
+                assert (
+                    tool_call.type == "function"
+                ), f"Unknown tool call type: {tool_call.type}"
                 tool_id = tool_call.id
                 tool_function = tool_call.function
 
                 tool_name = tool_function.name
                 tool_arguments = json.loads(tool_function.arguments)
 
-                logging.info(f"Calling tool {tool_name} with arguments {tool_arguments}")
+                logging.info(
+                    f"Calling tool {tool_name} with arguments {tool_arguments}"
+                )
 
-                if tool_name == 'request_to_developer':
-                    paths = tool_arguments['paths']
-                    question = tool_arguments['task_or_question']
+                if tool_name == "request_to_developer":
+                    paths = tool_arguments["paths"]
+                    question = tool_arguments["task_or_question"]
 
                     result = answer(paths, question)
 
@@ -379,49 +439,68 @@ def agent_call(root: Path, task: str, /, api_key: str | None = None, client: ope
                         "tool_call_id": tool_id,
                         "role": "tool",
                         "name": tool_name,
-                        "content": json.dumps(result, ensure_ascii=False)
+                        "content": json.dumps(result, ensure_ascii=False),
                     }
 
                     messages.append(msg)
 
-                elif tool_name == 'answer':
-                    result = tool_arguments['result']
+                elif tool_name == "answer":
+                    result = tool_arguments["result"]
                     return result
+
 
 def create_readme(project_name: str, root: Path, /, api_key: str) -> str:
     client = openai.Client(api_key=api_key)
 
-    overview = agent_call(root,
+    overview = agent_call(
+        root,
         textwrap.dedent(
-             """
+            """
              Create an overview of the repository as if you were writing a README file.
              Focus primarily on the high-level picture of the codebase, its purpose, and the main components.
-             """).strip(),
-        client=client)
+             """
+        ).strip(),
+        client=client,
+    )
 
-    usage = agent_call(root,
+    usage = agent_call(
+        root,
         textwrap.dedent(
             """
             Collect or create code usage examples for the repository.
             IF there are tests, use the tests to demonstrate usage.
             IF there are no tests, learn from the codebase and write examples.
-            """).strip(),
-        client=client)
+            """
+        ).strip(),
+        client=client,
+    )
 
-    notes = textwrap.dedent('''
+    notes = (
+        textwrap.dedent(
+            """
      <overview>{overview}</overview>
      <usage>{usage}</usage>
-     ''').strip().replace("{overview}", overview).replace("{usage}", usage)
+     """
+        )
+        .strip()
+        .replace("{overview}", overview)
+        .replace("{usage}", usage)
+    )
 
-    prompt_template = read_text_file(Path("data-repo-template/repo_template_prompt.txt"))
-    prompt_template = prompt_template.replace('{{project-id}}', project_name)
-    prompt_template = prompt_template.replace('{{notes}}', notes)
+    prompt_template = read_text_file(
+        Path("data-repo-template/repo_template_prompt.txt")
+    )
+    prompt_template = prompt_template.replace("{{project-id}}", project_name)
+    prompt_template = prompt_template.replace("{{notes}}", notes)
 
     response = client.chat.completions.create(
         messages=[
-            { "role": "system", "content":
-                "You are a 10x software developer, matching in skill and experience to John Carmack." },
-            { "role": "user", "content": prompt_template } ],
+            {
+                "role": "system",
+                "content": "You are a 10x software developer, matching in skill and experience to John Carmack.",
+            },
+            {"role": "user", "content": prompt_template},
+        ],
         model="gpt-4o",
         max_tokens=8000,
         temperature=1.0,
@@ -429,7 +508,6 @@ def create_readme(project_name: str, root: Path, /, api_key: str) -> str:
     )
 
     result = response.choices[0].message.content.strip()
-    if result.startswith('```') and result.endswith('```'):
-        result = result[result.find('\n') + 1:
-                        result.rfind('\n')]
+    if result.startswith("```") and result.endswith("```"):
+        result = result[result.find("\n") + 1 : result.rfind("\n")]
     return result

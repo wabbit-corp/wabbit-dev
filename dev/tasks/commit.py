@@ -4,6 +4,7 @@ from git import Repo
 
 from dev.messages import error, success
 
+
 def commit(project_name: str, message: str) -> None:
     path = Path(project_name)
     if not path.exists():

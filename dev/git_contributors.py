@@ -6,6 +6,7 @@ import re
 import os
 from pathlib import Path
 
+
 @dataclass(frozen=True, order=True)
 class GitContributor:
     name: str
@@ -139,7 +140,6 @@ def get_git_user() -> Optional[GitContributor]:
     if name and email:
         return GitContributor(name, email)
     return None
-
 
 
 if __name__ == "__main__":
