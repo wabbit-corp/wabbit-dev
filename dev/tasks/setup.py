@@ -334,6 +334,26 @@ def setup_python_project(
         + render_template(ctx.python_gitignore_template),
     )
 
+    dev.io.write_text_file(project.path / "CLA.md", render_template(ctx.cla))
+    dev.io.write_text_file(
+        project.path / "CLA_EXPLANATIONS.md", render_template(ctx.cla_explanations)
+    )
+
+    if project.ownership == OwnershipType.WABBIT:
+        dev.io.write_text_file(project.path / "LICENSE.md", ctx.licenses["AGPL"])
+
+    create_banner(
+        image_path=ctx.repo_template / "banner4c.png",
+        font_path=ctx.repo_template / "CooperHewitt-Light.otf",
+        main_text=project.name,
+        subtitle_text=None,
+        background_color=(0, 0, 0, 0),
+        output_path=project.path / ".banner.png",
+        font_size=60,
+        subtitle_font_size=None,
+        padding=40,
+    )
+
 
 def setup_purescript_project(
     ctx: RepoSetupContext, project: PurescriptProject, interactive: bool = True
