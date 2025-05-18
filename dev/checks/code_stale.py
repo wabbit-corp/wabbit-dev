@@ -1,5 +1,5 @@
 """
-* [x] Remove Dead or Debug Code: Regularly purge any commented-out code, leftover debug print statements,
+* [ ] Remove Dead or Debug Code: Regularly purge any commented-out code, leftover debug print statements,
       or temporary test fragments before merging. These clutter the repository and can confuse new contributors.
       This rule can be partially automated by scanning for specific keywords (TODO, FIXME, console.log, etc.)
       and ensuring they are addressed or removed in production code. While not all TODO comments need removal,
@@ -36,9 +36,9 @@ class StaleCodeCheck(FileCheck):
     def __init__(self, todo_age_days: int = 365) -> None:
         self.todo_age_days = todo_age_days
         self.todo_re = re.compile(r"(TODO|FIXME)", re.IGNORECASE)
-        self.debug_re = re.compile(
-            r"(console\.log|print\(|System\.out\.println)", re.IGNORECASE
-        )
+        # self.debug_re = re.compile(
+        #     r"(//\s*console\.log|#\s*print\(|//\s*System\.out\.println)", re.IGNORECASE
+        # )
 
     def check(self, path: Path, ctx: FileContext = FileContext()) -> List:
         if not path.is_file():
@@ -54,12 +54,12 @@ class StaleCodeCheck(FileCheck):
         try:
             with path.open("r", encoding="utf-8", errors="ignore") as f:
                 for ln, line in enumerate(f, 1):
-                    if self.debug_re.search(line):
-                        issues.append(
-                            E_DEBUG_CODE.make(snippet=line.strip()[:40]).at(
-                                path, line=ln
-                            )
-                        )
+                    # if self.debug_re.search(line):
+                    #     issues.append(
+                    #         E_DEBUG_CODE.make(snippet=line.strip()[:40]).at(
+                    #             path, line=ln
+                    #         )
+                    #     )
                     if self.todo_re.search(line):
                         if mtime is not None:
                             age_days = (datetime.now().timestamp() - mtime) / 86400.0
