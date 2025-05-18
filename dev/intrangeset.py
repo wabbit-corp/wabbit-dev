@@ -102,6 +102,35 @@ class IntRangeSet:
              return NotImplemented
         return self.union(other) # Calls the corrected union method
 
+    def intersection(self, other: 'IntRangeSet') -> 'IntRangeSet':
+        """Return a new ``IntRangeSet`` with values present in both sets."""
+        result: List[Tuple[int, int]] = []
+        i = 0
+        j = 0
+
+        while i < len(self.ranges) and j < len(other.ranges):
+            s1, e1 = self.ranges[i]
+            s2, e2 = other.ranges[j]
+
+            start = max(s1, s2)
+            end = min(e1, e2)
+            if start <= end:
+                result.append((start, end))
+
+            if e1 < e2:
+                i += 1
+            else:
+                j += 1
+
+        new_set = IntRangeSet([])
+        new_set.ranges = result
+        return new_set
+
+    def __and__(self, other: 'IntRangeSet') -> 'IntRangeSet':
+        if not isinstance(other, IntRangeSet):
+            return NotImplemented
+        return self.intersection(other)
+
     def __contains__(self, value: int) -> bool:
         """Checks if an integer value is contained within any of the ranges."""
         if not isinstance(value, int):
