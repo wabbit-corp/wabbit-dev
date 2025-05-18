@@ -3,7 +3,7 @@
       or source code. This includes API keys, passwords, and other sensitive information.
       Implemented by checking that there are no high-entropy strings that look like secrets.
 * [ ] Check for Hardcoded Absolute Paths: Look for hardcoded absolute file paths in scripts,
-      configuration files, or source code (e.g., starting with C:\, /home/, /Users/).
+      configuration files, or source code (e.g., starting with C:\\, /home/, /Users/).
       These often break portability and should usually be replaced with relative paths,
       environment variables, or configuration lookups. /absolute/path/to/danger
 * [ ] Check for Hardcoded URLs: Look for hardcoded URLs in scripts, configuration files,
@@ -44,6 +44,14 @@ from dev.file_properties import get_expected_file_properties, ExpectedFileProper
 # Character sets for entropy calculation
 BASE64_CHARS: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
 HEX_CHARS: str = "1234567890abcdefABCDEF"
+DEFAULT_NON_SECRET_SEQUENCES: Set[str] = {
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "abcdefghijklmnopqrstuvwxyz",
+    "0123456789",
+    "1234567890abcdef",
+    "1234567890ABCDEF",
+    "4b825dc642cb6eb9a060e54bf8d69288fbee4904",  # Empty tree SHA (git)
+}
 
 # Default configuration values (inspired by trufflehog defaults)
 DEFAULT_MIN_SECRET_LENGTH = 20
@@ -86,6 +94,7 @@ class HighEntropyStringCheck(FileCheck):
         url_regex: re.Pattern = DEFAULT_URL_REGEX,
         base64_chars: str = BASE64_CHARS,
         hex_chars: str = HEX_CHARS,
+        non_secret_sequences: Set[str] = DEFAULT_NON_SECRET_SEQUENCES,
     ):
         """
         Initializes the check with configurable parameters.
@@ -107,6 +116,7 @@ class HighEntropyStringCheck(FileCheck):
         self.url_regex = url_regex
         self.base64_chars = base64_chars
         self.hex_chars = hex_chars
+        self.non_secret_sequences = non_secret_sequences
 
         # Compile regex for Base64 and Hex strings based on min_length and char sets
         # Use re.escape to handle special characters like '+' and '/' in BASE64_CHARS
@@ -192,6 +202,11 @@ class HighEntropyStringCheck(FileCheck):
                         if self._check_overlap(start, end, url_spans):
                             continue  # Skip if likely part of a URL
 
+                        for non_secret in self.non_secret_sequences:
+                            if non_secret in string:
+                                # Remove non-secret sequences from the string
+                                string = string.replace(non_secret, "")
+
                         # 4. Calculate entropy
                         b64_entropy = self._shannon_entropy(string, self.base64_chars)
 
@@ -218,6 +233,11 @@ class HighEntropyStringCheck(FileCheck):
                         # 7. Check overlap with URLs
                         if self._check_overlap(start, end, url_spans):
                             continue  # Skip if likely part of a URL
+
+                        for non_secret in self.non_secret_sequences:
+                            if non_secret in string:
+                                # Remove non-secret sequences from the string
+                                string = string.replace(non_secret, "")
 
                         # 8. Calculate entropy
                         hex_entropy = self._shannon_entropy(string, self.hex_chars)
