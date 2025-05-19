@@ -79,8 +79,19 @@ class PythonFormattingCheck(FileCheck):
                 capture_output=True,
                 text=True,
             )
+
+            def fix():
+                try:
+                    subprocess.run(
+                        ["black", str(path)],
+                        capture_output=True,
+                        text=True,
+                    )
+                except Exception as e:
+                    error(f"Failed to format {path}: {e}")
+
             if result.returncode != 0:
-                issues.append(E_NOT_FORMATTED.at(path))
+                issues.append(E_NOT_FORMATTED.at(path).fixable(fix))
         except FileNotFoundError:
             issues.append(E_BLACK_MISSING.at(path))
 

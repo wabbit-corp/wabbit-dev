@@ -337,7 +337,10 @@ def setup_python_project(
     )
 
     if project.ownership == OwnershipType.WABBIT:
-        dev.io.write_text_file(project.path / "LICENSE.md", ctx.licenses["AGPL"])
+        if project.license is not None:
+            dev.io.write_text_file(
+                project.path / "LICENSE.md", ctx.licenses[project.license]
+            )
         dev.io.write_text_file(project.path / "CLA.md", render_template(ctx.cla))
         dev.io.write_text_file(
             project.path / "CLA_EXPLANATIONS.md", render_template(ctx.cla_explanations)
@@ -346,9 +349,7 @@ def setup_python_project(
             project.path / "CONTRIBUTOR_PRIVACY.md",
             render_template(ctx.contributor_privacy_policy),
         )
-        dev.io.write_text_file(
-            project.path / "CODE_OF_CONDUCT.md", ctx.coc
-        )
+        dev.io.write_text_file(project.path / "CODE_OF_CONDUCT.md", ctx.coc)
 
     create_banner(
         image_path=ctx.repo_template / "banner4c.png",
@@ -449,7 +450,19 @@ def setup_gradle_project(
     )
 
     if project.ownership == OwnershipType.WABBIT:
-        dev.io.write_text_file(project.path / "LICENSE.md", ctx.licenses["AGPL"])
+        if project.license is not None:
+            dev.io.write_text_file(
+                project.path / "LICENSE.md", ctx.licenses[project.license]
+            )
+        dev.io.write_text_file(project.path / "CLA.md", render_template(ctx.cla))
+        dev.io.write_text_file(
+            project.path / "CLA_EXPLANATIONS.md", render_template(ctx.cla_explanations)
+        )
+        dev.io.write_text_file(
+            project.path / "CONTRIBUTOR_PRIVACY.md",
+            render_template(ctx.contributor_privacy_policy),
+        )
+        dev.io.write_text_file(project.path / "CODE_OF_CONDUCT.md", ctx.coc)
 
     dev.io.copy(
         ctx.repo_template / "gradle-files" / "gradlew", project.path / "gradlew"
@@ -491,7 +504,7 @@ USED_COMMIT_MESSAGES = {}
 
 
 def commit_repo_changes(
-    project: Project, repo: Repo, openai_key: str = None, interactive: bool = True
+    project: Project, repo: Repo, openai_key: str = None, interactive: bool = True, add_files: bool = True
 ) -> None:
     """
     Example function that:
@@ -514,29 +527,30 @@ def commit_repo_changes(
         error(f"Cannot proceed: {ex}")
         return
 
-    # -------------------------------------------------------------------------
-    # Prompt about untracked files
-    # -------------------------------------------------------------------------
-    untracked_paths = [d.new_path for d in diffs if d.untracked]
-    if untracked_paths:
-        error(f"{project.name} has untracked files:", *untracked_paths)
-        if not interactive or ask(f"Add untracked files for {project.name}?"):
-            repo.git.add(*untracked_paths)
-        else:
-            raise Exception("Untracked files exist")
+    if add_files:
+        # -------------------------------------------------------------------------
+        # Prompt about untracked files
+        # -------------------------------------------------------------------------
+        untracked_paths = [d.new_path for d in diffs if d.untracked]
+        if untracked_paths:
+            error(f"{project.name} has untracked files:", *untracked_paths)
+            if not interactive or ask(f"Add untracked files for {project.name}?"):
+                repo.git.add(*untracked_paths)
+            else:
+                raise Exception("Untracked files exist")
 
-    # -------------------------------------------------------------------------
-    # Prompt about unstaged changes
-    # -------------------------------------------------------------------------
-    unstaged_paths = [d.new_path for d in diffs if d.unstaged and not d.untracked]
-    if unstaged_paths:
-        error(f"{project.name} has unstaged changes:")
-        for path in unstaged_paths:
-            print(f"  {path}")
-        if not interactive or ask(f"Add unstaged changes for {project.name}?"):
-            repo.git.add(*unstaged_paths)
-        else:
-            raise Exception("Unstaged changes exist")
+        # -------------------------------------------------------------------------
+        # Prompt about unstaged changes
+        # -------------------------------------------------------------------------
+        unstaged_paths = [d.new_path for d in diffs if d.unstaged and not d.untracked]
+        if unstaged_paths:
+            error(f"{project.name} has unstaged changes:")
+            for path in unstaged_paths:
+                print(f"  {path}")
+            if not interactive or ask(f"Add unstaged changes for {project.name}?"):
+                repo.git.add(*unstaged_paths)
+            else:
+                raise Exception("Unstaged changes exist")
 
     # -------------------------------------------------------------------------
     # Now let's see if there are changes relative to HEAD (after possible staging).
@@ -801,6 +815,7 @@ def commit_repo_changes(
 @cache(path=".dev.cache.db", ttl=7 * 24 * 3600)
 def get_coc_file() -> str:
     import requests
+
     # https://raw.githubusercontent.com/wabbit-corp/code-of-excellence/refs/heads/master/CODE_OF_CONDUCT.md
     coc_url = "https://raw.githubusercontent.com/wabbit-corp/code-of-excellence/refs/heads/master/CODE_OF_CONDUCT.md"
     response = requests.get(coc_url)
@@ -808,10 +823,7 @@ def get_coc_file() -> str:
         return response.text
     else:
         error(f"Failed to fetch CoC file: {response.status_code}")
-        raise Exception(
-            f"Failed to fetch CoC file: {response.status_code}"
-        )
-
+        raise Exception(f"Failed to fetch CoC file: {response.status_code}")
 
 
 def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupContext:
@@ -850,6 +862,9 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
         licenses={
             "AGPL": dev.io.read_text_file(
                 repo_template / "legal" / "licenses" / "AGPL.md"
+            ),
+            "CC0": dev.io.read_text_file(
+                repo_template / "legal" / "licenses" / "CC0.md"
             ),
         },
         gitignore_template=dev.io.read_template(repo_template / "gitignore.jinja2"),
@@ -911,7 +926,9 @@ def setup(mode: RepoSetupMode) -> None:
         isinstance(p, GradleProject) for p in config.defined_projects.values()
     )
     if any_gradle:
-        gradle_build = render_template(ctx.build_template)
+        gradle_build = render_template(
+            ctx.build_template,
+            kotlin_version=ctx.config.plugins["kotlin-jvm"].version)
         dev.io.write_text_file(Path("build.gradle.kts"), gradle_build)
 
         gradle_subprojects = [

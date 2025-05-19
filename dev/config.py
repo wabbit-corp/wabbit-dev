@@ -438,6 +438,7 @@ class PythonProject(Project):
     path: Path
     name: str
     version: Version | None
+    license: str | None
     github_repo: str | None
     quarantine: bool
     publish: bool
@@ -472,6 +473,7 @@ class PurescriptProject(Project):
     name: str
     quarantine: bool
     publish: bool
+    license: str | None
     github_repo: str | None
     ownership: OwnershipType
     version: Version | None
@@ -498,6 +500,7 @@ class PremakeProject(Project):
     name: str
     quarantine: bool
     publish: bool
+    license: str | None
     github_repo: str | None
     ownership: OwnershipType
     version: Version | None
@@ -524,6 +527,7 @@ class DataProject(Project):
     name: str
     quarantine: bool
     publish: bool
+    license: str | None
     github_repo: str | None
     ownership: OwnershipType
     version: Version | None
@@ -550,6 +554,7 @@ class GradleProject(Project):
     group_name: str
     name: str
     version: Version | None
+    license: str | None
     quarantine: bool
     publish: bool
     github_repo: str | None
@@ -872,6 +877,7 @@ def load_config() -> Config:
         dir_name: str,
         version: Quoted[SStr],
         name: Optional[str] = None,
+        license: str | None = "AGPL",
         quarantine: bool = False,
         publish: bool = True,
         repo: str | None = None,
@@ -884,6 +890,7 @@ def load_config() -> Config:
             name=name,
             quarantine=quarantine,
             publish=publish,
+            license=license,
             github_repo=repo,
             ownership=ownership,
             version=Version.parse(version) if version else None,
@@ -898,6 +905,7 @@ def load_config() -> Config:
         version: Quoted[SStr],
         name: Optional[str] = None,
         quarantine: bool = False,
+        license: str | None = "AGPL",
         publish: bool = True,
         repo: str | None = None,
         ownership: OwnershipType = OwnershipType.WABBIT,
@@ -908,6 +916,7 @@ def load_config() -> Config:
             path=path,
             name=name,
             quarantine=quarantine,
+            license=license,
             publish=publish,
             github_repo=repo,
             ownership=ownership,
@@ -922,6 +931,7 @@ def load_config() -> Config:
         dir_name: str,
         version: Quoted[SStr],
         name: Optional[str] = None,
+        license: str | None = "AGPL",
         quarantine: bool = False,
         publish: bool = True,
         repo: str | None = None,
@@ -934,6 +944,7 @@ def load_config() -> Config:
             name=name,
             quarantine=quarantine,
             publish=publish,
+            license=license,
             github_repo=repo,
             ownership=ownership,
             version=Version.parse(version) if version else None,
@@ -947,6 +958,7 @@ def load_config() -> Config:
         dir_name: str,
         version: Quoted[SStr],
         name: Optional[str] = None,
+        license: str | None = "AGPL",
         quarantine: bool = False,
         publish: bool = True,
         repo: str | None = None,
@@ -958,6 +970,7 @@ def load_config() -> Config:
             path=path,
             name=name,
             github_repo=repo,
+            license=license,
             quarantine=quarantine,
             publish=publish,
             ownership=ownership,
@@ -972,6 +985,7 @@ def load_config() -> Config:
         dir_name: str,
         version: Quoted[SStr],
         name: Optional[str] = None,
+        license: str | None = "AGPL",
         quarantine: bool = False,
         publish: bool = True,
         dependencies: (
@@ -1030,6 +1044,7 @@ def load_config() -> Config:
             name=name,
             version=Version.parse(version) if version else None,
             quarantine=quarantine,
+            license=license,
             publish=publish,
             github_repo=repo,
             raw_dependencies=raw_dependencies,

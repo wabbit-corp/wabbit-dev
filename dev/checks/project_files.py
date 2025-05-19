@@ -99,9 +99,9 @@ class GenericProjectStructureCheck(ProjectCheck):
             with open(readme_path, "r") as f:
                 readme_content = f.read()
 
-                if "![](/github-project-banner.png)" not in readme_content:
+                if '<img src=".banner.png"/>' not in readme_content:
                     issues.append(E_README_NO_BANNER.at(readme_path))
-                if 'alt="Monthly download statistics"' not in readme_content:
+                if '<img src="https://img.shields.io' not in readme_content:
                     issues.append(E_README_NO_BADGES.at(readme_path))
                 if "## 🚀 Installation" not in readme_content:
                     issues.append(E_README_NO_INSTALL.at(readme_path))

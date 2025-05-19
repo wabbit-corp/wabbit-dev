@@ -54,7 +54,8 @@ def check_main(
     )
     from dev.checks.code_stale import StaleCodeCheck
 
-    # from dev.checks.dependency_updates import RequirementsPinnedCheck
+    from dev.checks.dependencies import PythonRequirementsPinnedCheck
+
     # from dev.checks.file_duplicates import DuplicateFileCheck
     # from dev.checks.large_files import LargeFileCheck
     # from dev.checks.repo_contributors import ContributorEmailCheck
@@ -77,7 +78,7 @@ def check_main(
         "purescript_formatting": PurescriptFormattingCheck(),
         "csharp_formatting": CSharpFormattingCheck(),
         "stale_code": StaleCodeCheck(),
-        # "requirements_pinned": RequirementsPinnedCheck(),
+        "requirements_pinned": PythonRequirementsPinnedCheck(),
         # "duplicate_files": DuplicateFileCheck(),
         # "large_files": LargeFileCheck(),
         # "contributor_emails": ContributorEmailCheck(),

@@ -90,9 +90,6 @@ async def main() -> None:
     with commands("llmcopy") as cmd:
         cmd.add_argument("path", type=str, nargs="?")
 
-    with commands("dep/updates") as cmd:
-        pass
-
     with commands("dep/graph") as cmd:
         cmd.add_argument("project", type=str, nargs="?", default=".")
         cmd.add_argument(
@@ -101,6 +98,9 @@ async def main() -> None:
             default=False,
             help="Include artifacts in the graph",
         )
+
+    with commands("dep/updates") as cmd:
+        pass
 
     with commands("publish") as cmd:
         cmd.add_argument("project", type=str, nargs="?")
@@ -119,7 +119,6 @@ async def main() -> None:
 
     with commands("commit") as cmd:
         cmd.add_argument("project", type=str, nargs=1)
-        cmd.add_argument("message", type=str, nargs=1)
 
     with commands("push") as cmd:
         cmd.add_argument("project", type=str, nargs="?", default=".")
@@ -224,8 +223,8 @@ async def main() -> None:
             from dev.tasks.commit import commit
 
             project_name = args.project[0]
-            message = args.message[0]
-            commit(project_name, message)
+            assert isinstance(project_name, str), f"Expected str, got {type(project_name)}"
+            commit(project_name)
 
         case "push":
             from dev.tasks.push import push

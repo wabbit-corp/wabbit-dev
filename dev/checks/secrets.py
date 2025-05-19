@@ -51,12 +51,15 @@ DEFAULT_NON_SECRET_SEQUENCES: Set[str] = {
     "1234567890abcdef",
     "1234567890ABCDEF",
     "4b825dc642cb6eb9a060e54bf8d69288fbee4904",  # Empty tree SHA (git)
+    "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz",  # Base58
 }
 
 # Default configuration values (inspired by trufflehog defaults)
 DEFAULT_MIN_SECRET_LENGTH = 20
 DEFAULT_B64_ENTROPY_THRESHOLD = 4.5
 DEFAULT_HEX_ENTROPY_THRESHOLD = 3.0
+DISABLE_ENTROPY_CHECK_FRAGMENT = "<NO_ENTROPY_CHECK>"
+ENABLE_ENTROPY_CHECK_FRAGMENT = "</NO_ENTROPY_CHECK>"
 
 # Regex to find potential URLs. This is a common but not exhaustive pattern.
 # It looks for common schemes or www. and captures characters typical in URLs.
@@ -182,11 +185,21 @@ class HighEntropyStringCheck(FileCheck):
         line_number = 0
         try:
             with path.open("rt", encoding="utf-8", errors="strict") as f:
+                is_enabled = True
                 for line in f:
                     line_number += 1
                     original_line = (
                         line.strip()
                     )  # Keep for context if needed, but avoid putting in issue data by default
+
+                    if not is_enabled:
+                        # Skip lines if entropy check is disabled
+                        continue
+
+                    if DISABLE_ENTROPY_CHECK_FRAGMENT in line:
+                        is_enabled = False
+                    elif ENABLE_ENTROPY_CHECK_FRAGMENT in line:
+                        is_enabled = True
 
                     # 1. Find all URL spans in the current line
                     url_spans = [
