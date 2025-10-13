@@ -88,7 +88,7 @@ async def main() -> None:
         cmd.add_argument("--ij", action="store_true")
 
     with commands("llmcopy") as cmd:
-        cmd.add_argument("path", type=str, nargs="?")
+        cmd.add_argument("path", type=str, nargs="+")
 
     with commands("dep/graph") as cmd:
         cmd.add_argument("project", type=str, nargs="?", default=".")
@@ -171,8 +171,7 @@ async def main() -> None:
 
         case "llmcopy":
             from dev.tasks.llmcopy import llmcopy
-
-            llmcopy(Path(args.path))
+            llmcopy(args.path)
 
         case "jitpack":
             match args.subcommand:

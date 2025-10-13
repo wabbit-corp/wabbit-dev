@@ -217,7 +217,7 @@ if __name__ == "__main__":
 from pathlib import Path
 
 import dev.io
-from dev.config import load_config, GradleProject
+from dev.config import load_config, GradleProject, PythonProject
 
 
 def clean(project_name: str | None) -> None:
@@ -227,19 +227,24 @@ def clean(project_name: str | None) -> None:
     dev.io.delete_if_exists(Path(".gradle"))
     dev.io.delete_if_exists(Path(".kotlin"))
     dev.io.delete_if_exists(Path(".mypy_cache"))
+    dev.io.delete_if_exists(Path(".pytest_cache"))
     dev.io.delete_if_exists(Path("build"))
 
     for name, project in config.defined_projects.items():
         if project_name is not None and name != project_name:
             continue
 
-        assert isinstance(
-            project, GradleProject
-        )  # FIXME: For now, we only support Gradle projects
-
-        dev.io.delete_if_exists(project.path / "build")
-        dev.io.delete_if_exists(project.path / "bin")
-        dev.io.delete_if_exists(project.path / ".gradle")
-        dev.io.delete_if_exists(project.path / ".kotlin")
-        dev.io.delete_if_exists(project.path / ".mypy_cache")
-        dev.io.delete_if_exists(project.path / "__pycache__")
+        if isinstance(project, GradleProject):
+            # FIXME: For now, we only support Gradle projects
+            dev.io.delete_if_exists(project.path / "build")
+            dev.io.delete_if_exists(project.path / "bin")
+            dev.io.delete_if_exists(project.path / ".gradle")
+            dev.io.delete_if_exists(project.path / ".kotlin")
+            dev.io.delete_if_exists(project.path / ".mypy_cache")
+            dev.io.delete_if_exists(project.path / "__pycache__")
+        elif isinstance(project, PythonProject):
+            # Find all __pycache__ directories and delete them
+            for pycache in project.path.glob("**/__pycache__"):
+                dev.io.delete_if_exists(pycache)
+            dev.io.delete_if_exists(project.path / ".mypy_cache")
+            dev.io.delete_if_exists(project.path / ".pytest_cache")

@@ -78,7 +78,7 @@ def suggest_commit_name(modified: str, /, api_key: str) -> str:
                 "content": SUGGEST_COMMIT_PROMPT.replace("{modified}", modified),
             }
         ],
-        model="o3-mini",
+        model="gpt-5",
         reasoning_effort="high",
         # max_tokens=8192,
         # temperature=1.0,
@@ -182,7 +182,8 @@ def suggest_version_number(
                 ).replace("{last_version}", str(last_version)),
             }
         ],
-        model="o1",
+        model="gpt-5",
+        reasoning_effort="high",
         # max_tokens=1024,
         # temperature=1.0,
         # top_p=0.90,

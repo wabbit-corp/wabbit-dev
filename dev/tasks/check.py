@@ -60,7 +60,13 @@ def check_main(
     # from dev.checks.large_files import LargeFileCheck
     # from dev.checks.repo_contributors import ContributorEmailCheck
     # from dev.checks.repo_properties import DefaultBranchCheck
-    from dev.checks.secrets import HighEntropyStringCheck
+    from dev.checks.secrets import (
+        HighEntropyStringCheck,
+        HardcodedAbsolutePathCheck,
+        HardcodedCredentialCheck,
+        HardcodedInternalHostnameIpCheck,
+        HardcodedUrlCheck
+    )
 
     all_checks: Dict[str, RepoCheck] = {
         "text_quality": TextQualityCheck(),
@@ -84,6 +90,10 @@ def check_main(
         # "contributor_emails": ContributorEmailCheck(),
         # "default_branch": DefaultBranchCheck(),
         "secrets": HighEntropyStringCheck(),
+        "hardcoded_absolute_path": HardcodedAbsolutePathCheck(),
+        "hardcoded_credential": HardcodedCredentialCheck(),
+        "hardcoded_internal_hostname_ip": HardcodedInternalHostnameIpCheck(),
+        "hardcoded_url": HardcodedUrlCheck(),
     }
     for check_name in enabled_checks or []:
         if check_name not in all_checks:
