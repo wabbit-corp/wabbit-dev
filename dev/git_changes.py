@@ -952,10 +952,10 @@ class GitTestBase(unittest.TestCase):
         # Add user config to avoid commit errors on some systems
         try:
             with self.repo.config_writer() as cw:
-                cw.set_value("user", "name", "Test User").release()
-                cw.set_value("user", "email", "test@example.com").release()
-                # Disable GPG signing if enabled globally, as it can interfere
-                cw.set_value("commit", "gpgsign", "false").release()
+                cw.set_value("user", "name", "Test User")
+                cw.set_value("user", "email", "test@example.com")
+                cw.set_value("commit", "gpgsign", "false")
+                cw.set_value("core", "filemode", "true")
         except Exception as e:
             logging.warning(f"Could not write git config: {e}")
 
