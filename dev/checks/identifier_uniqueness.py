@@ -106,7 +106,7 @@ DEFAULT_IGNORE_FILES: Set[str] = {".DS_Store", "Thumbs.db", "desktop.ini"}
 # --- Issue Types ---
 
 E_DUPLICATE_IDENTIFIER = IssueType(
-    "7ac08480-1b54-43ca-ab8c-3e071eb098ff", "Duplicate identifier found."
+    "E_DUPLICATE_IDENTIFIER", "Duplicate identifier found."
 )
 
 # --- The Check ---

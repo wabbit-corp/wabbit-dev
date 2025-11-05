@@ -13,8 +13,8 @@ class ExpectedFileProperties:
     is_configuration: bool = False
     is_code: bool = False
     is_binary: bool = False
-    is_security_sensitive: bool = False  # Added this flag
-    is_crlf_native: bool = False  # Added this flag
+    is_security_sensitive: bool = False
+    is_crlf_native: bool = False
 
     @property
     def is_text(self) -> bool:

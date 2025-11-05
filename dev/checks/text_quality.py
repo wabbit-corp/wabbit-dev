@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 
 """
-* [x] Check for Merge Artifacts: As a hygiene rule, verify that no merge conflict strings
-      like <<<<<<< HEAD or >>>>>> exist in the repository files.
+* [x] Check for UTF-8 Encoding: Ensure that all files are valid UTF-8 encoded. This is crucial for
+      cross-platform compatibility and to avoid issues with text processing. Ensuring all text is
+      valid UTF-8 avoids invisible corruption (most random byte sequences are invalid UTF-8, so catching
+      encoding errors early is useful).
 * [x] Check for BOM (Byte Order Mark): Ensure that no files start with a BOM, as it can cause issues
       with some compilers or interpreters. This is especially important for UTF-8 files.
-* [x] Check for UTF-8 Encoding: Ensure that all files are valid UTF-8 encoded. This is crucial for
-      cross-platform compatibility and to avoid issues with text processing.
 * [x] Check for Trailing Whitespace: Ensure that no lines end with trailing whitespace.
 * [x] Check for Mixed Spaces and Tabs: Ensure that no lines use both spaces and tabs for indentation.
 * [x] Check for Long Lines: Ensure that no lines exceed a certain length (e.g., 80 or 120 characters).
@@ -16,7 +16,14 @@
 * [x] Check for Unicode Homoglyphs: Ensure that no lines contain characters that look similar to ASCII characters
       but are actually different Unicode characters. This can help prevent confusion and potential security issues.
 * [x] Check for Unicode Control Characters: Ensure that no lines contain control characters that can cause issues
-      in some environments.
+      in some environments. Ensure no spurious null bytes exist.
+* [x] Check for Final Newline: Ensure that all files end with a newline character. According to POSIX, _every_ text
+      file should end with a newline character (line terminator)[thoughtbot.com](https://thoughtbot.com/blog/no-newline-at-end-of-file)
+* [x] Check for Merge Artifacts: As a hygiene rule, verify that no merge conflict strings
+      like <<<<<<< HEAD or >>>>>> exist in the repository files.
+* [ ] Check for Overly Long Words: Extremely long sequences of non-whitespace characters can cause rendering issues
+      in diff viewers, code review tools, or editors. While often found in generated files (which should ideally
+      be `.gitignore`d), setting a threshold can catch potential issues in manually edited files.
 """
 
 from dev.checks.base import (
@@ -157,45 +164,17 @@ def fix_trailing_whitespace(file: Path) -> None:
 MAX_CODE_LINE_LENGTH = 200  # Default maximum line length for code files
 
 
-E_NO_NEWLINE = IssueType(
-    "236fdabb-4175-4b0a-b2c7-a19e2857ce72",
-    "File does not end with a newline character.",
-)
-E_BOM_AT_START = IssueType(
-    "369ebc23-b717-4e94-9309-929f62b89ab3",
-    "File starts with a UTF-8 BOM (Byte Order Mark).",
-)
-E_LINE_ENDINGS = IssueType(
-    "78c8326e-ee99-4264-a033-01ddf56c9c9a", "File contains incorrect line endings."
-)
-E_NOT_UTF8 = IssueType(
-    "4aad4c2a-afa5-4180-8a3e-0a06bed3f792", "File is not valid UTF-8 encoded."
-)
-E_GIT_CONFLICT_MARKER = IssueType(
-    "6a4208e1-81be-4ffe-9d23-b2a0df8599e5", "File contains a Git conflict marker."
-)
-E_LINE_TOO_LONG = IssueType(
-    "7d522f57-f5b2-4214-bc6b-9d9859fe4495", "Line exceeds maximum length."
-)
-E_TRAILING_WHITESPACE = IssueType(
-    "9eba1063-bd3c-43ac-aad7-2fe93ad84110", "Line contains trailing whitespace."
-)
-E_MIXED_SPACES_TABS = IssueType(
-    "11d40202-3271-450f-a078-0270951d7bd5",
-    "Line contains mixed spaces and tabs in indentation.",
-)
-E_UNEXPECTED_CONTROL_CHARACTER = IssueType(
-    "8cd4fac9-93e2-4ea9-899c-e618aa037f19",
-    "Line contains an unexpected control character.",
-)
-E_UNICODE_HOMOGLYPH = IssueType(
-    "074ce2f3-d932-4051-a219-750d7a9bec1a",
-    "Line contains a non-ASCII letter (potential homoglyph).",
-)
-E_UNICODE_INVISIBLE = IssueType(
-    "132134a3-7f21-4ca3-b9ac-f26da804392d",
-    "Line contains a potentially invisible or problematic Unicode character.",
-)
+E_NO_NEWLINE          = IssueType("E_NO_NEWLINE", "File does not end with a newline character.")
+E_BOM_AT_START        = IssueType("E_BOM_AT_START", "File starts with a UTF-8 BOM (Byte Order Mark).")
+E_LINE_ENDINGS        = IssueType("E_LINE_ENDINGS", "File contains incorrect line endings.")
+E_NOT_UTF8            = IssueType("E_NOT_UTF8", "File is not valid UTF-8 encoded.")
+E_GIT_CONFLICT_MARKER = IssueType("E_GIT_CONFLICT_MARKER", "File contains a Git conflict marker.")
+E_LINE_TOO_LONG       = IssueType("E_LINE_TOO_LONG", "Line exceeds maximum length.")
+E_TRAILING_WHITESPACE = IssueType("E_TRAILING_WHITESPACE", "Line contains trailing whitespace.")
+E_MIXED_SPACES_TABS   = IssueType("E_MIXED_SPACES_TABS", "Line contains mixed spaces and tabs in indentation.")
+E_UNICODE_HOMOGLYPH   = IssueType("E_UNICODE_HOMOGLYPH", "Line contains a non-ASCII letter (potential homoglyph).")
+E_UNICODE_INVISIBLE   = IssueType("E_UNICODE_INVISIBLE", "Line contains a potentially invisible or problematic Unicode character.")
+E_UNEXPECTED_CONTROL_CHARACTER = IssueType("E_UNEXPECTED_CONTROL_CHARACTER", "Line contains an unexpected control character.")
 
 
 class TextQualityCheck(FileCheck):
@@ -218,27 +197,18 @@ class TextQualityCheck(FileCheck):
             "\u180e",  # Mongolian Vowel Separator
         }
 
-    def check(self, file: Path, ctx: FileContext | None = None) -> List[Issue]:
-        if not file.is_file():
-            return []
-        if file.is_symlink():
-            return []  # Don't check symlinks directly
+    def check(self, ctx: FileContext):
+        if not ctx.path.is_file(): return
+        if ctx.path.is_symlink(): return
 
         if ctx is not None:
             if ctx.file_scope == CoarseFileScope.BUILD_TEMP:
-                return []
+                return
 
-        props = get_expected_file_properties(file) or ExpectedFileProperties()
+        if not ctx.expected_properties.is_text: return
 
-        # Only perform text checks on files identified as text
-        if not props.is_text:
-            return []
-
-        content_bytes = file.read_bytes()
-        if not content_bytes:
-            return []  # Skip empty files
-
-        issues = IssueList()
+        content_bytes = ctx.path.read_bytes()
+        if not content_bytes: return
 
         ###################################################################
         # Byte-based checks (before decoding)
@@ -246,44 +216,36 @@ class TextQualityCheck(FileCheck):
 
         is_invalid_encoding = False
         if content_bytes.startswith(b"\xef\xbb\xbf"):  # UTF-8 BOM
-            issues.append(E_BOM_AT_START.at(file))
+            ctx.add_issue(E_BOM_AT_START)
         elif content_bytes.startswith(b"\xff\xfe\x00\x00") or content_bytes.startswith(
             b"\x00\x00\xfe\xff"
         ):  # UTF-32 BOM
-            issues.append(E_BOM_AT_START.at(file))
-            issues.append(E_NOT_UTF8.at(file))  # Not valid UTF-8
+            ctx.add_issue(E_BOM_AT_START)
+            ctx.add_issue(E_NOT_UTF8)
             is_invalid_encoding = True
         elif content_bytes.startswith(b"\xff\xfe") or content_bytes.startswith(
             b"\xfe\xff"
         ):  # UTF-16 BOM
-            issues.append(E_BOM_AT_START.at(file))
-            issues.append(E_NOT_UTF8.at(file))  # Not valid UTF-8
+            ctx.add_issue(E_BOM_AT_START)
+            ctx.add_issue(E_NOT_UTF8)
             is_invalid_encoding = True
         elif content_bytes.startswith(b"\x2b\x2f\x76"):  # UTF-7 BOM
             # Note: UTF-7 BOM is rare and not recommended, but we can check for it if needed.
-            issues.append(E_BOM_AT_START.at(file))
-            issues.append(E_NOT_UTF8.at(file))  # Not valid UTF-8
+            ctx.add_issue(E_BOM_AT_START)
+            ctx.add_issue(E_NOT_UTF8)
             is_invalid_encoding = True
 
         # Check Line Endings based on bytes (more robust than decoded text)
-        if not props.is_crlf_native and b"\r\n" in content_bytes:
-            issues.append(
-                E_LINE_ENDINGS.at(file).fixable(
-                    lambda: fix_line_endings(file, LineEnding.LF)
-                )
-            )
+        if not ctx.expected_properties.is_crlf_native and b"\r\n" in content_bytes:
+            ctx.add_issue(E_LINE_ENDINGS, fix=(lambda: fix_line_endings(ctx.path, LineEnding.LF)))
 
-        if props.is_crlf_native:
-            line_ending_counts = get_line_ending_counts(file)
+        if ctx.expected_properties.is_crlf_native:
+            line_ending_counts = get_line_ending_counts(ctx.path)
             if (
                 line_ending_counts[LineEnding.LF] > 0
                 or line_ending_counts[LineEnding.CR] > 0
             ):
-                issues.append(
-                    E_LINE_ENDINGS.at(file).fixable(
-                        lambda: fix_line_endings(file, LineEnding.CRLF)
-                    )
-                )
+                ctx.add_issue(E_LINE_ENDINGS, fix=(lambda: fix_line_endings(ctx.path, LineEnding.CRLF)))
 
         ###################################################################
         # Decoding and String-based checks
@@ -301,21 +263,15 @@ class TextQualityCheck(FileCheck):
                     # Attempt Latin-1 (common fallback)
                     text = content_bytes.decode("latin-1")
                     detected_encoding = "latin-1"
-                    issues.append(
-                        E_NOT_UTF8.make(detected_encoding=detected_encoding).at(file)
-                    )
+                    ctx.add_issue(E_NOT_UTF8, detected_encoding=detected_encoding)
                 except UnicodeDecodeError:
                     # Attempt Windows-1252 (another common one)
                     try:
                         text = content_bytes.decode("cp1252")
                         detected_encoding = "cp1252"
-                        issues.append(
-                            E_NOT_UTF8.make(detected_encoding=detected_encoding).at(
-                                file
-                            )
-                        )
+                        ctx.add_issue(E_NOT_UTF8, detected_encoding=detected_encoding)
                     except UnicodeDecodeError:
-                        issues.append(E_NOT_UTF8.at(file))
+                        ctx.add_issue(E_NOT_UTF8)
                         text = None  # Cannot proceed with string checks
 
         else:
@@ -325,8 +281,8 @@ class TextQualityCheck(FileCheck):
         # String-based checks (after decoding)
         ###################################################################
 
-        if not content_bytes.endswith(b"\n") and (file.suffix not in (".json")):
-            issues.append(E_NO_NEWLINE.at(file).fixable(lambda: fix_no_newline(file)))
+        if not content_bytes.endswith(b"\n") and (ctx.path.suffix not in (".json")):
+            ctx.add_issue(E_NO_NEWLINE, fix=(lambda: fix_no_newline(ctx.path)))
 
         if text is not None:
             lines = (
@@ -338,28 +294,20 @@ class TextQualityCheck(FileCheck):
 
                 # Check for Git Conflict Markers
                 if line.startswith(self._git_conflict_markers):
-                    issues.append(E_GIT_CONFLICT_MARKER.at(file, line=line_nr))
+                    ctx.add_issue(E_GIT_CONFLICT_MARKER, line=line_nr)
                     # Often conflict markers break other checks, maybe continue to next line?
 
                 # Check for Long Lines (only for code files)
-                if props.is_code and not (
+                if ctx.expected_properties.is_code and not (
                     ctx and ctx.project_type == CoarseProjectType.DATA
                 ):
                     # Note: len() works on Unicode characters, not bytes. This is usually what's desired.
                     if len(line) > MAX_CODE_LINE_LENGTH:
-                        issues.append(
-                            E_LINE_TOO_LONG.make(
-                                actual=len(line), max=MAX_CODE_LINE_LENGTH
-                            ).at(file, line=line_nr)
-                        )
+                        ctx.add_issue(E_LINE_TOO_LONG, actual=len(line), max=MAX_CODE_LINE_LENGTH, line=line_nr)
 
                 # Check for Trailing Whitespace
                 if line != line.rstrip(" \t"):
-                    issues.append(
-                        E_TRAILING_WHITESPACE.at(file, line=line_nr).fixable(
-                            lambda: fix_trailing_whitespace(file)
-                        )
-                    )
+                    ctx.add_issue(E_TRAILING_WHITESPACE, line=line_nr, fix=(lambda: fix_trailing_whitespace(ctx.path)))
 
                 # Check for Mixed Spaces and Tabs in Indentation
                 leading_whitespace = ""
@@ -369,7 +317,7 @@ class TextQualityCheck(FileCheck):
                     else:
                         break
                 if " " in leading_whitespace and "\t" in leading_whitespace:
-                    issues.append(E_MIXED_SPACES_TABS.at(file, line=line_nr))
+                    ctx.add_issue(E_MIXED_SPACES_TABS, line=line_nr)
 
                 # Character-level checks within the line
                 control_chars = set()
@@ -413,18 +361,8 @@ class TextQualityCheck(FileCheck):
 
                 if control_chars:
                     # Report all control characters found in the line
-                    issues.append(
-                        E_UNEXPECTED_CONTROL_CHARACTER.make(
-                            control_chars=", ".join(repr(c) for c in control_chars)
-                        ).at(file, line=line_nr)
-                    )
+                    ctx.add_issue(E_UNEXPECTED_CONTROL_CHARACTER, control_chars=", ".join(repr(c) for c in control_chars), line=line_nr)
 
                 if invisible_chars:
                     # Report all invisible characters found in the line
-                    issues.append(
-                        E_UNICODE_INVISIBLE.make(
-                            invisible_chars=", ".join(repr(c) for c in invisible_chars)
-                        ).at(file, line=line_nr)
-                    )
-
-        return issues
+                    ctx.add_issue(E_UNICODE_INVISIBLE, invisible_chars=", ".join(repr(c) for c in invisible_chars), line=line_nr)

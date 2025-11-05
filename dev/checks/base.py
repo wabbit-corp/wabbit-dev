@@ -5,7 +5,12 @@ from pathlib import Path
 import enum
 import uuid
 
+from dev.base import Module
 from dev.intrangeset import IntRangeSet
+
+# Assuming get_expected_file_properties exists and helps identify text files
+# If not, we might need a simpler text file check.
+from dev.file_properties import get_expected_file_properties, ExpectedFileProperties
 
 
 @dataclass(frozen=True)
@@ -34,6 +39,7 @@ class Severity(enum.Enum):
     ERROR = "error"
     CRITICAL = "critical"
 
+_KNOWN_TYPES = set()
 
 @dataclass(frozen=True)
 class IssueType:
@@ -46,13 +52,21 @@ class IssueType:
     severity: Severity = Severity.ERROR
 
     def __post_init__(self):
-        # Verify that the ID is a valid UUID
+        # Verify that the ID is a valid IssueType Id
         if not isinstance(self.id, str):
             raise ValueError(f"Invalid ID: {self.id}")
-        try:
-            uuid.UUID(self.id)
-        except ValueError:
-            raise ValueError(f"Invalid UUID: {self.id}")
+        if not self.id.startswith("E_"):
+            raise ValueError(f"IssueType ID must start with 'E_': {self.id}")
+        # Error ids must be [A-Z0-9_]
+        for c in self.id:
+            if not (c.isupper() or c.isdigit() or c == "_"):
+                raise ValueError(
+                    f"IssueType ID must contain only uppercase letters, digits, or underscores: {self.id}"
+                )
+        # Register the issue type
+        if self.id in _KNOWN_TYPES:
+            raise ValueError(f"Duplicate IssueType ID: {self.id}")
+        _KNOWN_TYPES.add(self.id)
 
     def make(self, **kwargs) -> "Issue":
         """
@@ -121,8 +135,11 @@ class IssueList:
                 self.issues[-1].issue_type == issue.issue_type
                 and self.issues[-1].data == issue.data
             ):
-                self.issues[-1].location = self.issues[-1].location + issue.location
-                return
+                if self.issues[-1].location and issue.location:
+                    if self.issues[-1].location.path != issue.location.path:
+                        return
+
+                    self.issues[-1].location = self.issues[-1].location + issue.location
         self.issues.append(issue)
 
     def __iter__(self):
@@ -140,6 +157,14 @@ class IssueList:
                 self.append(issue)
         else:
             self.issues.extend(issues)
+
+
+class CheckFailedWithReportedIssues(Exception):
+    """
+    Exception raised when a check fails with reported issues.
+    """
+    def __init__(self) -> None:
+        super().__init__("Check failed with reported issues.")
 
 
 class CoarseProjectType(enum.Enum):
@@ -164,31 +189,75 @@ class CoarseFileScope(enum.Enum):
     BUILD_TEMP = "build"  # e.g., temporary build files (NOT config files)
 
 
+class Check(Module, abc.ABC):
+    pass
+
+
+E_GENERIC_READ_ERROR = IssueType("E_GENERIC_READ_ERROR", "Could not read the file: {error} in {check_name}.")
+
+
 @dataclass(frozen=True)
 class FileContext:
+    check_name: str
+    path: Path
+    issues: IssueList = field(default_factory=IssueList)
     project_type: CoarseProjectType | None = None
     file_scope: CoarseFileScope | None = None
 
+    def add_issue(self, tpe: IssueType, line: int | None = None, fix: Callable[[], None] | None = None, **kwargs) -> None:
+        issue = tpe.make(**kwargs).at(self.path, line=line)
+        if fix:
+            issue.fix = fix
+        self.issues.append(issue)
 
-class RepoCheck(abc.ABC):
+    @property
+    def is_file(self) -> bool:
+        return self.path.is_file()
+
+    @property
+    def expected_properties(self) -> ExpectedFileProperties:
+        props = get_expected_file_properties(self.path)
+        if props is None:
+            return ExpectedFileProperties()
+        return props
+
+    def read_text(self: 'FileContext', issue_type: IssueType | None = None) -> str:
+        try:
+            return self.path.read_text(encoding="utf-8")
+        except (IOError, OSError) as e:
+            self.issues.append(E_GENERIC_READ_ERROR.make(
+                error=f"I/O error: {e}", check_name=self.check_name).at(self.path))
+            raise CheckFailedWithReportedIssues()
+        except UnicodeDecodeError as e:
+            self.issues.append(E_GENERIC_READ_ERROR.make(
+                error=f"UTF-8 decode error: {e}", check_name=self.check_name).at(self.path))
+            raise CheckFailedWithReportedIssues()
+        except Exception as e:
+            self.issues.append(E_GENERIC_READ_ERROR.make(
+                error=f"Unexpected error: {e}", check_name=self.check_name).at(self.path))
+            raise CheckFailedWithReportedIssues()
+
+
+class FileCheck(Check):
+    @abc.abstractmethod
+    def check(self, ctx: FileContext):
+        raise NotImplementedError()
+
+
+class RepoCheck(Check):
     @abc.abstractmethod
     def check(self, path: Path, project: Any) -> List[Issue]:
         raise NotImplementedError()
 
 
-class ProjectCheck(abc.ABC):
+class ProjectCheck(Check):
     @abc.abstractmethod
     def check(self, path: Path, project: Any) -> List[Issue]:
         raise NotImplementedError()
 
 
-class FileCheck(abc.ABC):
+class DirectoryCheck(Check):
     @abc.abstractmethod
-    def check(self, path: Path, ctx: FileContext = FileContext()) -> List[Issue]:
+    def check(self, ctx: FileContext):
         raise NotImplementedError()
 
-
-class DirectoryCheck(abc.ABC):
-    @abc.abstractmethod
-    def check(self, path: Path, ctx: FileContext = FileContext()) -> List[Issue]:
-        raise NotImplementedError()

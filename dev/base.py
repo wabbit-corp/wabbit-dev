@@ -4,7 +4,9 @@ from dev.messages import error
 import traceback
 from types import TracebackType
 import enum
+import abc
 
+from mu.exec import ExecutionContext
 
 class Callback:
     pass
@@ -72,3 +74,54 @@ class Scope:
                         fn()
                     except Exception as e:
                         error(f"Error during deferred execution: {e}")
+
+
+class Module(abc.ABC):
+
+    def register_script_commands(self, ctx: ExecutionContext) -> None:
+        pass
+
+    @staticmethod
+    def load_modules() -> dict[str, "Module"]:
+        from importlib import import_module
+        from pathlib import Path
+        import inspect
+
+        dev_dir = Path(__file__).parent
+
+        packages = [
+            ("dev.checks", dev_dir / "checks")
+        ]
+
+        # Get the file location of base.py to discover all checks
+        modules: dict[str, Module] = {}
+
+        for package, package_dir in packages:
+            for path in package_dir.iterdir():
+                if path.is_file() and path.suffix == ".py" :
+                    module = import_module(f"{package}.{path.stem}")
+                    for name, obj in vars(module).items():
+                        if isinstance(obj, type) and issubclass(obj, Module):
+                            if inspect.isabstract(obj):
+                                continue
+
+                            # Check if it has an immediate abc.ABC parent
+                            skip = False
+                            for base in obj.__bases__:
+                                if base is Module:
+                                    continue
+                                if base is abc.ABC:
+                                    skip = True
+                                    break
+                            if skip:
+                                continue
+
+                            try:
+                                # print(f"Loading module: {name}")
+                                modules[name] = obj()  # assumes no-arg ctor
+                            except TypeError:
+                                # print(f"Skipping module (needs args): {name}")
+                                # skip or handle modules that need args
+                                pass
+
+        return modules

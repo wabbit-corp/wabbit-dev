@@ -13,18 +13,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
+from mu.exec import ExecutionContext
+
 from dev.checks.base import FileCheck, IssueType, IssueList, FileContext
 
 
-E_DEBUG_CODE = IssueType(
-    "e077b2db-073b-465d-99a4-3c0e7ae44462",
-    "Possible leftover debug statement: '{snippet}'.",
-)
-
-E_STALE_TODO = IssueType(
-    "332cbb53-ffec-4d80-b2a1-b5a23abbce7a",
-    "Stale TODO/FIXME comment: '{snippet}'.",
-)
+E_DEBUG_CODE = IssueType("E_DEBUG_CODE", "Possible leftover debug statement.")
+E_STALE_TODO = IssueType("E_STALE_TODO", "Stale TODO/FIXME comment.")
 
 
 class StaleCodeCheck(FileCheck):
@@ -37,42 +32,29 @@ class StaleCodeCheck(FileCheck):
         #     r"(//\s*console\.log|#\s*print\(|//\s*System\.out\.println)", re.IGNORECASE
         # )
 
-    def check(self, path: Path, ctx: FileContext = FileContext()) -> List:
-        if not path.is_file():
-            return []
+    def register_script_commands(self, ctx: ExecutionContext) -> None:
+        def stale_code_todo_age_days(val: int) -> int:
+            self.todo_age_days = val
+            return self.todo_age_days
+        ctx.register(name="checks/stale-todo/age-days", func=stale_code_todo_age_days)
 
-        issues = IssueList()
+
+    def check(self, ctx: FileContext):
+        if not ctx.path.is_file(): return
+        if not ctx.expected_properties.is_text: return
 
         try:
-            mtime = path.stat().st_mtime
+            mtime = ctx.path.stat().st_mtime
         except OSError:
             mtime = None
 
-        try:
-            with path.open("r", encoding="utf-8", errors="ignore") as f:
-                for ln, line in enumerate(f, 1):
-                    # if self.debug_re.search(line):
-                    #     issues.append(
-                    #         E_DEBUG_CODE.make(snippet=line.strip()[:40]).at(
-                    #             path, line=ln
-                    #         )
-                    #     )
-                    if self.todo_re.search(line):
-                        if mtime is not None:
-                            age_days = (datetime.now().timestamp() - mtime) / 86400.0
-                            if age_days >= self.todo_age_days:
-                                issues.append(
-                                    E_STALE_TODO.make(snippet=line.strip()[:40]).at(
-                                        path, line=ln
-                                    )
-                                )
-                        else:
-                            issues.append(
-                                E_STALE_TODO.make(snippet=line.strip()[:40]).at(
-                                    path, line=ln
-                                )
-                            )
-        except OSError:
-            pass
+        text = ctx.read_text(E_STALE_TODO)
 
-        return issues.issues
+        for ln, line in enumerate(text.splitlines(), 1):
+            if self.todo_re.search(line):
+                if mtime is not None:
+                    age_days = (datetime.now().timestamp() - mtime) / 86400.0
+                    if age_days >= self.todo_age_days:
+                        ctx.add_issue(E_STALE_TODO, line=ln)
+                else:
+                    ctx.add_issue(E_STALE_TODO, line=ln)

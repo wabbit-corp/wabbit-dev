@@ -22,6 +22,9 @@
 * [ ] Check License Consistency: Verify that the license specified in package manager files (e.g., license
       field in package.json, license classifier in setup.py) matches the license declared in the main LICENSE
       file in the repository root.
+* [ ] Check consistency of Github metadata with project files: Ensure that the repository name,
+      description, topics/tags, and homepage URL on GitHub align with the information provided
+      in the project's README and metadata files.
 """
 
 import re
@@ -44,43 +47,17 @@ from dev.checks.base import (
     IssueList,
 )
 
-E_MISSING_README = IssueType(
-    "d0b2162a-119d-4a0b-a4e4-ca8d1d6a40a8", "Missing README file"
-)
-E_README_NO_BANNER = IssueType(
-    "9a39b395-43d1-4c6f-b9ba-8d21496fac4e",
-    "README file does not contain a project banner",
-)
-E_README_NO_BADGES = IssueType(
-    "1631689a-8d5d-400e-a604-a1853f65c049", "README file does not contain badges"
-)
-E_README_NO_INSTALL = IssueType(
-    "c4f3b5a0-8d1e-4a2b-9c6d-7f3e1f2b5a8d",
-    "README file does not contain installation instructions",
-)
-E_README_NO_USAGE = IssueType(
-    "798866e6-feb5-4634-8954-188245c02a29",
-    "README file does not contain usage instructions",
-)
-E_README_NO_LICENSE = IssueType(
-    "4bd8af48-b638-4bf9-b0e1-4ca4b1932ac0",
-    "README file does not contain license information",
-)
-E_README_NO_CONTRIBUTING = IssueType(
-    "358e5d64-54a1-4fe5-9343-cad86552d4f2",
-    "README file does not contain contributing instructions",
-)
-
-E_MISSING_LICENSE = IssueType(
-    "c92b8c51-b0bb-464d-98fd-03b9d74d37be", "Missing LICENSE file"
-)
-E_MISSING_CLA = IssueType("9438a917-3202-42ad-ba34-7723dc477a45", "Missing CLA file")
-E_MISSING_CLA_SIMPLE = IssueType(
-    "e9908e2a-16df-4149-96c4-f48603978f5e", "Missing CLA explanations file"
-)
-E_MISSING_GITIGNORE = IssueType(
-    "9156d9e0-a4fc-40eb-82e0-26fc22391e8f", "Missing .gitignore file"
-)
+E_MISSING_README         = IssueType("E_MISSING_README", "Missing README file")
+E_README_NO_BANNER       = IssueType("E_README_NO_BANNER", "README file does not contain a project banner")
+E_README_NO_BADGES       = IssueType("E_README_NO_BADGES", "README file does not contain badges")
+E_README_NO_INSTALL      = IssueType("E_README_NO_INSTALL", "README file does not contain installation instructions")
+E_README_NO_USAGE        = IssueType("E_README_NO_USAGE", "README file does not contain usage instructions")
+E_README_NO_LICENSE      = IssueType("E_README_NO_LICENSE", "README file does not contain license information")
+E_README_NO_CONTRIBUTING = IssueType("E_README_NO_CONTRIBUTING", "README file does not contain contributing instructions")
+E_MISSING_LICENSE        = IssueType("E_MISSING_LICENSE", "Missing LICENSE file")
+E_MISSING_CLA            = IssueType("E_MISSING_CLA", "Missing CLA file")
+E_MISSING_CLA_SIMPLE     = IssueType("E_MISSING_CLA_SIMPLE", "Missing CLA explanations file")
+E_MISSING_GITIGNORE      = IssueType("E_MISSING_GITIGNORE", "Missing .gitignore file")
 
 
 class GenericProjectStructureCheck(ProjectCheck):

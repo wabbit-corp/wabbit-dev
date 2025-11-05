@@ -15,12 +15,13 @@ from dev.checks.base import (
     IssueType,
     FileContext,
     IssueList,
+    CheckFailedWithReportedIssues
 )
 from dev.config import load_config, Config, Project
 from dev.messages import error, info, warning
 
 E_GITIGNORE_WITHOUT_REPO = IssueType(
-    "bc9220ba-b4f1-4062-81bd-36b65e91d7ad",
+    "E_GITIGNORE_WITHOUT_REPO",
     "Gitignore file found without a git repository.",
 )
 
@@ -33,80 +34,45 @@ def check_main(
     """
     Main function to run checks on the project.
     """
-    from dev.checks.base import RepoCheck, FileCheck, DirectoryCheck
-    from dev.checks.text_quality import TextQualityCheck
-    from dev.checks.identifier_uniqueness import UniqueIdentifiersCheck
-    from dev.checks.file_paths import (
-        FilenameLengthCheck,
-        SensitiveFilenameCheck,
-        FilenamePropertiesCheck,
-        NamingConventionCheck,
-        SymlinkTargetCheck,
-        CaseConflictCheck,
-    )
-    from dev.checks.project_files import GenericProjectStructureCheck
-    from dev.checks.code_linting import (
-        PythonFormattingCheck,
-        KotlinFormattingCheck,
-        CppFormattingCheck,
-        PurescriptFormattingCheck,
-        CSharpFormattingCheck,
-    )
-    from dev.checks.code_stale import StaleCodeCheck
+    from dev.checks.base import Check, RepoCheck, FileCheck, DirectoryCheck, ProjectCheck
+    from importlib import import_module
 
-    from dev.checks.dependencies import PythonRequirementsPinnedCheck
+    # Get the file location of base.py to discover all checks
+    all_checks: Dict[str, Check] = {}
 
-    # from dev.checks.file_duplicates import DuplicateFileCheck
-    # from dev.checks.large_files import LargeFileCheck
-    # from dev.checks.repo_contributors import ContributorEmailCheck
-    # from dev.checks.repo_properties import DefaultBranchCheck
-    from dev.checks.secrets import (
-        HighEntropyStringCheck,
-        HardcodedAbsolutePathCheck,
-        HardcodedCredentialCheck,
-        HardcodedInternalHostnameIpCheck,
-        HardcodedUrlCheck
-    )
+    pkg = "dev.checks"
+    checks_dir = Path(__file__).parent.parent / "checks"
+    for path in checks_dir.iterdir():
+        if path.is_file() and path.suffix == ".py" and path.stem not in {"__init__", "base"}:
+            module = import_module(f"{pkg}.{path.stem}")
+            for name, obj in vars(module).items():
+                if obj is RepoCheck or obj is FileCheck or obj is DirectoryCheck or obj is ProjectCheck:
+                    continue
+                if isinstance(obj, type) and issubclass(obj, Check) and obj is not Check:
+                    try:
+                        # print(f"Loading check: {name}")
+                        all_checks[name] = obj()  # assumes no-arg ctor
+                    except TypeError:
+                        # print(f"Skipping check (needs args): {name}")
+                        # skip or handle checks that need args
+                        pass
 
-    all_checks: Dict[str, RepoCheck] = {
-        "text_quality": TextQualityCheck(),
-        "unique_identifiers": UniqueIdentifiersCheck(),
-        "file_name_length": FilenameLengthCheck(),
-        "sensitive_file_name": SensitiveFilenameCheck(),
-        "filename_properties": FilenamePropertiesCheck(),
-        "naming_convention": NamingConventionCheck(),
-        "symlink_target": SymlinkTargetCheck(),
-        "case_conflict": CaseConflictCheck(),
-        "project_structure": GenericProjectStructureCheck(),
-        "python_formatting": PythonFormattingCheck(),
-        "kotlin_formatting": KotlinFormattingCheck(),
-        "cpp_formatting": CppFormattingCheck(),
-        "purescript_formatting": PurescriptFormattingCheck(),
-        "csharp_formatting": CSharpFormattingCheck(),
-        "stale_code": StaleCodeCheck(),
-        "requirements_pinned": PythonRequirementsPinnedCheck(),
-        # "duplicate_files": DuplicateFileCheck(),
-        # "large_files": LargeFileCheck(),
-        # "contributor_emails": ContributorEmailCheck(),
-        # "default_branch": DefaultBranchCheck(),
-        "secrets": HighEntropyStringCheck(),
-        "hardcoded_absolute_path": HardcodedAbsolutePathCheck(),
-        "hardcoded_credential": HardcodedCredentialCheck(),
-        "hardcoded_internal_hostname_ip": HardcodedInternalHostnameIpCheck(),
-        "hardcoded_url": HardcodedUrlCheck(),
-    }
     for check_name in enabled_checks or []:
         if check_name not in all_checks:
             raise ValueError(f"Unknown check: {check_name}")
     check_set = set(enabled_checks) if enabled_checks else set(all_checks.keys())
 
-    all_checks = {k: v for k, v in all_checks.items() if k in check_set}
-    repo_checks = [v for k, v in all_checks.items() if isinstance(v, RepoCheck)]
-    project_checks = [v for k, v in all_checks.items() if isinstance(v, ProjectCheck)]
-    file_checks = [v for k, v in all_checks.items() if isinstance(v, FileCheck)]
-    dir_checks = [v for k, v in all_checks.items() if isinstance(v, DirectoryCheck)]
+    from dev.checks.base import _KNOWN_TYPES
+    print(f"Known Issue Types: {sorted(_KNOWN_TYPES)}")
 
-    config = load_config() if Path("./root.clj").exists() else None
+    all_checks = {k: v for k, v in all_checks.items() if k in check_set}
+    repo_checks : list[RepoCheck] = [v for k, v in all_checks.items() if isinstance(v, RepoCheck)]
+    project_checks : list[ProjectCheck] = [v for k, v in all_checks.items() if isinstance(v, ProjectCheck)]
+    file_checks : list[FileCheck] = [v for k, v in all_checks.items() if isinstance(v, FileCheck)]
+    dir_checks : list[DirectoryCheck] = [v for k, v in all_checks.items() if isinstance(v, DirectoryCheck)]
+
+    config_path = Path("./root.clj").absolute()
+    config = load_config() if config_path.exists() else None
     if config is None:
         warning(
             "No config file found. Some checks may not have sufficient context to run."
@@ -139,13 +105,49 @@ def check_main(
         if not path.exists():
             raise ValueError(f"Path does not exist: {path}")
 
+    disabled_checks: dict[str, pathspec.PathSpec] = {}
+    if config is not None:
+        disabled_error_names = set(error_name for error_name, _ in config.disabled_checks)
+        for error_name in disabled_error_names:
+            patterns = [pattern for ename, pattern in config.disabled_checks if ename == error_name]
+
+            if error_name == '*':
+                for known_error in _KNOWN_TYPES:
+                    disabled_checks[known_error] = pathspec.PathSpec.from_lines(
+                        pathspec.patterns.gitwildmatch.GitWildMatchPattern, patterns
+                    )
+                continue
+
+            assert error_name in _KNOWN_TYPES, f"Unknown error type in disabled_checks: {error_name}"
+            disabled_checks[error_name] = pathspec.PathSpec.from_lines(
+                pathspec.patterns.gitwildmatch.GitWildMatchPattern, patterns
+            )
+
+    print(f"Disabled checks: {disabled_checks}")
+
+    def is_check_disabled(issue: Issue) -> bool:
+        if issue.issue_type.id not in disabled_checks:
+            return False
+        spec = disabled_checks[issue.issue_type.id]
+        if issue.location is None:
+            return False
+        path = issue.location.path.absolute()
+        rel_path = path.relative_to(config_path.parent)
+        # print(f"Checking if {rel_path} is ignored for {issue.issue_type.id} by {spec.patterns}")
+        return spec.match_file(str(rel_path))
+
     def report(issue: Issue | IssueList | List) -> None:
         if isinstance(issue, IssueList) or isinstance(issue, list):
             for i in issue:
                 report(i)
             return
 
+        if is_check_disabled(issue): return
+
         msg = ""
+
+        msg += "[{issue_type}] ".format(issue_type=issue.issue_type.id)
+        msg += "(fixable) " if issue.fix else ""
 
         if issue.location is not None:
             msg += str(issue.location.path)
@@ -159,7 +161,11 @@ def check_main(
         else:
             msg += "> "
 
-        msg += issue.issue_type.message.format(**(issue.data or {}))
+        try:
+            msg += issue.issue_type.message.format(**(issue.data or {}))
+        except Exception as e:
+            error(f"Error formatting issue message: {e} with type: {issue.issue_type} and data: {issue.data}")
+            msg += issue.issue_type.message
 
         data_str = (
             ", ".join(f"{k}={v}" for k, v in issue.data.items() if v is not None)
@@ -168,8 +174,6 @@ def check_main(
         )
         if data_str:
             msg += f" ({data_str})"
-
-        msg += " (fixable)" if issue.fix else ""
 
         error(msg)
 
@@ -239,12 +243,8 @@ def check_main(
                 )
 
                 for check in repo_checks:
-                    issues = check.check(repo)
+                    issues = check.check(repo.root, project=project)
                     report(issues)
-
-            for check in dir_checks:
-                issues = check.check(path)
-                report(issues)
 
             if (path / ".gitignore").exists():
                 if repo is None:
@@ -252,6 +252,17 @@ def check_main(
                 else:
                     ignore = read_gitignore(path / ".gitignore")
                     repo = repo.with_ignore(ignore)
+
+            accumulated_issues = IssueList()
+            for check in dir_checks:
+                # FIXME: File Context?
+                ctx = FileContext(path=path, check_name=check.__class__.__name__)
+                try:
+                    check.check(ctx=ctx)
+                except CheckFailedWithReportedIssues as e:
+                    pass  # Issues already reported in context
+                accumulated_issues.extend(ctx.issues)
+            report(accumulated_issues)
 
             for child in path.iterdir():
                 if repo is not None:
@@ -263,16 +274,21 @@ def check_main(
         else:
             file_scope = project.get_coarse_file_scope(path) if project else None
             project_type = project.coarse_project_type if project else None
-            ctx = FileContext(
-                project_type=project_type,
-                file_scope=file_scope,
-            )
 
             accumulated_issues = IssueList()
             for check in file_checks:
                 # print(f"Checking {path} with {check} {ctx}")
-                issues = check.check(path, ctx=ctx)
-                accumulated_issues.extend(issues)
+                ctx = FileContext(
+                    check_name=check.__class__.__name__,
+                    path=path,
+                    project_type=project_type,
+                    file_scope=file_scope,
+                )
+                try:
+                    check.check(ctx=ctx)
+                except CheckFailedWithReportedIssues as e:
+                    pass  # Issues already reported in context
+                accumulated_issues.extend(ctx.issues)
             for issue in accumulated_issues:
                 report([issue])
                 if issue.fix and fix:

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import dataclasses
 from dataclasses import dataclass
 from enum import Enum
@@ -15,6 +15,7 @@ from dev.checks.base import CoarseFileScope, CoarseProjectType
 from mu.types import SAtom, SStr, SDoc
 from mu.parser import sexpr
 from mu.exec import ExecutionContext, Quoted, eval_sexpr
+from dev.base import Module
 
 ################################################################################
 # Ownership Type
@@ -631,6 +632,8 @@ class Config:
         default_factory=OrderedDict
     )
 
+    disabled_checks: List[Tuple[str, str]] = dataclasses.field(default_factory=list)
+
 
 def load_config() -> Config:
     with open(CONFIG_FILE, "rt", encoding="utf-8") as f:
@@ -641,9 +644,17 @@ def load_config() -> Config:
     config = Config(raw=root)
     ctx = ExecutionContext()
 
+    modules = Module.load_modules()
+    for module in modules.values():
+        module.register_script_commands(ctx)
+
     ctx.env["true"] = True
     ctx.env["false"] = False
     ctx.env["null"] = None
+
+    @ctx.register(name="checks/disable")
+    def disable_check(error_name: str, pathspec: str):
+        config.disabled_checks.append((error_name, pathspec))
 
     @ctx.register(name="define")
     def define(name: Quoted[SAtom], value: Any):

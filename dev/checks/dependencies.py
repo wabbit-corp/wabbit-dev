@@ -19,34 +19,31 @@ from dev.checks.base import FileCheck, IssueType, IssueList, FileContext
 
 
 E_UNPINNED_DEPENDENCY = IssueType(
-    "55ed8276-45a1-4f16-8b43-287e247424e0",
-    "Dependency '{line}' is not version pinned.",
+    "E_UNPINNED_DEPENDENCY",
+    "Dependency '{dep}' is not version pinned.",
 )
 
 
 class PythonRequirementsPinnedCheck(FileCheck):
     """Ensure entries in ``requirements.txt`` are version pinned."""
 
-    def check(self, path: Path, ctx: FileContext = FileContext()) -> List:
-        if path.name != "requirements.txt" or not path.is_file():
-            return []
+    def check(self, ctx: FileContext):
+        if not ctx.path.is_file(): return
+        if ctx.path.name != "requirements.txt": return
 
-        issues = IssueList()
-        with path.open() as f:
-            for ln, raw in enumerate(f, 1):
-                line = raw.strip()
-                if not line or line.startswith("#"):
-                    continue
-                try:
-                    req = Requirement(line)
-                except Exception:
-                    continue
+        text = ctx.read_text(E_UNPINNED_DEPENDENCY)
+        for ln, raw in enumerate(text.splitlines(), 1):
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                req = Requirement(line)
+            except Exception:
+                continue
 
-                if not req.specifier:
-                    issues.append(
-                        E_UNPINNED_DEPENDENCY.make(line=line).at(path, line=ln)
-                    )
-                    continue
+            if not req.specifier:
+                ctx.add_issue(E_UNPINNED_DEPENDENCY, dep=line, path=ctx.path, line_number=ln)
+                continue
 
             #     # consider pinned only if there is exactly one == specifier
             #     if len(req.specifier) != 1:
@@ -57,4 +54,3 @@ class PythonRequirementsPinnedCheck(FileCheck):
             #     if spec.operator != "==" and spec.operator != "===":
             #         issues.append(E_UNPINNED_DEPENDENCY.make(line=line).at(path, line=ln))
 
-        return issues.issues

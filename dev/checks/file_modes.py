@@ -2,6 +2,8 @@
 
 """
 * [x] Check that there are no unnecessary executable file modes.
+* [ ] Check that there are no executable files that lack a shebang line (i.e. a file is marked executable but probably shouldn't be, or it needs a shebang).
+* [ ] Check that files that are supposed to be executable (e.g., scripts) have the correct executable permissions.
 """
 
 import os
@@ -77,7 +79,7 @@ def is_elf_exe_mach(filepath):
         return None
 
 
-assert is_elf_exe_mach("trufflehog")
+# assert is_elf_exe_mach("trufflehog")
 
 
 def is_executable(filepath):
