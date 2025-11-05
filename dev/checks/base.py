@@ -39,7 +39,9 @@ class Severity(enum.Enum):
     ERROR = "error"
     CRITICAL = "critical"
 
+
 _KNOWN_TYPES = set()
+
 
 @dataclass(frozen=True)
 class IssueType:
@@ -163,6 +165,7 @@ class CheckFailedWithReportedIssues(Exception):
     """
     Exception raised when a check fails with reported issues.
     """
+
     def __init__(self) -> None:
         super().__init__("Check failed with reported issues.")
 
@@ -193,7 +196,9 @@ class Check(Module, abc.ABC):
     pass
 
 
-E_GENERIC_READ_ERROR = IssueType("E_GENERIC_READ_ERROR", "Could not read the file: {error} in {check_name}.")
+E_GENERIC_READ_ERROR = IssueType(
+    "E_GENERIC_READ_ERROR", "Could not read the file: {error} in {check_name}."
+)
 
 
 @dataclass(frozen=True)
@@ -204,7 +209,13 @@ class FileContext:
     project_type: CoarseProjectType | None = None
     file_scope: CoarseFileScope | None = None
 
-    def add_issue(self, tpe: IssueType, line: int | None = None, fix: Callable[[], None] | None = None, **kwargs) -> None:
+    def add_issue(
+        self,
+        tpe: IssueType,
+        line: int | None = None,
+        fix: Callable[[], None] | None = None,
+        **kwargs,
+    ) -> None:
         issue = tpe.make(**kwargs).at(self.path, line=line)
         if fix:
             issue.fix = fix
@@ -221,20 +232,29 @@ class FileContext:
             return ExpectedFileProperties()
         return props
 
-    def read_text(self: 'FileContext', issue_type: IssueType | None = None) -> str:
+    def read_text(self: "FileContext", issue_type: IssueType | None = None) -> str:
         try:
             return self.path.read_text(encoding="utf-8")
         except (IOError, OSError) as e:
-            self.issues.append(E_GENERIC_READ_ERROR.make(
-                error=f"I/O error: {e}", check_name=self.check_name).at(self.path))
+            self.issues.append(
+                E_GENERIC_READ_ERROR.make(
+                    error=f"I/O error: {e}", check_name=self.check_name
+                ).at(self.path)
+            )
             raise CheckFailedWithReportedIssues()
         except UnicodeDecodeError as e:
-            self.issues.append(E_GENERIC_READ_ERROR.make(
-                error=f"UTF-8 decode error: {e}", check_name=self.check_name).at(self.path))
+            self.issues.append(
+                E_GENERIC_READ_ERROR.make(
+                    error=f"UTF-8 decode error: {e}", check_name=self.check_name
+                ).at(self.path)
+            )
             raise CheckFailedWithReportedIssues()
         except Exception as e:
-            self.issues.append(E_GENERIC_READ_ERROR.make(
-                error=f"Unexpected error: {e}", check_name=self.check_name).at(self.path))
+            self.issues.append(
+                E_GENERIC_READ_ERROR.make(
+                    error=f"Unexpected error: {e}", check_name=self.check_name
+                ).at(self.path)
+            )
             raise CheckFailedWithReportedIssues()
 
 
@@ -260,4 +280,3 @@ class DirectoryCheck(Check):
     @abc.abstractmethod
     def check(self, ctx: FileContext):
         raise NotImplementedError()
-

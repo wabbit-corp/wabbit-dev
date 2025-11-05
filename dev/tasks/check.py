@@ -15,7 +15,7 @@ from dev.checks.base import (
     IssueType,
     FileContext,
     IssueList,
-    CheckFailedWithReportedIssues
+    CheckFailedWithReportedIssues,
 )
 from dev.config import load_config, Config, Project
 from dev.messages import error, info, warning
@@ -34,42 +34,6 @@ def check_main(
     """
     Main function to run checks on the project.
     """
-    from dev.checks.base import Check, RepoCheck, FileCheck, DirectoryCheck, ProjectCheck
-    from importlib import import_module
-
-    # Get the file location of base.py to discover all checks
-    all_checks: Dict[str, Check] = {}
-
-    pkg = "dev.checks"
-    checks_dir = Path(__file__).parent.parent / "checks"
-    for path in checks_dir.iterdir():
-        if path.is_file() and path.suffix == ".py" and path.stem not in {"__init__", "base"}:
-            module = import_module(f"{pkg}.{path.stem}")
-            for name, obj in vars(module).items():
-                if obj is RepoCheck or obj is FileCheck or obj is DirectoryCheck or obj is ProjectCheck:
-                    continue
-                if isinstance(obj, type) and issubclass(obj, Check) and obj is not Check:
-                    try:
-                        # print(f"Loading check: {name}")
-                        all_checks[name] = obj()  # assumes no-arg ctor
-                    except TypeError:
-                        # print(f"Skipping check (needs args): {name}")
-                        # skip or handle checks that need args
-                        pass
-
-    for check_name in enabled_checks or []:
-        if check_name not in all_checks:
-            raise ValueError(f"Unknown check: {check_name}")
-    check_set = set(enabled_checks) if enabled_checks else set(all_checks.keys())
-
-    from dev.checks.base import _KNOWN_TYPES
-    print(f"Known Issue Types: {sorted(_KNOWN_TYPES)}")
-
-    all_checks = {k: v for k, v in all_checks.items() if k in check_set}
-    repo_checks : list[RepoCheck] = [v for k, v in all_checks.items() if isinstance(v, RepoCheck)]
-    project_checks : list[ProjectCheck] = [v for k, v in all_checks.items() if isinstance(v, ProjectCheck)]
-    file_checks : list[FileCheck] = [v for k, v in all_checks.items() if isinstance(v, FileCheck)]
-    dir_checks : list[DirectoryCheck] = [v for k, v in all_checks.items() if isinstance(v, DirectoryCheck)]
 
     config_path = Path("./root.clj").absolute()
     config = load_config() if config_path.exists() else None
@@ -105,25 +69,66 @@ def check_main(
         if not path.exists():
             raise ValueError(f"Path does not exist: {path}")
 
+    # Gather checks
+    from dev.checks.base import (
+        Check,
+        RepoCheck,
+        FileCheck,
+        DirectoryCheck,
+        ProjectCheck,
+        Check,
+    )
+    from importlib import import_module
+    from dev.checks.base import _KNOWN_TYPES
+
+    # Get the file location of base.py to discover all checks
+    if config is not None:
+        all_checks: Dict[str, Check] = {}
+        for check_name, check in config.modules.items():
+            if isinstance(check, Check):
+                all_checks[check_name] = check
+        for check_name in enabled_checks or []:
+            if check_name not in all_checks:
+                raise ValueError(f"Unknown check: {check_name}")
+        check_set = set(enabled_checks) if enabled_checks else set(all_checks.keys())
+        all_checks = {k: v for k, v in all_checks.items() if k in check_set}
+        repo_checks: list[RepoCheck] = [
+            v for k, v in all_checks.items() if isinstance(v, RepoCheck)
+        ]
+        project_checks: list[ProjectCheck] = [
+            v for k, v in all_checks.items() if isinstance(v, ProjectCheck)
+        ]
+        file_checks: list[FileCheck] = [
+            v for k, v in all_checks.items() if isinstance(v, FileCheck)
+        ]
+        dir_checks: list[DirectoryCheck] = [
+            v for k, v in all_checks.items() if isinstance(v, DirectoryCheck)
+        ]
+
     disabled_checks: dict[str, pathspec.PathSpec] = {}
     if config is not None:
-        disabled_error_names = set(error_name for error_name, _ in config.disabled_checks)
-        for error_name in disabled_error_names:
-            patterns = [pattern for ename, pattern in config.disabled_checks if ename == error_name]
+        patterns_by_error_name: Dict[str, List[str]] = {}
+        for error_name, pattern in config.disabled_checks:
+            assert isinstance(error_name, str), f"Expected string, got {type(error_name)}"
+            assert isinstance(pattern, str), f"Expected string, got {type(pattern)}"
+            assert error_name in _KNOWN_TYPES or error_name == "*", f"Unknown error type in disabled_checks: {repr(error_name)}"
 
-            if error_name == '*':
+            if error_name == "*":
                 for known_error in _KNOWN_TYPES:
-                    disabled_checks[known_error] = pathspec.PathSpec.from_lines(
-                        pathspec.patterns.gitwildmatch.GitWildMatchPattern, patterns
-                    )
-                continue
+                    if known_error not in patterns_by_error_name:
+                        patterns_by_error_name[known_error] = []
+                    patterns_by_error_name[known_error].append(pattern)
+            else:
+                if error_name not in patterns_by_error_name:
+                    patterns_by_error_name[error_name] = []
+                patterns_by_error_name[error_name].append(pattern)
 
-            assert error_name in _KNOWN_TYPES, f"Unknown error type in disabled_checks: {error_name}"
+        for error_name, patterns in patterns_by_error_name.items():
             disabled_checks[error_name] = pathspec.PathSpec.from_lines(
                 pathspec.patterns.gitwildmatch.GitWildMatchPattern, patterns
             )
 
-    print(f"Disabled checks: {disabled_checks}")
+    # print(f"Disabled checks: {disabled_checks}")
 
     def is_check_disabled(issue: Issue) -> bool:
         if issue.issue_type.id not in disabled_checks:
@@ -133,8 +138,9 @@ def check_main(
             return False
         path = issue.location.path.absolute()
         rel_path = path.relative_to(config_path.parent)
-        # print(f"Checking if {rel_path} is ignored for {issue.issue_type.id} by {spec.patterns}")
-        return spec.match_file(str(rel_path))
+        result = spec.match_file(str(rel_path))
+        # print(f"Checking if {rel_path} is ignored for {issue.issue_type.id} by {[p.pattern for p in spec.patterns]}: {result}")
+        return result
 
     def report(issue: Issue | IssueList | List) -> None:
         if isinstance(issue, IssueList) or isinstance(issue, list):
@@ -142,7 +148,8 @@ def check_main(
                 report(i)
             return
 
-        if is_check_disabled(issue): return
+        if is_check_disabled(issue):
+            return
 
         msg = ""
 
@@ -164,7 +171,9 @@ def check_main(
         try:
             msg += issue.issue_type.message.format(**(issue.data or {}))
         except Exception as e:
-            error(f"Error formatting issue message: {e} with type: {issue.issue_type} and data: {issue.data}")
+            error(
+                f"Error formatting issue message: {e} with type: {issue.issue_type} and data: {issue.data}"
+            )
             msg += issue.issue_type.message
 
         data_str = (
@@ -289,9 +298,10 @@ def check_main(
                 except CheckFailedWithReportedIssues as e:
                     pass  # Issues already reported in context
                 accumulated_issues.extend(ctx.issues)
+
             for issue in accumulated_issues:
                 report([issue])
-                if issue.fix and fix:
+                if issue.fix and fix and is_check_disabled(issue) is False:
                     info(f"Fixing")
                     issue.fix()
 

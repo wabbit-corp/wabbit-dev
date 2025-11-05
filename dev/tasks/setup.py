@@ -504,7 +504,11 @@ USED_COMMIT_MESSAGES = {}
 
 
 def commit_repo_changes(
-    project: Project, repo: Repo, openai_key: str = None, interactive: bool = True, add_files: bool = True
+    project: Project,
+    repo: Repo,
+    openai_key: str = None,
+    interactive: bool = True,
+    add_files: bool = True,
 ) -> None:
     """
     Example function that:
@@ -927,8 +931,8 @@ def setup(mode: RepoSetupMode) -> None:
     )
     if any_gradle:
         gradle_build = render_template(
-            ctx.build_template,
-            kotlin_version=ctx.config.plugins["kotlin-jvm"].version)
+            ctx.build_template, kotlin_version=ctx.config.plugins["kotlin-jvm"].version
+        )
         dev.io.write_text_file(Path("build.gradle.kts"), gradle_build)
 
         gradle_subprojects = [

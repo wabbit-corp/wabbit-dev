@@ -65,18 +65,36 @@ class FilenameLengthCheck(FileCheck):
         actual_length = len(filename)
         if actual_length <= self.max_length:
             return []
-        ctx.add_issue(E_FILENAME_TOO_LONG, max_length=self.max_length, actual_length=actual_length)
+        ctx.add_issue(
+            E_FILENAME_TOO_LONG, max_length=self.max_length, actual_length=actual_length
+        )
 
 
 # Common sensitive filename patterns (lowercase for case-insensitive matching)
 # Using simple substring checks for broader matching
 DEFAULT_SENSITIVE_FILENAME_PATTERNS: Set[str] = {
-    "private_key", "privatekey",
-    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
-    "credential", "password", "secret", "token",
-    "authkey", "access_key", "session_key", "api_key",
-    ".env", ".htpasswd", "config.json", "settings.json",  # Be careful with generic names
-    "backup", ".bak", ".swp", ".swo",  # Potential accidental commits
+    "private_key",
+    "privatekey",
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "credential",
+    "password",
+    "secret",
+    "token",
+    "authkey",
+    "access_key",
+    "session_key",
+    "api_key",
+    ".env",
+    ".htpasswd",
+    "config.json",
+    "settings.json",  # Be careful with generic names
+    "backup",
+    ".bak",
+    ".swp",
+    ".swo",  # Potential accidental commits
 }
 
 
@@ -117,18 +135,43 @@ class SensitiveFilenameCheck(FileCheck):
 
 # Windows reserved filenames (case-insensitive, without extension)
 WINDOWS_RESERVED_NAMES: Set[str] = {
-    "CON", "PRN", "AUX", "NUL",
-    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
 }
 
 # Characters often problematic in shells or cross-platform environments
 # Excludes common path separators / and \ which are handled by Path objects
 DEFAULT_PROBLEMATIC_FILENAME_CHARS: Set[str] = set("*?:[]$&;|<>!`\"'()")
 
-E_PROBLEMATIC_FILENAME_CHARS = IssueType("E_PROBLEMATIC_FILENAME_CHARS", "Filename contains problematic characters: {chars}.")
-E_NON_ASCII_FILENAME = IssueType("E_NON_ASCII_FILENAME", "Filename contains non-ASCII characters.")
-E_RESERVED_FILENAME = IssueType("E_RESERVED_FILENAME", "Filename is a reserved name on Windows.")
+E_PROBLEMATIC_FILENAME_CHARS = IssueType(
+    "E_PROBLEMATIC_FILENAME_CHARS", "Filename contains problematic characters: {chars}."
+)
+E_NON_ASCII_FILENAME = IssueType(
+    "E_NON_ASCII_FILENAME", "Filename contains non-ASCII characters."
+)
+E_RESERVED_FILENAME = IssueType(
+    "E_RESERVED_FILENAME", "Filename is a reserved name on Windows."
+)
 
 
 class FilenamePropertiesCheck(FileCheck):
@@ -171,7 +214,10 @@ class FilenamePropertiesCheck(FileCheck):
             char for char in filename if char in self.problematic_chars
         }
         if found_problematic:
-            ctx.add_issue(E_PROBLEMATIC_FILENAME_CHARS, chars=", ".join(sorted(list(found_problematic))))
+            ctx.add_issue(
+                E_PROBLEMATIC_FILENAME_CHARS,
+                chars=", ".join(sorted(list(found_problematic))),
+            )
 
         # 2. Check for non-ASCII characters
         if self.check_non_ascii and not filename.isascii():
@@ -230,10 +276,11 @@ class NamingConventionCheck(FileCheck):
         description = rule.get("description", "expected format")
 
         if pattern and not pattern.match(filename_stem):
-            ctx.add_issue(E_FILE_NAMING_CONVENTION,
-                    file_type=f"'{extension}' files",
-                    reason=f"does not match expected pattern ({description})",
-                )
+            ctx.add_issue(
+                E_FILE_NAMING_CONVENTION,
+                file_type=f"'{extension}' files",
+                reason=f"does not match expected pattern ({description})",
+            )
 
 
 E_SYMLINK_POINTS_ABSOLUTE = IssueType(
@@ -266,7 +313,11 @@ class SymlinkTargetCheck(FileCheck):
 
         # 1. Check if target is absolute
         if self.check_absolute and target_path.is_absolute():
-            ctx.add_issue(E_SYMLINK_POINTS_ABSOLUTE, link_name=ctx.path.name, target=target_path_str)
+            ctx.add_issue(
+                E_SYMLINK_POINTS_ABSOLUTE,
+                link_name=ctx.path.name,
+                target=target_path_str,
+            )
 
         # 2. Check if target exists (relative to the link's location)
         # Note: resolve() can fail if the link is broken deeper in the chain
@@ -280,7 +331,9 @@ class SymlinkTargetCheck(FileCheck):
             if not os.path.lexists(
                 absolute_target
             ):  # lexists checks link target without following
-                ctx.add_issue(E_SYMLINK_BROKEN, link_name=ctx.path.name, target=target_path_str)
+                ctx.add_issue(
+                    E_SYMLINK_BROKEN, link_name=ctx.path.name, target=target_path_str
+                )
             # More robust check: Check if path.resolve() works without error AND exists
             # try:
             #     resolved_target = path.resolve(strict=True) # strict=True raises error if broken
@@ -297,6 +350,7 @@ E_CASE_CONFLICTING_FILENAME = IssueType(
     "E_CASE_CONFLICTING_FILENAME",
     "Directory '{directory}' contains filenames differing only by case: {conflicting_files}.",
 )
+
 
 class CaseConflictCheck(DirectoryCheck):
     """
@@ -316,7 +370,6 @@ class CaseConflictCheck(DirectoryCheck):
             if name_lower not in filenames_lower_map:
                 filenames_lower_map[name_lower] = []
             filenames_lower_map[name_lower].append(name)
-
 
         for name_lower, original_names in filenames_lower_map.items():
             if len(original_names) > 1:

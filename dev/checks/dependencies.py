@@ -28,8 +28,10 @@ class PythonRequirementsPinnedCheck(FileCheck):
     """Ensure entries in ``requirements.txt`` are version pinned."""
 
     def check(self, ctx: FileContext):
-        if not ctx.path.is_file(): return
-        if ctx.path.name != "requirements.txt": return
+        if not ctx.path.is_file():
+            return
+        if ctx.path.name != "requirements.txt":
+            return
 
         text = ctx.read_text(E_UNPINNED_DEPENDENCY)
         for ln, raw in enumerate(text.splitlines(), 1):
@@ -42,7 +44,9 @@ class PythonRequirementsPinnedCheck(FileCheck):
                 continue
 
             if not req.specifier:
-                ctx.add_issue(E_UNPINNED_DEPENDENCY, dep=line, path=ctx.path, line_number=ln)
+                ctx.add_issue(
+                    E_UNPINNED_DEPENDENCY, dep=line, path=ctx.path, line_number=ln
+                )
                 continue
 
             #     # consider pinned only if there is exactly one == specifier
@@ -53,4 +57,3 @@ class PythonRequirementsPinnedCheck(FileCheck):
             #     spec = next(iter(req.specifier))
             #     if spec.operator != "==" and spec.operator != "===":
             #         issues.append(E_UNPINNED_DEPENDENCY.make(line=line).at(path, line=ln))
-

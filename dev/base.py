@@ -8,6 +8,7 @@ import abc
 
 from mu.exec import ExecutionContext
 
+
 class Callback:
     pass
 
@@ -89,16 +90,14 @@ class Module(abc.ABC):
 
         dev_dir = Path(__file__).parent
 
-        packages = [
-            ("dev.checks", dev_dir / "checks")
-        ]
+        packages = [("dev.checks", dev_dir / "checks")]
 
         # Get the file location of base.py to discover all checks
         modules: dict[str, Module] = {}
 
         for package, package_dir in packages:
             for path in package_dir.iterdir():
-                if path.is_file() and path.suffix == ".py" :
+                if path.is_file() and path.suffix == ".py":
                     module = import_module(f"{package}.{path.stem}")
                     for name, obj in vars(module).items():
                         if isinstance(obj, type) and issubclass(obj, Module):

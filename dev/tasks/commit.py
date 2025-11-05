@@ -19,7 +19,6 @@ def commit(project_name: str) -> None:
             error(f"Project {project_name} does not exist")
             return
 
-
         from dev.tasks.setup import commit_repo_changes
 
         try:
@@ -34,7 +33,7 @@ def commit(project_name: str) -> None:
             repo=repo,
             openai_key=config.openai_key,
             interactive=True,
-            add_files=True
+            add_files=True,
         )
 
     # repo = Repo(path)

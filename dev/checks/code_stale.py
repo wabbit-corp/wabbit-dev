@@ -36,12 +36,14 @@ class StaleCodeCheck(FileCheck):
         def stale_code_todo_age_days(val: int) -> int:
             self.todo_age_days = val
             return self.todo_age_days
+
         ctx.register(name="checks/stale-todo/age-days", func=stale_code_todo_age_days)
 
-
     def check(self, ctx: FileContext):
-        if not ctx.path.is_file(): return
-        if not ctx.expected_properties.is_text: return
+        if not ctx.path.is_file():
+            return
+        if not ctx.expected_properties.is_text:
+            return
 
         try:
             mtime = ctx.path.stat().st_mtime

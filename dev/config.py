@@ -634,6 +634,8 @@ class Config:
 
     disabled_checks: List[Tuple[str, str]] = dataclasses.field(default_factory=list)
 
+    modules: Dict[str, Module] = dataclasses.field(default_factory=dict)
+
 
 def load_config() -> Config:
     with open(CONFIG_FILE, "rt", encoding="utf-8") as f:
@@ -647,6 +649,7 @@ def load_config() -> Config:
     modules = Module.load_modules()
     for module in modules.values():
         module.register_script_commands(ctx)
+    config.modules = modules
 
     ctx.env["true"] = True
     ctx.env["false"] = False

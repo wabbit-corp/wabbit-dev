@@ -45,11 +45,11 @@ def llmcopy(paths: List[str]) -> None:
             buf.write("\n\n")
 
     for path in paths:
-        if '*' not in path:
+        if "*" not in path:
             go(Path(path))
         else:
             # Use rglob to handle wildcards
-            for p in Path('.').rglob(path):
+            for p in Path(".").rglob(path):
                 go(p)
 
     # copy to clipboard

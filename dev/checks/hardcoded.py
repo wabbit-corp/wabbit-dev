@@ -32,7 +32,7 @@ from dev.checks.base import (
     IntRangeSet,
     FileContext,
     IssueList,
-    E_GENERIC_READ_ERROR
+    E_GENERIC_READ_ERROR,
 )
 
 # Assuming get_expected_file_properties exists and helps identify text files
@@ -108,7 +108,9 @@ INTERNAL_HOSTNAME_REGEX: Pattern[str] = re.compile(
 )
 
 
-E_HARDCODED_ABSOLUTE_PATH = IssueType("E_HARDCODED_ABSOLUTE_PATH", "Found hardcoded absolute path: '{path_found}'.")
+E_HARDCODED_ABSOLUTE_PATH = IssueType(
+    "E_HARDCODED_ABSOLUTE_PATH", "Found hardcoded absolute path: '{path_found}'."
+)
 
 
 class HardcodedAbsolutePathCheck(FileCheck):
@@ -116,24 +118,44 @@ class HardcodedAbsolutePathCheck(FileCheck):
     Scans text files for hardcoded absolute paths.
     """
 
-    def __init__(self, abs_path_regex: Pattern[str] = DEFAULT_ABS_PATH_REGEX, url_regex: Pattern[str] = DEFAULT_URL_REGEX):
+    def __init__(
+        self,
+        abs_path_regex: Pattern[str] = DEFAULT_ABS_PATH_REGEX,
+        url_regex: Pattern[str] = DEFAULT_URL_REGEX,
+    ):
         self.abs_path_regex = abs_path_regex
         self.url_regex = url_regex
 
     def _is_part_of_url(self, path_match: re.Match, line: str) -> bool:
         """Checks if the found path is likely part of a URL."""
         for url_match in self.url_regex.finditer(line):
-            if url_match.start() <= path_match.start() and url_match.end() >= path_match.end():
+            if (
+                url_match.start() <= path_match.start()
+                and url_match.end() >= path_match.end()
+            ):
                 # Check if the scheme is 'file://' specifically for paths
-                if path_match.group(0).startswith('/') and "file://" in url_match.group(0)[:path_match.start() + 7]: # crude check
-                    return False # It's a file URI, so it IS an absolute path issue.
+                if (
+                    path_match.group(0).startswith("/")
+                    and "file://" in url_match.group(0)[: path_match.start() + 7]
+                ):  # crude check
+                    return False  # It's a file URI, so it IS an absolute path issue.
                 return True
         return False
 
     def check(self, ctx: FileContext):
-        if not ctx.path.is_file(): return
-        if not ctx.expected_properties.is_text: return
-        if ctx.path.suffix.lower() in {".md", ".markdown", ".txt", ".rst", ".json", ".yaml", ".yml"}:
+        if not ctx.path.is_file():
+            return
+        if not ctx.expected_properties.is_text:
+            return
+        if ctx.path.suffix.lower() in {
+            ".md",
+            ".markdown",
+            ".txt",
+            ".rst",
+            ".json",
+            ".yaml",
+            ".yml",
+        }:
             return
         if ctx.path.name.lower() in {"dockerfile"}:
             return
@@ -146,15 +168,29 @@ class HardcodedAbsolutePathCheck(FileCheck):
             line_number += 1
             # Skip comment lines for common comment types to reduce FPs
             stripped_line = line.strip()
-            if stripped_line.startswith("#") or stripped_line.startswith("//") or stripped_line.startswith("--") or stripped_line.startswith(";") or stripped_line.startswith("/*") or stripped_line.startswith("*"):
-                if not ("file://" in stripped_line and self.abs_path_regex.search(stripped_line)): # allow file:// in comments for now
-                        continue
+            if (
+                stripped_line.startswith("#")
+                or stripped_line.startswith("//")
+                or stripped_line.startswith("--")
+                or stripped_line.startswith(";")
+                or stripped_line.startswith("/*")
+                or stripped_line.startswith("*")
+            ):
+                if not (
+                    "file://" in stripped_line
+                    and self.abs_path_regex.search(stripped_line)
+                ):  # allow file:// in comments for now
+                    continue
 
             for match in self.abs_path_regex.finditer(line):
                 found_path = match.group(0)
                 # Further filter: avoid very short paths like "/" unless it's clearly problematic
-                if len(found_path) < 3 and found_path == "/": # Example: avoid flagging single "/"
-                    if not re.search(r"\s/\s", line): # only flag "/" if it is standalone, not e.g. "foo / bar"
+                if (
+                    len(found_path) < 3 and found_path == "/"
+                ):  # Example: avoid flagging single "/"
+                    if not re.search(
+                        r"\s/\s", line
+                    ):  # only flag "/" if it is standalone, not e.g. "foo / bar"
                         continue
 
                 # Avoid flagging paths within URLs (e.g. example.com/some/path)
@@ -163,14 +199,18 @@ class HardcodedAbsolutePathCheck(FileCheck):
 
                 # Avoid flagging if it is part of an XML namespace or similar constructs
                 if "xmlns:" in line or " xlink:" in line or " DTD " in line:
-                    if "/" in found_path and not found_path.startswith("/"): # e.g. schema/foo
+                    if "/" in found_path and not found_path.startswith(
+                        "/"
+                    ):  # e.g. schema/foo
                         continue
 
                 # Avoid flagging markdown link definitions like `[text](/abs/path)` if path is clearly a link target
                 if re.search(rf"\[[^\]]+\]\({re.escape(found_path)}\)", line):
                     continue
 
-                ctx.add_issue(E_HARDCODED_ABSOLUTE_PATH, path_found=found_path, line=line_number)
+                ctx.add_issue(
+                    E_HARDCODED_ABSOLUTE_PATH, path_found=found_path, line=line_number
+                )
 
 
 E_HARDCODED_URL = IssueType("E_HARDCODED_URL", "Found hardcoded URL: '{url_found}'.")
@@ -181,15 +221,27 @@ class HardcodedUrlCheck(FileCheck):
     Scans text files for hardcoded URLs.
     """
 
-    def __init__(self, url_regex: Pattern[str] = DEFAULT_URL_REGEX, allowed_domains: Optional[Set[str]] = None):
+    def __init__(
+        self,
+        url_regex: Pattern[str] = DEFAULT_URL_REGEX,
+        allowed_domains: Optional[Set[str]] = None,
+    ):
         self.url_regex = url_regex
         self.allowed_domains = allowed_domains if allowed_domains else set()
         # Add common public/documentation domains that are usually fine to hardcode
-        self.allowed_domains.update({
-            "www.w3.org", "xml.apache.org", "schemas.xmlsoap.org", "json-schema.org",
-            "example.com", "example.org", "example.net", "localhost", "127.0.0.1"
-        })
-
+        self.allowed_domains.update(
+            {
+                "www.w3.org",
+                "xml.apache.org",
+                "schemas.xmlsoap.org",
+                "json-schema.org",
+                "example.com",
+                "example.org",
+                "example.net",
+                "localhost",
+                "127.0.0.1",
+            }
+        )
 
     def _get_domain(self, url_string: str) -> Optional[str]:
         try:
@@ -198,8 +250,8 @@ class HardcodedUrlCheck(FileCheck):
             if protocol_end == -1:
                 if url_string.startswith("www."):
                     start = 4
-                else: # no protocol, no www. -> might be a relative path or not a full URL we care about here
-                    return None # or treat as non-standard URL
+                else:  # no protocol, no www. -> might be a relative path or not a full URL we care about here
+                    return None  # or treat as non-standard URL
             else:
                 start = protocol_end + 3
 
@@ -215,19 +267,36 @@ class HardcodedUrlCheck(FileCheck):
                 return domain_port[:port_start].lower()
             return domain_port.lower()
         except Exception:
-            return None # Could not parse domain
+            return None  # Could not parse domain
 
     def check(self, ctx: FileContext):
-        if not ctx.path.is_file(): return
-        if not ctx.expected_properties.is_text: return
-        if ctx.path.suffix.lower() in {".md", ".markdown", ".txt", ".rst", ".json", ".yaml", ".yml"}:
+        if not ctx.path.is_file():
+            return
+        if not ctx.expected_properties.is_text:
+            return
+        if ctx.path.suffix.lower() in {
+            ".md",
+            ".markdown",
+            ".txt",
+            ".rst",
+            ".json",
+            ".yaml",
+            ".yml",
+        }:
             return
 
         text = ctx.read_text(E_HARDCODED_URL)
         for line_number, line in enumerate(text.splitlines(), start=1):
             # Skip comment lines for common comment types if desired for less noise
             stripped_line = line.strip()
-            if stripped_line.startswith("#") or stripped_line.startswith("//") or stripped_line.startswith("--") or stripped_line.startswith(";") or stripped_line.startswith("/*") or stripped_line.startswith("*"):
+            if (
+                stripped_line.startswith("#")
+                or stripped_line.startswith("//")
+                or stripped_line.startswith("--")
+                or stripped_line.startswith(";")
+                or stripped_line.startswith("/*")
+                or stripped_line.startswith("*")
+            ):
                 # However, URLs in comments can still be sensitive or point to internal resources.
                 # For now, let's check them but one might add a config to skip comments.
                 pass
@@ -246,16 +315,20 @@ class HardcodedUrlCheck(FileCheck):
                 # Avoid flagging URLs that are part of typical documentation or link markdowns
                 # if it's clearly a markdown link, it's often intentional.
                 # e.g. [text](http://example.com) or <http://example.com>
-                if re.search(rf"\[[^\]]+\]\({re.escape(url_found)}\)", line) or \
-                    re.search(rf"<({re.escape(url_found)})>", line):
+                if re.search(
+                    rf"\[[^\]]+\]\({re.escape(url_found)}\)", line
+                ) or re.search(rf"<({re.escape(url_found)})>", line):
                     # Could add more context checks here, e.g., if line is purely a comment
                     # For now, if it's a markdown link, assume it's for documentation
-                    pass # Still report, but one might want to filter these based on severity or context
+                    pass  # Still report, but one might want to filter these based on severity or context
 
                 ctx.add_issue(E_HARDCODED_URL, url_found=url_found, line=line_number)
 
 
-E_HARDCODED_CREDENTIAL = IssueType("E_HARDCODED_CREDENTIAL", "Found potential hardcoded credential near keyword '{keyword}'.")
+E_HARDCODED_CREDENTIAL = IssueType(
+    "E_HARDCODED_CREDENTIAL",
+    "Found potential hardcoded credential near keyword '{keyword}'.",
+)
 
 
 class HardcodedCredentialCheck(FileCheck):
@@ -264,55 +337,98 @@ class HardcodedCredentialCheck(FileCheck):
     This check is heuristic and may produce false positives or miss some credentials.
     """
 
-    def __init__(self, credential_regex: Pattern[str] = DEFAULT_CREDENTIAL_KEYWORDS_REGEX):
+    def __init__(
+        self, credential_regex: Pattern[str] = DEFAULT_CREDENTIAL_KEYWORDS_REGEX
+    ):
         self.credential_regex = credential_regex
         # Keywords that, if found alongside credential keywords, might indicate a false positive (e.g., config option names)
-        self.fp_indicators = {"example", "template", "default", "placeholder", "your_", "enter_", "_here", "config_"}
-
+        self.fp_indicators = {
+            "example",
+            "template",
+            "default",
+            "placeholder",
+            "your_",
+            "enter_",
+            "_here",
+            "config_",
+        }
 
     def check(self, ctx: FileContext):
-        if not ctx.is_file: return
-        if not ctx.expected_properties.is_text: return
+        if not ctx.is_file:
+            return
+        if not ctx.expected_properties.is_text:
+            return
 
         text = ctx.read_text(E_HARDCODED_CREDENTIAL)
         for line_number, line in enumerate(text.splitlines(), start=1):
             stripped_line = line.strip().lower()
 
             # Skip common comment lines unless they look like active config
-            if stripped_line.startswith("#") or stripped_line.startswith("//") or stripped_line.startswith("--") or stripped_line.startswith(";"):
-                if not ("=" in stripped_line or ":" in stripped_line): # if no assignment, likely a real comment
+            if (
+                stripped_line.startswith("#")
+                or stripped_line.startswith("//")
+                or stripped_line.startswith("--")
+                or stripped_line.startswith(";")
+            ):
+                if not (
+                    "=" in stripped_line or ":" in stripped_line
+                ):  # if no assignment, likely a real comment
                     continue
 
             # Basic check to avoid flagging the check's own definition or similar meta-code
-            if "e_hardcoded_credential" in stripped_line or "default_credential_keywords_regex" in stripped_line:
+            if (
+                "e_hardcoded_credential" in stripped_line
+                or "default_credential_keywords_regex" in stripped_line
+            ):
                 continue
 
             for match in self.credential_regex.finditer(line):
-                keyword_match = match.group(0) # The whole match including keyword and value
+                keyword_match = match.group(
+                    0
+                )  # The whole match including keyword and value
 
                 # Attempt to reduce false positives
                 value_part = match.group("credential_value")
                 if value_part:
                     lower_value = value_part.lower()
-                    if any(fp_ind in lower_value for fp_ind in self.fp_indicators) or \
-                        any(fp_ind in line[:match.start()].lower() for fp_ind in self.fp_indicators): # check context before match too
+                    if any(
+                        fp_ind in lower_value for fp_ind in self.fp_indicators
+                    ) or any(
+                        fp_ind in line[: match.start()].lower()
+                        for fp_ind in self.fp_indicators
+                    ):  # check context before match too
                         continue
-                    if lower_value in {"true", "false", "yes", "no", "null", "none", "''", '""'}: # common non-secret values
+                    if lower_value in {
+                        "true",
+                        "false",
+                        "yes",
+                        "no",
+                        "null",
+                        "none",
+                        "''",
+                        '""',
+                    }:  # common non-secret values
                         continue
-                    if "password" in lower_value and "example" in line.lower(): # if "example password"
+                    if (
+                        "password" in lower_value and "example" in line.lower()
+                    ):  # if "example password"
                         continue
 
                 # Heuristic: if the line contains variable placeholders like ${...} or <...>
                 if re.search(r"(\$\{.*?\})|(<.*?>)", line):
                     continue
 
-
-                ctx.add_issue(E_HARDCODED_CREDENTIAL,
+                ctx.add_issue(
+                    E_HARDCODED_CREDENTIAL,
                     keyword=match.group(0).split(":")[0].split("=")[0].strip(),
-                    line=line_number)
+                    line=line_number,
+                )
 
 
-E_HARDCODED_INTERNAL_HOSTNAME_IP = IssueType("E_HARDCODED_INTERNAL_HOSTNAME_IP", "Hardcoded internal hostname or IP address: '{host_or_ip}'.")
+E_HARDCODED_INTERNAL_HOSTNAME_IP = IssueType(
+    "E_HARDCODED_INTERNAL_HOSTNAME_IP",
+    "Hardcoded internal hostname or IP address: '{host_or_ip}'.",
+)
 
 
 class HardcodedInternalHostnameIpCheck(FileCheck):
@@ -330,18 +446,30 @@ class HardcodedInternalHostnameIpCheck(FileCheck):
     ):
         self.ip_regex = ip_regex
         self.hostname_regex = hostname_regex
-        self.url_regex = url_regex # To avoid flagging hostnames/IPs that are part of a public URL's path
-        self.allowed_ips = allowed_ips if allowed_ips else {"127.0.0.1", "::1"} # localhost is often fine
-        self.allowed_hostnames = allowed_hostnames if allowed_hostnames else {"localhost"}
-
+        self.url_regex = url_regex  # To avoid flagging hostnames/IPs that are part of a public URL's path
+        self.allowed_ips = (
+            allowed_ips if allowed_ips else {"127.0.0.1", "::1"}
+        )  # localhost is often fine
+        self.allowed_hostnames = (
+            allowed_hostnames if allowed_hostnames else {"localhost"}
+        )
 
     def _is_part_of_url_path(self, found_item: str, line: str) -> bool:
         """Checks if the found item is part of a path in a non-internal URL"""
         for url_match in self.url_regex.finditer(line):
             url_string = url_match.group(0).lower()
             # If the URL itself starts with an internal scheme or typical internal markers, it's not a public URL path
-            if any(marker in url_string for marker in ["http://localhost", "http://127.0.0.1", ".internal", ".local", "file://"]):
-                continue # This URL itself might be an issue, but not for *this* check if item is inside it
+            if any(
+                marker in url_string
+                for marker in [
+                    "http://localhost",
+                    "http://127.0.0.1",
+                    ".internal",
+                    ".local",
+                    "file://",
+                ]
+            ):
+                continue  # This URL itself might be an issue, but not for *this* check if item is inside it
 
             # Check if the found item is in the path part of a general URL
             # A bit simplistic: assumes `found_item` is not the domain itself
@@ -350,13 +478,15 @@ class HardcodedInternalHostnameIpCheck(FileCheck):
                 domain_part_end = url_string.find("/", schema_end + 3)
                 if domain_part_end != -1 and found_item in url_string[domain_part_end:]:
                     # Make sure 'found_item' is not the domain of the URL
-                    if not url_string[schema_end+3:].startswith(found_item):
+                    if not url_string[schema_end + 3 :].startswith(found_item):
                         return True
         return False
 
     def check(self, ctx: FileContext):
-        if not ctx.path.is_file(): return
-        if not ctx.expected_properties.is_text: return
+        if not ctx.path.is_file():
+            return
+        if not ctx.expected_properties.is_text:
+            return
 
         if ctx.path.suffix.lower() in {".md", ".markdown", ".txt"}:
             return
@@ -364,7 +494,14 @@ class HardcodedInternalHostnameIpCheck(FileCheck):
         text = ctx.read_text(E_HARDCODED_INTERNAL_HOSTNAME_IP)
         for line_number, line in enumerate(text.splitlines(), start=1):
             stripped_line = line.strip()
-            if stripped_line.startswith("#") or stripped_line.startswith("//") or stripped_line.startswith("--") or stripped_line.startswith(";") or stripped_line.startswith("/*") or stripped_line.startswith("*"):
+            if (
+                stripped_line.startswith("#")
+                or stripped_line.startswith("//")
+                or stripped_line.startswith("--")
+                or stripped_line.startswith(";")
+                or stripped_line.startswith("/*")
+                or stripped_line.startswith("*")
+            ):
                 # IPs/hostnames in comments can still be sensitive.
                 pass
 
@@ -377,10 +514,16 @@ class HardcodedInternalHostnameIpCheck(FileCheck):
                     continue
 
                 # Avoid flagging IPs in common documentation/example patterns
-                if "example" in line.lower() and ("ip address" in line.lower() or "e.g." in line.lower()):
+                if "example" in line.lower() and (
+                    "ip address" in line.lower() or "e.g." in line.lower()
+                ):
                     continue
 
-                ctx.add_issue(E_HARDCODED_INTERNAL_HOSTNAME_IP, host_or_ip=ip_found, line=line_number)
+                ctx.add_issue(
+                    E_HARDCODED_INTERNAL_HOSTNAME_IP,
+                    host_or_ip=ip_found,
+                    line=line_number,
+                )
 
             # Check for Hostnames
             for match in self.hostname_regex.finditer(line):
@@ -391,10 +534,16 @@ class HardcodedInternalHostnameIpCheck(FileCheck):
                     continue
 
                     # Avoid flagging hostnames in common documentation/example patterns
-                if "example" in line.lower() and ("hostname" in line.lower() or "e.g." in line.lower()):
+                if "example" in line.lower() and (
+                    "hostname" in line.lower() or "e.g." in line.lower()
+                ):
                     continue
                 # Avoid flagging if it's part of an email address
                 if "@" + hostname_found in line:
                     continue
 
-                ctx.add_issue(E_HARDCODED_INTERNAL_HOSTNAME_IP, host_or_ip=hostname_found, line=line_number)
+                ctx.add_issue(
+                    E_HARDCODED_INTERNAL_HOSTNAME_IP,
+                    host_or_ip=hostname_found,
+                    line=line_number,
+                )

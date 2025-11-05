@@ -164,17 +164,32 @@ def fix_trailing_whitespace(file: Path) -> None:
 MAX_CODE_LINE_LENGTH = 200  # Default maximum line length for code files
 
 
-E_NO_NEWLINE          = IssueType("E_NO_NEWLINE", "File does not end with a newline character.")
-E_BOM_AT_START        = IssueType("E_BOM_AT_START", "File starts with a UTF-8 BOM (Byte Order Mark).")
-E_LINE_ENDINGS        = IssueType("E_LINE_ENDINGS", "File contains incorrect line endings.")
-E_NOT_UTF8            = IssueType("E_NOT_UTF8", "File is not valid UTF-8 encoded.")
-E_GIT_CONFLICT_MARKER = IssueType("E_GIT_CONFLICT_MARKER", "File contains a Git conflict marker.")
-E_LINE_TOO_LONG       = IssueType("E_LINE_TOO_LONG", "Line exceeds maximum length.")
-E_TRAILING_WHITESPACE = IssueType("E_TRAILING_WHITESPACE", "Line contains trailing whitespace.")
-E_MIXED_SPACES_TABS   = IssueType("E_MIXED_SPACES_TABS", "Line contains mixed spaces and tabs in indentation.")
-E_UNICODE_HOMOGLYPH   = IssueType("E_UNICODE_HOMOGLYPH", "Line contains a non-ASCII letter (potential homoglyph).")
-E_UNICODE_INVISIBLE   = IssueType("E_UNICODE_INVISIBLE", "Line contains a potentially invisible or problematic Unicode character.")
-E_UNEXPECTED_CONTROL_CHARACTER = IssueType("E_UNEXPECTED_CONTROL_CHARACTER", "Line contains an unexpected control character.")
+E_NO_NEWLINE = IssueType("E_NO_NEWLINE", "File does not end with a newline character.")
+E_BOM_AT_START = IssueType(
+    "E_BOM_AT_START", "File starts with a UTF-8 BOM (Byte Order Mark)."
+)
+E_LINE_ENDINGS = IssueType("E_LINE_ENDINGS", "File contains incorrect line endings.")
+E_NOT_UTF8 = IssueType("E_NOT_UTF8", "File is not valid UTF-8 encoded.")
+E_GIT_CONFLICT_MARKER = IssueType(
+    "E_GIT_CONFLICT_MARKER", "File contains a Git conflict marker."
+)
+E_LINE_TOO_LONG = IssueType("E_LINE_TOO_LONG", "Line exceeds maximum length.")
+E_TRAILING_WHITESPACE = IssueType(
+    "E_TRAILING_WHITESPACE", "Line contains trailing whitespace."
+)
+E_MIXED_SPACES_TABS = IssueType(
+    "E_MIXED_SPACES_TABS", "Line contains mixed spaces and tabs in indentation."
+)
+E_UNICODE_HOMOGLYPH = IssueType(
+    "E_UNICODE_HOMOGLYPH", "Line contains a non-ASCII letter (potential homoglyph)."
+)
+E_UNICODE_INVISIBLE = IssueType(
+    "E_UNICODE_INVISIBLE",
+    "Line contains a potentially invisible or problematic Unicode character.",
+)
+E_UNEXPECTED_CONTROL_CHARACTER = IssueType(
+    "E_UNEXPECTED_CONTROL_CHARACTER", "Line contains an unexpected control character."
+)
 
 
 class TextQualityCheck(FileCheck):
@@ -198,17 +213,21 @@ class TextQualityCheck(FileCheck):
         }
 
     def check(self, ctx: FileContext):
-        if not ctx.path.is_file(): return
-        if ctx.path.is_symlink(): return
+        if not ctx.path.is_file():
+            return
+        if ctx.path.is_symlink():
+            return
 
         if ctx is not None:
             if ctx.file_scope == CoarseFileScope.BUILD_TEMP:
                 return
 
-        if not ctx.expected_properties.is_text: return
+        if not ctx.expected_properties.is_text:
+            return
 
         content_bytes = ctx.path.read_bytes()
-        if not content_bytes: return
+        if not content_bytes:
+            return
 
         ###################################################################
         # Byte-based checks (before decoding)
@@ -237,7 +256,9 @@ class TextQualityCheck(FileCheck):
 
         # Check Line Endings based on bytes (more robust than decoded text)
         if not ctx.expected_properties.is_crlf_native and b"\r\n" in content_bytes:
-            ctx.add_issue(E_LINE_ENDINGS, fix=(lambda: fix_line_endings(ctx.path, LineEnding.LF)))
+            ctx.add_issue(
+                E_LINE_ENDINGS, fix=(lambda: fix_line_endings(ctx.path, LineEnding.LF))
+            )
 
         if ctx.expected_properties.is_crlf_native:
             line_ending_counts = get_line_ending_counts(ctx.path)
@@ -245,7 +266,10 @@ class TextQualityCheck(FileCheck):
                 line_ending_counts[LineEnding.LF] > 0
                 or line_ending_counts[LineEnding.CR] > 0
             ):
-                ctx.add_issue(E_LINE_ENDINGS, fix=(lambda: fix_line_endings(ctx.path, LineEnding.CRLF)))
+                ctx.add_issue(
+                    E_LINE_ENDINGS,
+                    fix=(lambda: fix_line_endings(ctx.path, LineEnding.CRLF)),
+                )
 
         ###################################################################
         # Decoding and String-based checks
@@ -303,11 +327,20 @@ class TextQualityCheck(FileCheck):
                 ):
                     # Note: len() works on Unicode characters, not bytes. This is usually what's desired.
                     if len(line) > MAX_CODE_LINE_LENGTH:
-                        ctx.add_issue(E_LINE_TOO_LONG, actual=len(line), max=MAX_CODE_LINE_LENGTH, line=line_nr)
+                        ctx.add_issue(
+                            E_LINE_TOO_LONG,
+                            actual=len(line),
+                            max=MAX_CODE_LINE_LENGTH,
+                            line=line_nr,
+                        )
 
                 # Check for Trailing Whitespace
                 if line != line.rstrip(" \t"):
-                    ctx.add_issue(E_TRAILING_WHITESPACE, line=line_nr, fix=(lambda: fix_trailing_whitespace(ctx.path)))
+                    ctx.add_issue(
+                        E_TRAILING_WHITESPACE,
+                        line=line_nr,
+                        fix=(lambda: fix_trailing_whitespace(ctx.path)),
+                    )
 
                 # Check for Mixed Spaces and Tabs in Indentation
                 leading_whitespace = ""
@@ -361,8 +394,16 @@ class TextQualityCheck(FileCheck):
 
                 if control_chars:
                     # Report all control characters found in the line
-                    ctx.add_issue(E_UNEXPECTED_CONTROL_CHARACTER, control_chars=", ".join(repr(c) for c in control_chars), line=line_nr)
+                    ctx.add_issue(
+                        E_UNEXPECTED_CONTROL_CHARACTER,
+                        control_chars=", ".join(repr(c) for c in control_chars),
+                        line=line_nr,
+                    )
 
                 if invisible_chars:
                     # Report all invisible characters found in the line
-                    ctx.add_issue(E_UNICODE_INVISIBLE, invisible_chars=", ".join(repr(c) for c in invisible_chars), line=line_nr)
+                    ctx.add_issue(
+                        E_UNICODE_INVISIBLE,
+                        invisible_chars=", ".join(repr(c) for c in invisible_chars),
+                        line=line_nr,
+                    )

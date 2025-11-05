@@ -171,6 +171,7 @@ async def main() -> None:
 
         case "llmcopy":
             from dev.tasks.llmcopy import llmcopy
+
             llmcopy(args.path)
 
         case "jitpack":
@@ -222,7 +223,9 @@ async def main() -> None:
             from dev.tasks.commit import commit
 
             project_name = args.project[0]
-            assert isinstance(project_name, str), f"Expected str, got {type(project_name)}"
+            assert isinstance(
+                project_name, str
+            ), f"Expected str, got {type(project_name)}"
             commit(project_name)
 
         case "push":

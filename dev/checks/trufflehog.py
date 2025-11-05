@@ -23,7 +23,7 @@ from dev.checks.base import (
     IntRangeSet,
     FileContext,
     IssueList,
-    E_GENERIC_READ_ERROR
+    E_GENERIC_READ_ERROR,
 )
 
 # Assuming get_expected_file_properties exists and helps identify text files
@@ -62,6 +62,7 @@ E_HIGH_ENTROPY_STRING = IssueType(
     "E_HIGH_ENTROPY_STRING",
     "Found potential secret (Type: {type}, Entropy: {entropy:.3f}).",
 )
+
 
 class HighEntropyStringCheck(FileCheck):
     """
@@ -141,18 +142,18 @@ class HighEntropyStringCheck(FileCheck):
         return False
 
     def check(self, ctx: FileContext):
-        if not ctx.is_file: return
-        if not ctx.expected_properties.is_text: return
+        if not ctx.is_file:
+            return
+        if not ctx.expected_properties.is_text:
+            return
 
         text = ctx.read_text(E_HIGH_ENTROPY_STRING)
 
         for line_number, line in enumerate(text.splitlines()):
-            original_line = (line.strip())
+            original_line = line.strip()
 
             # 1. Find all URL spans in the current line
-            url_spans = [
-                (m.start(), m.end()) for m in self.url_regex.finditer(line)
-            ]
+            url_spans = [(m.start(), m.end()) for m in self.url_regex.finditer(line)]
 
             # 2. Find potential Base64 strings
             for match in self.b64_regex.finditer(line):
@@ -173,7 +174,12 @@ class HighEntropyStringCheck(FileCheck):
 
                 # 5. Check threshold and report
                 if b64_entropy > self.b64_threshold:
-                    ctx.add_issue(E_HIGH_ENTROPY_STRING, line=line_number, type="Base64", entropy=b64_entropy)
+                    ctx.add_issue(
+                        E_HIGH_ENTROPY_STRING,
+                        line=line_number,
+                        type="Base64",
+                        entropy=b64_entropy,
+                    )
                     # Don't check the same string multiple times if nested B64 patterns match
                     # Breaking here might miss overlapping valid secrets, careful
                     # break
@@ -197,5 +203,10 @@ class HighEntropyStringCheck(FileCheck):
 
                 # 9. Check threshold and report
                 if hex_entropy > self.hex_threshold:
-                    ctx.add_issue(E_HIGH_ENTROPY_STRING, line=line_number, type="Hex", entropy=hex_entropy)
+                    ctx.add_issue(
+                        E_HIGH_ENTROPY_STRING,
+                        line=line_number,
+                        type="Hex",
+                        entropy=hex_entropy,
+                    )
                     # break # Optional break
