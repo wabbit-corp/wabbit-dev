@@ -72,8 +72,19 @@ class KotlinFormattingCheck(FileCheck):
                 capture_output=True,
                 text=True,
             )
+
+            def fix():
+                try:
+                    subprocess.run(
+                        ["ktlint", "-F", str(ctx.path)],
+                        capture_output=True,
+                        text=True,
+                    )
+                except Exception as e:
+                    error(f"Failed to format {ctx.path}: {e}")
+
             if result.returncode != 0:
-                ctx.add_issue(E_KOTLIN_NOT_FORMATTED)
+                ctx.add_issue(E_KOTLIN_NOT_FORMATTED, fix=fix)
         except FileNotFoundError:
             ctx.add_issue(E_KTLINT_MISSING)
 
