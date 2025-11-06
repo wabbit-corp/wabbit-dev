@@ -392,6 +392,8 @@ def clean_text(text: str) -> str:
 def clean_gradle_build_text(text: str) -> str:
     while True:
         old_text = text
+        if text.startswith("\n"):
+            text = text[1:]
         text = re.sub(r"\n\s*\n", "\n\n", text)
         text = re.sub(r"\n{3,}", "\n\n", text)
         text = re.sub(r"\{\n\n", "{\n", text)
