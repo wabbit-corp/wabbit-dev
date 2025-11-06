@@ -67,8 +67,21 @@ def get_line_ending_counts(file: Path) -> Dict[LineEnding, int]:
 
     state = STATE_OUTSIDE
 
-    def update(byte: bytes):
+    def update(byte: int | bytes | None):
         nonlocal crlf_count, lf_count, cr_count, state
+
+        # Flush at EOF:
+        if byte is None:
+            if state == STATE_CR:
+                cr_count += 1
+            elif state == STATE_LF:
+                lf_count += 1
+            state = STATE_OUTSIDE
+            return
+        # If we got an int (typical when iterating bytes), normalize to a 1-byte bytes
+        if isinstance(byte, int):
+            byte = bytes((byte,))
+
         if state == STATE_OUTSIDE:
             if byte == b"\r":
                 state = STATE_CR
@@ -159,6 +172,62 @@ def fix_trailing_whitespace(file: Path) -> None:
     with file.open("wt", encoding="utf-8") as f:
         for line in lines:
             f.write(line.rstrip() + nl)
+
+
+def fix_mixed_spaces_tabs(
+    file: Path, tab_width: int = 4, prefer_tabs: bool = False
+) -> None:
+    """
+    Normalize *leading* indentation on lines that mix tabs and spaces.
+
+    - Assumes one tab == `tab_width` spaces (default 4).
+    - By default, rewrites mixed prefixes to all spaces with exact column preservation.
+    - If `prefer_tabs=True`, rewrites to tabs for full tab stops and spaces for the remainder.
+    - Preserves the file's detected newline style via `get_line_ending`.
+    """
+    nl = get_line_ending(file).value.decode("utf-8")
+
+    def split_leading_ws(s: str):
+        i = 0
+        while i < len(s) and s[i] in (" ", "\t"):
+            i += 1
+        return s[:i], s[i:]
+
+    def indent_columns(ws: str) -> int:
+        col = 0
+        for ch in ws:
+            if ch == "\t":
+                col += tab_width - (col % tab_width)
+            else:  # ' '
+                col += 1
+        return col
+
+    def render_indent(cols: int) -> str:
+        if prefer_tabs:
+            tabs, spaces = divmod(cols, tab_width)
+            return "\t" * tabs + " " * spaces
+        else:
+            return " " * cols
+
+    # Read and rewrite
+    with file.open("rt", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    changed = False
+    out: List[str] = []
+
+    for line in lines:
+        raw = line.rstrip("\r\n")  # normalize endings; we'll re-append `nl`
+        ws, rest = split_leading_ws(raw)
+        if " " in ws and "\t" in ws:
+            cols = indent_columns(ws)
+            ws = render_indent(cols)
+            changed = True
+        out.append(ws + rest + nl)
+
+    if changed:
+        with file.open("wt", encoding="utf-8") as f:
+            f.writelines(out)
 
 
 MAX_CODE_LINE_LENGTH = 200  # Default maximum line length for code files
@@ -350,7 +419,15 @@ class TextQualityCheck(FileCheck):
                     else:
                         break
                 if " " in leading_whitespace and "\t" in leading_whitespace:
-                    ctx.add_issue(E_MIXED_SPACES_TABS, line=line_nr)
+                    ctx.add_issue(
+                        E_MIXED_SPACES_TABS,
+                        line=line_nr,
+                        fix=(
+                            lambda: fix_mixed_spaces_tabs(
+                                ctx.path, tab_width=4, prefer_tabs=False
+                            )
+                        ),
+                    )
 
                 # Character-level checks within the line
                 control_chars = set()

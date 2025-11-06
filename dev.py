@@ -114,6 +114,9 @@ async def main() -> None:
     with commands("clean") as cmd:
         cmd.add_argument("project", type=str, nargs="?")
 
+    with commands("cloc") as cmd:
+        cmd.add_argument("project", type=str, nargs="?")
+
     with commands("status") as cmd:
         cmd.add_argument("project", type=str, nargs=1)
 
@@ -206,6 +209,11 @@ async def main() -> None:
             await publish_main(args.project)
 
         # TODO: review commands below
+
+        case "cloc":
+            from dev.tasks.cloc import cloc
+
+            cloc(args.project)
 
         case "clean":
             from dev.tasks.clean import clean

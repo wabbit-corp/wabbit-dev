@@ -109,9 +109,13 @@ def check_main(
     if config is not None:
         patterns_by_error_name: Dict[str, List[str]] = {}
         for error_name, pattern in config.disabled_checks:
-            assert isinstance(error_name, str), f"Expected string, got {type(error_name)}"
+            assert isinstance(
+                error_name, str
+            ), f"Expected string, got {type(error_name)}"
             assert isinstance(pattern, str), f"Expected string, got {type(pattern)}"
-            assert error_name in _KNOWN_TYPES or error_name == "*", f"Unknown error type in disabled_checks: {repr(error_name)}"
+            assert (
+                error_name in _KNOWN_TYPES or error_name == "*"
+            ), f"Unknown error type in disabled_checks: {repr(error_name)}"
 
             if error_name == "*":
                 for known_error in _KNOWN_TYPES:
@@ -176,13 +180,13 @@ def check_main(
             )
             msg += issue.issue_type.message
 
-        data_str = (
-            ", ".join(f"{k}={v}" for k, v in issue.data.items() if v is not None)
-            if issue.data
-            else ""
-        )
-        if data_str:
-            msg += f" ({data_str})"
+        # data_str = (
+        #     ", ".join(f"{k}={v}" for k, v in issue.data.items() if v is not None)
+        #     if issue.data
+        #     else ""
+        # )
+        # if data_str:
+        #     msg += f" ({data_str})"
 
         error(msg)
 

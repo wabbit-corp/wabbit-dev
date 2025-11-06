@@ -18,6 +18,7 @@ import math
 import os
 from pathlib import Path
 from typing import List, Set, Optional, Tuple, Pattern
+from bisect import bisect_right
 
 from mu.exec import ExecutionContext
 
@@ -37,29 +38,219 @@ from dev.checks.base import (
 
 # Assuming get_expected_file_properties exists and helps identify text files
 # If not, we might need a simpler text file check.
-from dev.file_properties import get_expected_file_properties, ExpectedFileProperties
+from dev.file_properties import (
+    get_expected_file_properties,
+    ExpectedFileProperties,
+    CommentStyle,
+    get_comment_style_for_file,
+)
 
-# Regex to find potential URLs. This is a common but not exhaustive pattern.
-# It looks for common schemes or www. and captures characters typical in URLs.
+# ----------------------------
+# Comment handling (core)
+# ----------------------------
+
+
+def _merge_spans(spans: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    """Merge overlapping/adjacent [start, end) spans."""
+    if not spans:
+        return []
+    spans = sorted(spans)
+    merged: List[Tuple[int, int]] = []
+    cs, ce = spans[0]
+    for s, e in spans[1:]:
+        if s <= ce:  # overlap or adjacent
+            ce = max(ce, e)
+        else:
+            merged.append((cs, ce))
+            cs, ce = s, e
+    merged.append((cs, ce))
+    return merged
+
+
+def _compute_comment_spans(
+    text: str, style: Optional[CommentStyle]
+) -> List[Tuple[int, int]]:
+    """
+    Quote-aware scan to compute comment spans for a given file based on CommentStyle.
+    Produces [start, end) ranges in *absolute* indices over the file text.
+    Handles:
+      - line comments per style.line_markers (to EOL, including the newline)
+      - block comments per style.block_markers (/* ... */, <!-- ... -->, etc.)
+      - rudimentary string handling: ', ", Python ''' and \""" with backslash escaping
+    """
+    if not style:
+        return []
+
+    line_markers: Tuple[str, ...] = tuple(
+        sorted(style.line_markers, key=len, reverse=True)
+    )
+    block_markers: Tuple[Tuple[str, str], ...] = tuple(
+        sorted(style.block_markers, key=lambda p: len(p[0]), reverse=True)
+    )
+
+    spans: List[Tuple[int, int]] = []
+    n = len(text)
+    i = 0
+
+    in_single = False
+    in_double = False
+    in_triple_single = False
+    in_triple_double = False
+
+    in_block = False
+    current_block_end = ""
+    block_start_idx = -1
+
+    def _in_any_quote() -> bool:
+        return in_single or in_double or in_triple_single or in_triple_double
+
+    while i < n:
+        # Inside block comment: consume until its terminator.
+        if in_block:
+            if current_block_end and text.startswith(current_block_end, i):
+                # Close block
+                spans.append((block_start_idx, i + len(current_block_end)))
+                i += len(current_block_end)
+                in_block = False
+                current_block_end = ""
+                block_start_idx = -1
+                continue
+            i += 1
+            continue
+
+        # Handle triple quotes first (Python)
+        if not _in_any_quote():
+            if text.startswith("'''", i):
+                in_triple_single = True
+                i += 3
+                continue
+            if text.startswith('"""', i):
+                in_triple_double = True
+                i += 3
+                continue
+        elif in_triple_single:
+            if text.startswith("'''", i):
+                in_triple_single = False
+                i += 3
+                continue
+            i += 1
+            continue
+        elif in_triple_double:
+            if text.startswith('"""', i):
+                in_triple_double = False
+                i += 3
+                continue
+            i += 1
+            continue
+
+        # Simple quotes with backslash escapes
+        ch = text[i]
+        if ch == "'" and not in_double:
+            if i == 0 or text[i - 1] != "\\":
+                in_single = not in_single
+            i += 1
+            continue
+        if ch == '"' and not in_single:
+            if i == 0 or text[i - 1] != "\\":
+                in_double = not in_double
+            i += 1
+            continue
+
+        if _in_any_quote():
+            i += 1
+            continue
+
+        # Try to open a block comment
+        opened = False
+        for start, end in block_markers:
+            if text.startswith(start, i):
+                in_block = True
+                current_block_end = end
+                block_start_idx = i
+                i += len(start)
+                opened = True
+                break
+        if opened:
+            continue
+
+        # Try to open a line comment (to end-of-line)
+        for lm in line_markers:
+            if text.startswith(lm, i):
+                eol = text.find("\n", i)
+                if eol == -1:
+                    eol = n
+                else:
+                    eol = (
+                        eol + 1
+                    )  # include newline so subsequent line offsets are natural
+                spans.append((i, eol))
+                i = eol
+                opened = True
+                break
+        if opened:
+            continue
+
+        i += 1
+
+    return _merge_spans(spans)
+
+
+def _position_in_spans_checker(spans: List[Tuple[int, int]]):
+    """
+    Return a predicate pos -> bool that is O(log N) using bisect, assuming merged non-overlapping spans.
+    """
+    if not spans:
+        return lambda _: False
+    starts = [s for s, _ in spans]
+    ends = [e for _, e in spans]
+
+    def _inside(pos: int) -> bool:
+        idx = bisect_right(starts, pos) - 1
+        return idx >= 0 and pos < ends[idx]
+
+    return _inside
+
+
+# Broader URL regex: includes scheme-relative URLs (//example.com/...), and avoids trailing quotes/parens.
 DEFAULT_URL_REGEX: Pattern[str] = re.compile(
-    r"""\b((?:https?|ftp|file|wss?|git|ssh)://|www\.|ftp\.)[-a-zA-Z0-9+&@#/%?=~_()|!:,.;]*[-a-zA-Z0-9+&@#/%=~_()|]""",
-    re.IGNORECASE,
+    r"""
+    \b(
+        (?:https?|wss?|ftp|file|git|ssh)://
+      | //[A-Za-z0-9][A-Za-z0-9.-]+\.[A-Za-z]{2,63}(?::\d+)?(?:/[^\s<>"')]+)?
+      | www\.
+      | ftp\.
+    )[^\s<>"']*[^\s<>"'.,);]
+    """,
+    re.VERBOSE | re.IGNORECASE,
 )
 
 # Regex for absolute paths
-# Unix-like: starts with / or ~
-# Windows: C:\, C:/, \\server\share, //server/share
+# - Windows drives: C:\ or C:/
+# - Windows UNC: \\server\share   (intentionally NOT matching //server/share to avoid XPath/URL FPs)
+# - Unix-like: selected roots (kept conservative), or home paths requiring a slash
 DEFAULT_ABS_PATH_REGEX: Pattern[str] = re.compile(
     r"""
     (?:
-        (?:\b[a-zA-Z]:[\\/])| # Windows drive letter like C:\ or C:/
-        (?:\\\\|//)[^\\/:\s]+[\\/][^\\/:\s]+| # UNC paths like \\server\share or //server/share
-        (?:\b/(?:usr|mnt|home|root|etc)(?:/[^/\0\s]+)*[/]?)| # Unix-like absolute paths starting with /
-        (?:~[/a-zA-Z0-9_.-]+) # Unix-like home directory paths like ~/documents
+        # Windows drive letter like C:\ or C:/
+        \b[a-zA-Z]:[\\/][^\s"'<>()]+
+
+      | # Windows UNC with backslashes only (avoid // to prevent URL/XPath FPs)
+        \\\\                                   # leading backslashes
+        (?![abfnrtv0'"xuU.])                   # NOT typical escape starts or '\.'
+        (?!u[0-9A-Fa-f]{4}\b)                  # NOT a \uXXXX escape
+        [A-Za-z0-9][A-Za-z0-9.-]{0,62}         # host: start alnum, then alnum, dot or hyphen
+        [\\/]
+        [A-Za-z0-9$][A-Za-z0-9._$-]{0,255}     # share: start alnum or $, then sane chars
+        (?:[\\/][^\s"'<>()]+)?                 # optional tail
+
+      | # Unix-like absolute paths from common roots
+        \b/(?:usr|mnt|home|root|etc)(?:/[^\s"'<>()]+)*
+
+      | # Home dir: ~ or ~user must be followed by a slash
+        ~(?:[A-Za-z_][A-Za-z0-9_-]{0,31})?/[^\s"'<>()]+
     )
-    (?<![:\w]) # Negative lookbehind to avoid matching parts of URLs like http://
     """,
-    re.VERBOSE | re.IGNORECASE,
+    re.VERBOSE,
 )
 
 # Regex for common credential keywords
@@ -127,18 +318,20 @@ class HardcodedAbsolutePathCheck(FileCheck):
         self.url_regex = url_regex
 
     def _is_part_of_url(self, path_match: re.Match, line: str) -> bool:
-        """Checks if the found path is likely part of a URL."""
-        for url_match in self.url_regex.finditer(line):
-            if (
-                url_match.start() <= path_match.start()
-                and url_match.end() >= path_match.end()
+        """Treat the path as 'inside a URL' if its start sits inside any URL span,
+        or immediately after (to tolerate a trailing quote/paren captured by the path regex).
+        """
+        ps, pe = path_match.start(), path_match.end()
+        for um in self.url_regex.finditer(line):
+            us, ue = um.start(), um.end()
+            if (us <= ps <= ue) or (
+                ps == ue
+                and pe <= ue + 2
+                and line[ue:pe] in {"'", '"', ")", "]", ">", ";", ","}
             ):
-                # Check if the scheme is 'file://' specifically for paths
-                if (
-                    path_match.group(0).startswith("/")
-                    and "file://" in url_match.group(0)[: path_match.start() + 7]
-                ):  # crude check
-                    return False  # It's a file URI, so it IS an absolute path issue.
+                # file:// is intentionally considered an absolute path issue
+                if um.group(0).lower().startswith("file://"):
+                    return False
                 return True
         return False
 
@@ -163,27 +356,20 @@ class HardcodedAbsolutePathCheck(FileCheck):
             return
 
         text = ctx.read_text(E_HARDCODED_ABSOLUTE_PATH)
+        comment_style = get_comment_style_for_file(ctx.path)
+        comment_spans = _compute_comment_spans(text, comment_style)
+        is_in_comment = _position_in_spans_checker(comment_spans)
 
-        for line_number, line in enumerate(text.splitlines(), start=1):
-            line_number += 1
-            # Skip comment lines for common comment types to reduce FPs
-            stripped_line = line.strip()
-            if (
-                stripped_line.startswith("#")
-                or stripped_line.startswith("//")
-                or stripped_line.startswith("--")
-                or stripped_line.startswith(";")
-                or stripped_line.startswith("/*")
-                or stripped_line.startswith("*")
-            ):
-                if not (
-                    "file://" in stripped_line
-                    and self.abs_path_regex.search(stripped_line)
-                ):  # allow file:// in comments for now
-                    continue
-
+        # Use keepends=True so we can compute absolute offsets correctly
+        offset = 0
+        for line_number, line in enumerate(text.splitlines(keepends=True), start=1):
             for match in self.abs_path_regex.finditer(line):
                 found_path = match.group(0)
+                # Skip anything inside comments (per policy: paths allowed in comments)
+                abs_start = offset + match.start()
+                if is_in_comment(abs_start):
+                    continue
+
                 # Further filter: avoid very short paths like "/" unless it's clearly problematic
                 if (
                     len(found_path) < 3 and found_path == "/"
@@ -211,6 +397,8 @@ class HardcodedAbsolutePathCheck(FileCheck):
                 ctx.add_issue(
                     E_HARDCODED_ABSOLUTE_PATH, path_found=found_path, line=line_number
                 )
+
+            offset += len(line)
 
 
 E_HARDCODED_URL = IssueType("E_HARDCODED_URL", "Found hardcoded URL: '{url_found}'.")
@@ -285,24 +473,20 @@ class HardcodedUrlCheck(FileCheck):
         }:
             return
 
+        comment_style = get_comment_style_for_file(ctx.path)
         text = ctx.read_text(E_HARDCODED_URL)
-        for line_number, line in enumerate(text.splitlines(), start=1):
-            # Skip comment lines for common comment types if desired for less noise
-            stripped_line = line.strip()
-            if (
-                stripped_line.startswith("#")
-                or stripped_line.startswith("//")
-                or stripped_line.startswith("--")
-                or stripped_line.startswith(";")
-                or stripped_line.startswith("/*")
-                or stripped_line.startswith("*")
-            ):
-                # However, URLs in comments can still be sensitive or point to internal resources.
-                # For now, let's check them but one might add a config to skip comments.
-                pass
 
+        comment_spans = _compute_comment_spans(text, comment_style)
+        is_in_comment = _position_in_spans_checker(comment_spans)
+
+        offset = 0
+        for line_number, line in enumerate(text.splitlines(keepends=True), start=1):
             for match in self.url_regex.finditer(line):
                 url_found = match.group(0)
+                # Skip anything inside comments (per policy: URLs allowed in comments)
+                abs_start = offset + match.start()
+                if is_in_comment(abs_start):
+                    continue
 
                 # Skip if it's a 'file://' URL, as that's an absolute path issue
                 if url_found.startswith("file://"):
@@ -324,105 +508,7 @@ class HardcodedUrlCheck(FileCheck):
 
                 ctx.add_issue(E_HARDCODED_URL, url_found=url_found, line=line_number)
 
-
-E_HARDCODED_CREDENTIAL = IssueType(
-    "E_HARDCODED_CREDENTIAL",
-    "Found potential hardcoded credential near keyword '{keyword}'.",
-)
-
-
-class HardcodedCredentialCheck(FileCheck):
-    """
-    Scans text files for potential hardcoded credentials using keyword matching.
-    This check is heuristic and may produce false positives or miss some credentials.
-    """
-
-    def __init__(
-        self, credential_regex: Pattern[str] = DEFAULT_CREDENTIAL_KEYWORDS_REGEX
-    ):
-        self.credential_regex = credential_regex
-        # Keywords that, if found alongside credential keywords, might indicate a false positive (e.g., config option names)
-        self.fp_indicators = {
-            "example",
-            "template",
-            "default",
-            "placeholder",
-            "your_",
-            "enter_",
-            "_here",
-            "config_",
-        }
-
-    def check(self, ctx: FileContext):
-        if not ctx.is_file:
-            return
-        if not ctx.expected_properties.is_text:
-            return
-
-        text = ctx.read_text(E_HARDCODED_CREDENTIAL)
-        for line_number, line in enumerate(text.splitlines(), start=1):
-            stripped_line = line.strip().lower()
-
-            # Skip common comment lines unless they look like active config
-            if (
-                stripped_line.startswith("#")
-                or stripped_line.startswith("//")
-                or stripped_line.startswith("--")
-                or stripped_line.startswith(";")
-            ):
-                if not (
-                    "=" in stripped_line or ":" in stripped_line
-                ):  # if no assignment, likely a real comment
-                    continue
-
-            # Basic check to avoid flagging the check's own definition or similar meta-code
-            if (
-                "e_hardcoded_credential" in stripped_line
-                or "default_credential_keywords_regex" in stripped_line
-            ):
-                continue
-
-            for match in self.credential_regex.finditer(line):
-                keyword_match = match.group(
-                    0
-                )  # The whole match including keyword and value
-
-                # Attempt to reduce false positives
-                value_part = match.group("credential_value")
-                if value_part:
-                    lower_value = value_part.lower()
-                    if any(
-                        fp_ind in lower_value for fp_ind in self.fp_indicators
-                    ) or any(
-                        fp_ind in line[: match.start()].lower()
-                        for fp_ind in self.fp_indicators
-                    ):  # check context before match too
-                        continue
-                    if lower_value in {
-                        "true",
-                        "false",
-                        "yes",
-                        "no",
-                        "null",
-                        "none",
-                        "''",
-                        '""',
-                    }:  # common non-secret values
-                        continue
-                    if (
-                        "password" in lower_value and "example" in line.lower()
-                    ):  # if "example password"
-                        continue
-
-                # Heuristic: if the line contains variable placeholders like ${...} or <...>
-                if re.search(r"(\$\{.*?\})|(<.*?>)", line):
-                    continue
-
-                ctx.add_issue(
-                    E_HARDCODED_CREDENTIAL,
-                    keyword=match.group(0).split(":")[0].split("=")[0].strip(),
-                    line=line_number,
-                )
+            offset += len(line)
 
 
 E_HARDCODED_INTERNAL_HOSTNAME_IP = IssueType(
