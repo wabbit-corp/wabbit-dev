@@ -375,6 +375,33 @@ def setup_purescript_project(
     )
 
 
+def clean_text(text: str) -> str:
+    # Remove trailing spaces
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    # Ensure no tabs
+    text = text.replace("\t", "    ")
+    # Normalize line endings
+    text = text.replace("\r\n", "\n")
+    text = text.replace("\r", "\n")
+    # Ensure final newline
+    if not text.endswith("\n"):
+        text = text + "\n"
+    return text
+
+
+def clean_gradle_build_text(text: str) -> str:
+    while True:
+        old_text = text
+        text = re.sub(r"\n\s*\n", "\n\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = re.sub(r"\{\n\n", "{\n", text)
+        text = re.sub(r"\n\n\}", "\n}", text)
+        text = clean_text(text)
+        if text == old_text:
+            break
+    return text
+
+
 def setup_gradle_project(
     ctx: RepoSetupContext, project: GradleProject, interactive: bool = True
 ) -> None:
@@ -403,12 +430,7 @@ def setup_gradle_project(
             "kotlinx-serialization-core"
         ].maven_urn.__str__(),
     )
-    result = re.sub(r"\n\s*\n", "\n\n", result)
-    result = re.sub(r"\n{3,}", "\n\n", result)
-    result = re.sub(r"\{\n\n", "{\n", result)
-    result = re.sub(r"\n\n\}", "\n}", result)
-    result = result.strip()
-    result = result + "\n"
+    result = clean_gradle_build_text(result)
     dev.io.write_text_file(project.path / "build.gradle.kts", result)
 
     match ctx.mode:
@@ -420,7 +442,7 @@ def setup_gradle_project(
         case RepoSetupMode.DEV:
             dev.io.write_text_file(
                 project.path / "settings.gradle.kts",
-                render_template(ctx.settings_template, project_name=project.name),
+                clean_gradle_build_text(render_template(ctx.settings_template, project_name=project.name)),
             )
             dev.io.delete_if_exists(project.path / ".is-ij-mode")
             dev.io.touch(project.path / ".is-dev-mode")
@@ -428,9 +450,9 @@ def setup_gradle_project(
         case RepoSetupMode.PROD:
             dev.io.write_text_file(
                 project.path / "settings.gradle.kts",
-                render_template(
+                clean_gradle_build_text(render_template(
                     ctx.subproject_settings_template, project_name=project.name
-                ),
+                )),
             )
             dev.io.delete_if_exists(project.path / ".is-ij-mode")
             dev.io.delete_if_exists(project.path / ".is-dev-mode")
@@ -440,13 +462,15 @@ def setup_gradle_project(
     # ))
     dev.io.write_text_file(
         project.path / ".gitignore",
-        render_template(ctx.gitignore_template)
-        + "\n"
-        + render_template(ctx.gradle_gitignore_template),
+        clean_text(
+            render_template(ctx.gitignore_template)
+            + "\n"
+            + render_template(ctx.gradle_gitignore_template)
+        ),
     )
     dev.io.write_text_file(
         project.path / "gradle.properties",
-        render_template(ctx.gradle_properties_template),
+        clean_text(render_template(ctx.gradle_properties_template)),
     )
 
     if project.ownership == OwnershipType.WABBIT:
