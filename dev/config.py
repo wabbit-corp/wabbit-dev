@@ -603,6 +603,29 @@ CONFIG_FILE = "root.clj"
 CONFIG_PRIVATE_FILE = "root.private.clj"
 
 
+def _coerce_jvm_version(value: int | str, field_name: str = "jvm_version") -> int:
+    if isinstance(value, int):
+        version = value
+    elif isinstance(value, str):
+        normalized = value.strip()
+        if normalized == "1.8":
+            version = 8
+        elif re.fullmatch(r"\d+", normalized):
+            version = int(normalized)
+        else:
+            raise ValueError(
+                f"{field_name} must be an int or numeric string (e.g. 17, '21', '1.8')"
+            )
+    else:
+        raise ValueError(
+            f"{field_name} must be an int or numeric string, got {type(value)}"
+        )
+
+    if version < 8:
+        raise ValueError(f"{field_name} must be >= 8")
+    return version
+
+
 @dataclass
 class Config:
     raw: SDoc
@@ -635,6 +658,18 @@ class Config:
     disabled_checks: List[Tuple[str, str]] = dataclasses.field(default_factory=list)
 
     modules: Dict[str, Module] = dataclasses.field(default_factory=dict)
+
+    jvm_version: int = 21
+
+    @property
+    def java_version(self) -> int:
+        return self.jvm_version
+
+    @property
+    def kotlin_jvm_target(self) -> str:
+        if self.jvm_version == 8:
+            return "JVM_1_8"
+        return f"JVM_{self.jvm_version}"
 
 
 def load_config() -> Config:
@@ -693,6 +728,15 @@ def load_config() -> Config:
     @ctx.register(name="anthropic-key")
     def anthropic_key(key: str):
         config.anthropic_key = key
+
+    @ctx.register(name="jvm-version")
+    def jvm_version(version: int | str):
+        config.jvm_version = _coerce_jvm_version(version, "jvm-version")
+
+    @ctx.register(name="jvm-defaults")
+    def jvm_defaults(version: int | str | None = None):
+        if version is not None:
+            config.jvm_version = _coerce_jvm_version(version, "jvm-defaults.version")
 
     @ctx.register(name="jvm-kotlin-library")
     def jvm_kotlin_library() -> JvmKotlinLibrary:

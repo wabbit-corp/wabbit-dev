@@ -424,6 +424,8 @@ def setup_gradle_project(
         repositories=project.resolved_maven_repositories,
         kotlin_version=ctx.config.plugins["kotlin-jvm"].version,
         shadow_version=ctx.config.plugins["shadow"].version,
+        java_version=ctx.config.java_version,
+        kotlin_jvm_target=ctx.config.kotlin_jvm_target,
         features=project.resolved_features,
         project_dependencies=project_dependencies,
         other_dependencies=other_dependencies,
