@@ -1,2 +1,1 @@
-# Development dependencies
 pytest>=8.2.2,<9.0.0
