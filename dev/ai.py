@@ -8,10 +8,12 @@ import os
 from pathlib import Path
 import textwrap
 import logging
+import re
 
 from dev.caching import cache
 from dev.io import read_text_file, read_ignore_file, walk_files
 
+# Keep this prompt aligned with AGENTS.md > Commit Message Policy.
 SUGGEST_COMMIT_PROMPT = textwrap.dedent(
     """
 I have made some changes to a repository.
@@ -58,6 +60,20 @@ Finally, at the end of the commit message, explicitly include a line stating the
 ).strip()
 
 
+SEMVER_IMPACT_PATTERN = re.compile(
+    r"^Semver Impact:\s*(MAJOR|MINOR|PATCH|NONE)\s*$", re.MULTILINE | re.IGNORECASE
+)
+
+
+def ensure_semver_impact_line(commit_message: str) -> str:
+    message = commit_message.strip()
+    if not message:
+        return "chore: update repository\n\nSemver Impact: NONE"
+    if SEMVER_IMPACT_PATTERN.search(message):
+        return message
+    return f"{message}\n\nSemver Impact: NONE"
+
+
 @cache(path=".dev.cache.db", ttl=7 * 24 * 3600)
 def suggest_commit_name(modified: str, /, api_key: str) -> str:
     assert modified.strip(), "No modified files"
@@ -101,9 +117,9 @@ def suggest_commit_name(modified: str, /, api_key: str) -> str:
 
     obj = json.loads(response.choices[0].message.content)
     if isinstance(obj, dict) and "full_commit_message" in obj:
-        return obj["full_commit_message"]
+        return ensure_semver_impact_line(obj["full_commit_message"])
     else:
-        return "Unknown"
+        return ensure_semver_impact_line("Unknown")
 
 
 SUGGEST_VERSION_NUMBER = textwrap.dedent(

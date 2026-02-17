@@ -32,7 +32,7 @@ from dev.config import (
 )
 from dev.banner import create_banner
 from dev.base import Scope
-from dev.ai import suggest_commit_name
+from dev.ai import suggest_commit_name, ensure_semver_impact_line
 
 import dev.git_changes
 from dev.git_changes import compute_repo_diffs, FileType, ChangeType, FileDiff
@@ -813,6 +813,9 @@ def commit_repo_changes(
                 commit_name = suggest_commit_name(final_diff_text, api_key=openai_key)
                 print(f"Suggested commit message: {commit_name}")
 
+        if commit_name is not None:
+            commit_name = ensure_semver_impact_line(commit_name)
+
         # Optionally commit if user agrees
 
         if interactive:
@@ -835,6 +838,8 @@ def commit_repo_changes(
                     os.system(f"{editor} {repo.working_dir}/.git/COMMIT_EDITMSG")
                     with open(commit_file, "r") as f:
                         commit_name = f.read().strip()
+                    if commit_name:
+                        commit_name = ensure_semver_impact_line(commit_name)
                 else:
                     raise Exception("Changes on master")
         else:
