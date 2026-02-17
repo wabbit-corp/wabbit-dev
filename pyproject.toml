@@ -27,6 +27,7 @@ fastembed = ">=0.7.0,<1.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.2.2,<9.0.0"
+pyinstaller = ">=6.9.0,<7.0.0"
 
 [tool.black]
 line-length = 120

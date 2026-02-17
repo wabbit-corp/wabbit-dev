@@ -59,6 +59,18 @@ python dev.py dep/updates
 
 Consult `python dev.py --help` for the full list of commands and options.
 
+## 📦 Packaging (single executable)
+
+Install dependencies, then build with PyInstaller:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+python scripts/build_executable.py
+```
+
+The binary is emitted under `dist/` (for example `dist/wabbit-dev` or
+`dist/wabbit-dev.exe`).
+
 ## Repository Layout
 
 ```
