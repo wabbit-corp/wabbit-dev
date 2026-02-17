@@ -6,3 +6,4 @@
 - Add JVM version config parsing (`jvm-version`, `jvm-defaults`) and propagate Java/Kotlin JVM target values to setup rendering.
 - Align root project metadata and dependency constraints in `pyproject.toml` and requirements files.
 - Add PyInstaller build script and README packaging instructions for producing a single executable.
+- Ignore temporary setup cache artifacts (`.dev.cache.db`, `test/tmp-setup-*`, `*.bak`).
