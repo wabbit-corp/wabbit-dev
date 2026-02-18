@@ -1,4 +1,4 @@
-from typing import Any, List, Dict, Tuple
+from typing import Any
 from enum import Enum
 from dataclasses import dataclass
 import dataclasses
@@ -66,13 +66,13 @@ class RepoInfo:
 @dataclass
 class RepoSetupContext:
     config: Config
-    known_repo_names: List[str]
-    known_github_repos: Dict[str, RepoInfo]
+    known_repo_names: list[str]
+    known_github_repos: dict[str, RepoInfo]
     is_github_api_available: bool
 
     repo_template: Path
 
-    licenses: Dict[str, str]
+    licenses: dict[str, str]
     coc: str
 
     gitignore_template: jinja2.Template
@@ -95,9 +95,9 @@ class RepoSetupContext:
 
 def _make_dependency_strings(
     ctx: RepoSetupContext, project: Project
-) -> Tuple[List[str], List[str]]:
-    other_dependencies: List[str] = []
-    project_dependencies: List[str] = []
+) -> tuple[list[str], list[str]]:
+    other_dependencies: list[str] = []
+    project_dependencies: list[str] = []
     for dep in project.resolved_dependencies:
         match dep.target:
             case DependencyTarget.Maven(_, _):
@@ -334,7 +334,7 @@ def setup_project(
             )
 
 
-def _discover_python_packages(project_path: Path) -> List[str]:
+def _discover_python_packages(project_path: Path) -> list[str]:
     ignore_dirs = {
         ".git",
         ".idea",
@@ -345,7 +345,7 @@ def _discover_python_packages(project_path: Path) -> List[str]:
         "dist",
         "venv",
     }
-    packages: List[str] = []
+    packages: list[str] = []
     for child in project_path.iterdir():
         if not child.is_dir():
             continue
@@ -356,7 +356,7 @@ def _discover_python_packages(project_path: Path) -> List[str]:
     return sorted(packages)
 
 
-def _discover_test_paths(project_path: Path) -> List[str]:
+def _discover_test_paths(project_path: Path) -> list[str]:
     ignore_dirs = {
         ".git",
         ".idea",
@@ -367,7 +367,7 @@ def _discover_test_paths(project_path: Path) -> List[str]:
         "dist",
         "venv",
     }
-    test_paths: List[str] = []
+    test_paths: list[str] = []
     for root, dirs, _ in os.walk(project_path):
         root_path = Path(root)
         dirs[:] = [
@@ -387,7 +387,7 @@ def _discover_test_paths(project_path: Path) -> List[str]:
     return sorted(test_paths)
 
 
-def _iter_python_files(project_path: Path) -> List[Path]:
+def _iter_python_files(project_path: Path) -> list[Path]:
     ignore_dirs = {
         ".git",
         ".idea",
@@ -398,7 +398,7 @@ def _iter_python_files(project_path: Path) -> List[Path]:
         "dist",
         "venv",
     }
-    files: List[Path] = []
+    files: list[Path] = []
     for root, dirs, filenames in os.walk(project_path):
         root_path = Path(root)
         dirs[:] = [
@@ -416,7 +416,7 @@ def _iter_python_files(project_path: Path) -> List[Path]:
     return files
 
 
-def _discover_import_modules(project_path: Path) -> List[str]:
+def _discover_import_modules(project_path: Path) -> list[str]:
     modules: set[str] = set()
     for file_path in _iter_python_files(project_path):
         try:
@@ -442,14 +442,14 @@ def _normalize_import_name(name: str) -> str:
 
 
 def _derive_deptry_package_map(
-    project_path: Path, dependencies: List[str]
-) -> Dict[str, str]:
+    project_path: Path, dependencies: list[str]
+) -> dict[str, str]:
     imports = _discover_import_modules(project_path)
     if not imports:
         return {}
     import_norm = {_normalize_import_name(name): name for name in imports}
     import_norm_keys = sorted(import_norm.keys(), key=len, reverse=True)
-    mapping: Dict[str, str] = {}
+    mapping: dict[str, str] = {}
 
     for dep in dependencies:
         dep_name, _ = _split_requirement(dep)
@@ -480,26 +480,26 @@ def _derive_deptry_package_map(
     return mapping
 
 
-def _toml_list(items: List[str]) -> str:
+def _toml_list(items: list[str]) -> str:
     quoted = [f"\"{item}\"" for item in items]
     return f"[{', '.join(quoted)}]"
 
 
-def _toml_map_lines(map_data: Dict[str, List[str]]) -> str:
-    lines: List[str] = []
+def _toml_map_lines(map_data: dict[str, list[str]]) -> str:
+    lines: list[str] = []
     for key in sorted(map_data.keys()):
         lines.append(f"\"{key}\" = {_toml_list(map_data[key])}")
     return "\n".join(lines)
 
 
-def _toml_kv_lines(map_data: Dict[str, str]) -> str:
-    lines: List[str] = []
+def _toml_kv_lines(map_data: dict[str, str]) -> str:
+    lines: list[str] = []
     for key in sorted(map_data.keys()):
         lines.append(f"\"{key}\" = \"{map_data[key]}\"")
     return "\n".join(lines)
 
 
-def _toml_inline_table_list_map(map_data: Dict[str, List[str]]) -> str:
+def _toml_inline_table_list_map(map_data: dict[str, list[str]]) -> str:
     if not map_data:
         return "{}"
     parts = [f"\"{key}\" = {_toml_list(map_data[key])}" for key in map_data.keys()]
@@ -522,8 +522,8 @@ def _toml_value(value: Any) -> str:
     return f"\"{value}\""
 
 
-def _toml_contracts_blocks(contracts: List[Dict[str, Any]]) -> str:
-    blocks: List[str] = []
+def _toml_contracts_blocks(contracts: list[dict[str, Any]]) -> str:
+    blocks: list[str] = []
     for contract in contracts:
         lines = ["[[tool.importlinter.contracts]]"]
         for key, value in contract.items():
@@ -548,7 +548,7 @@ def _split_requirement(requirement: str) -> tuple[str, str]:
 
 
 def _write_requirements_file(
-    path: Path, deps: List[str], *, interactive: bool, project_name: str
+    path: Path, deps: list[str], *, interactive: bool, project_name: str
 ) -> None:
     if not deps:
         if path.exists():
@@ -574,7 +574,7 @@ def _python_target_version(requires_python: str | None) -> str:
             )
             target = default
         else:
-            lower_bounds: List[PythonVersion] = []
+            lower_bounds: list[PythonVersion] = []
             for item in spec:
                 if item.operator not in {">=", ">", "==", "===", "~="}:
                     continue
@@ -614,19 +614,19 @@ def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> st
         package_entries = ", ".join([f"{{ include = \"{name}\" }}" for name in packages])
         packages_toml = f"[{package_entries}]"
 
-    dependencies_lines: List[str] = []
+    dependencies_lines: list[str] = []
     for dep in dependencies:
         name, spec = _split_requirement(dep)
         key = _format_toml_key(name)
         dependencies_lines.append(f"{key} = \"{spec}\"")
 
-    dev_dependencies_lines: List[str] = []
+    dev_dependencies_lines: list[str] = []
     for dep in dev_dependencies:
         name, spec = _split_requirement(dep)
         key = _format_toml_key(name)
         dev_dependencies_lines.append(f"{key} = \"{spec}\"")
 
-    script_lines: List[str] = []
+    script_lines: list[str] = []
     for script in project.scripts:
         if "=" not in script:
             warning(f"Invalid python script entry for {project.name}: {script}")
@@ -696,7 +696,7 @@ def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> st
         or main_source_sets
         or packages
     )
-    importlinter_contracts: List[Dict[str, Any]] = []
+    importlinter_contracts: list[dict[str, Any]] = []
     if project.importlinter_layers:
         importlinter_contracts.append(
             {
@@ -1040,7 +1040,7 @@ def commit_repo_changes(
         return
 
     try:
-        diffs: List[FileDiff] = compute_repo_diffs(repo)
+        diffs: list[FileDiff] = compute_repo_diffs(repo)
     except Exception as ex:
         error(f"Cannot proceed: {ex}")
         return
@@ -1092,7 +1092,7 @@ def commit_repo_changes(
         # We'll do a single pass and write all info into buf.
         # ---------------------------------------------------------------------
         # Re-gather to see final state
-        final_diffs: List[FileDiff] = compute_repo_diffs(repo, include_untracked=True)
+        final_diffs: list[FileDiff] = compute_repo_diffs(repo, include_untracked=True)
 
         buf = io.StringIO()
         for diff_item in final_diffs:
