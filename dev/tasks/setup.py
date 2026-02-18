@@ -690,7 +690,6 @@ def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> st
 
     importlinter_root_packages = (
         project.importlinter_root_packages
-        or project.importlinter_layers
         or main_source_sets
         or packages
     )

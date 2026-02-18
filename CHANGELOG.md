@@ -12,3 +12,4 @@
 - Simplify `PythonProject` internals by removing redundant `python_` field prefixes.
 - Ensure project directories are created/validated before per-project setup writes files.
 - Fix Python target-version derivation to use the minimum supported version from `requires-python` specifiers.
+- Stop deriving import-linter root packages from layer definitions; fall back to source sets/packages only.

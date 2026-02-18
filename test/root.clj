@@ -84,7 +84,7 @@
             :per-rule-ignores { "DEP002": ["hypothesis"] }
             :auto-package-map true)
         (python-importlinter
-            :layers ["servant" "codi" "typed_json"])
+            :layers ["interface" "service" "data"])
     ]
     :source-sets [
         { "path": "codi" "kind": "main" }

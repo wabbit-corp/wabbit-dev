@@ -141,7 +141,7 @@ def test_setup_generates_pyproject_from_config(tmp_path: Path, monkeypatch) -> N
 
     generated_jeeves = _load_toml(temp_root / "python-jeeves" / "pyproject.toml")
 
-    expected_layers = ["servant", "codi", "typed_json"]
+    expected_layers = ["interface", "service", "data"]
     expected_test_paths = ["tests", "codi/api/tests"]
     expected_main_sources = ["codi", "servant", "typed_json"]
 
@@ -181,7 +181,7 @@ def test_setup_generates_pyproject_from_config(tmp_path: Path, monkeypatch) -> N
         "DEP002": ["hypothesis"]
     }
 
-    assert generated_jeeves["tool"]["importlinter"]["root_packages"] == expected_layers
+    assert generated_jeeves["tool"]["importlinter"]["root_packages"] == expected_main_sources
     assert _normalize_contracts(
         generated_jeeves["tool"]["importlinter"]["contracts"]
     ) == _normalize_contracts(
