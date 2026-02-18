@@ -779,6 +779,28 @@ def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> st
     rendered = render_template(ctx.python_pyproject_template, **context)
     return rendered
 
+
+def _write_wabbit_legal_files(ctx: RepoSetupContext, project: Project) -> None:
+    if project.ownership != OwnershipType.WABBIT:
+        return
+
+    if project.license is not None:
+        license_text = ctx.licenses.get(project.license)
+        if license_text is None:
+            error(f"Unknown license key: {project.license}")
+        else:
+            dev.io.write_text_file(project.path / "LICENSE.md", license_text)
+    dev.io.write_text_file(project.path / "CLA.md", render_template(ctx.cla))
+    dev.io.write_text_file(
+        project.path / "CLA_EXPLANATIONS.md", render_template(ctx.cla_explanations)
+    )
+    dev.io.write_text_file(
+        project.path / "CONTRIBUTOR_PRIVACY.md",
+        render_template(ctx.contributor_privacy_policy),
+    )
+    dev.io.write_text_file(project.path / "CODE_OF_CONDUCT.md", ctx.coc)
+
+
 def setup_python_project(
     ctx: RepoSetupContext, project: PythonProject, interactive: bool = True
 ) -> None:
@@ -789,22 +811,7 @@ def setup_python_project(
         + render_template(ctx.python_gitignore_template),
     )
 
-    if project.ownership == OwnershipType.WABBIT:
-        if project.license is not None:
-            license_text = ctx.licenses.get(project.license)
-            if license_text is None:
-                error(f"Unknown license key: {project.license}")
-            else:
-                dev.io.write_text_file(project.path / "LICENSE.md", license_text)
-        dev.io.write_text_file(project.path / "CLA.md", render_template(ctx.cla))
-        dev.io.write_text_file(
-            project.path / "CLA_EXPLANATIONS.md", render_template(ctx.cla_explanations)
-        )
-        dev.io.write_text_file(
-            project.path / "CONTRIBUTOR_PRIVACY.md",
-            render_template(ctx.contributor_privacy_policy),
-        )
-        dev.io.write_text_file(project.path / "CODE_OF_CONDUCT.md", ctx.coc)
+    _write_wabbit_legal_files(ctx, project)
 
     create_banner(
         image_path=ctx.repo_template / "banner4c.png",
@@ -960,22 +967,7 @@ def setup_gradle_project(
         clean_text(render_template(ctx.gradle_properties_template)),
     )
 
-    if project.ownership == OwnershipType.WABBIT:
-        if project.license is not None:
-            license_text = ctx.licenses.get(project.license)
-            if license_text is None:
-                error(f"Unknown license key: {project.license}")
-            else:
-                dev.io.write_text_file(project.path / "LICENSE.md", license_text)
-        dev.io.write_text_file(project.path / "CLA.md", render_template(ctx.cla))
-        dev.io.write_text_file(
-            project.path / "CLA_EXPLANATIONS.md", render_template(ctx.cla_explanations)
-        )
-        dev.io.write_text_file(
-            project.path / "CONTRIBUTOR_PRIVACY.md",
-            render_template(ctx.contributor_privacy_policy),
-        )
-        dev.io.write_text_file(project.path / "CODE_OF_CONDUCT.md", ctx.coc)
+    _write_wabbit_legal_files(ctx, project)
 
     dev.io.copy(
         ctx.repo_template / "gradle-files" / "gradlew", project.path / "gradlew"
