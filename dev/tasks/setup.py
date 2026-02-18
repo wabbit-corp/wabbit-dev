@@ -13,7 +13,6 @@ from packaging.version import InvalidVersion, Version as PythonVersion
 
 import git
 from git import Repo
-import github
 
 import jinja2
 
@@ -1354,11 +1353,11 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
 
     assert config.github_token is not None, "Github token is not set"
     try:
-        github = Github(login_or_token=config.github_token, retry = 0)
+        gh = Github(login_or_token=config.github_token, retry=0)
 
         # list(wabbit_corp_org.get_repos()) + list(corsaircraft_org.get_repos()) +
         # list(sir_wabbit_org.get_repos()) + \
-        all_repos = list(github.get_user().get_repos())
+        all_repos = list(gh.get_user().get_repos())
         known_repo_names = [r.full_name for r in all_repos]
         known_github_repos = {
             r.full_name: RepoInfo(

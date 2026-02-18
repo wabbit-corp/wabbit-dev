@@ -15,3 +15,4 @@
 - Stop deriving import-linter root packages from layer definitions; fall back to source sets/packages only.
 - Guard setup-time license/dependency lookups and emit errors for unknown keys instead of raising `KeyError`.
 - Normalize setup task typing annotations to built-in generics (`list`/`dict`/`tuple`) for Python 3.10 style consistency.
+- Remove `github` module/client name shadowing in setup context creation by renaming the GitHub client handle.
