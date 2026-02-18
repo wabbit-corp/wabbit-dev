@@ -8,3 +8,5 @@
 - Add PyInstaller build script and README packaging instructions for producing a single executable.
 - Ignore temporary setup cache artifacts (`.dev.cache.db`, `test/tmp-setup-*`, `*.bak`).
 - Split CLI entrypoint into `dev/cli.py` and add `setup --local` mode marker handling.
+- Normalize Python config keywords to kebab-case and drop legacy `python_*` keyword forms.
+- Simplify `PythonProject` internals by removing redundant `python_` field prefixes.

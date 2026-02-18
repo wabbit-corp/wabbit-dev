@@ -265,6 +265,14 @@ class JvmKotlinAgent(Feature):
             ShadowJar(jarName=self.shadedJarName),
         ]
 
+@dataclass
+class IntellijPlugin(Feature):
+    __feature_name__ = "intellij-plugin"
+    pluginName: str
+
+    def implied(self) -> List[Feature]:
+        return [Kotlin(), Jvm()]
+
 
 @dataclass
 class KotlinSerialization(Feature):
@@ -272,6 +280,37 @@ class KotlinSerialization(Feature):
 
     def implied(self) -> List[Feature]:
         return [Kotlin()]
+
+
+@dataclass
+class PythonDeptry(Feature):
+    __feature_name__ = "python-deptry"
+    package_map: Dict[str, str] = dataclasses.field(default_factory=dict)
+    per_rule_ignores: Dict[str, List[str]] = dataclasses.field(default_factory=dict)
+    auto_package_map: bool = False
+
+
+@dataclass
+class PythonImportLinter(Feature):
+    __feature_name__ = "python-importlinter"
+    root_packages: List[str] = dataclasses.field(default_factory=list)
+    layers: List[str] = dataclasses.field(default_factory=list)
+
+
+def resolve_features(features: List[Feature]) -> Dict[str, Feature]:
+    resolved_features: Dict[str, Feature] = {
+        type(feature).__feature_name__: feature for feature in features
+    }
+    for feature in list(resolved_features.values()):
+        for implied in feature.implied():
+            implied_name = type(implied).__feature_name__
+            if implied_name not in resolved_features:
+                resolved_features[implied_name] = implied
+            else:
+                assert (
+                    resolved_features[implied_name] == implied
+                ), f"Implied feature {implied_name} is already defined with a different configuration {resolved_features[implied_name]} != {implied}"
+    return resolved_features
 
 
 ################################################################################
@@ -401,6 +440,8 @@ DependencyTarget.Maven = MavenDependencyTarget
 class Project:
     path: Path
     name: str
+    description: str | None
+    authors: List[str]
     quarantine: bool
     publish: bool
     github_repo: str | None
@@ -435,12 +476,49 @@ class PythonDependency:
 
 
 @dataclass
+class PythonSourceSet:
+    path: str
+    kind: str
+
+    @property
+    def is_test(self) -> bool:
+        return self.kind == "test"
+
+
+@dataclass
 class PythonProject(Project):
     path: Path
     name: str
     version: Version | None
+    description: str | None
+    authors: List[str]
     license: str | None
     github_repo: str | None
+    requires_python: str | None
+    dependencies: List[str]
+    dev_dependencies: List[str]
+    scripts: List[str]
+    raw_features: List[Feature]
+    resolved_features: Dict[str, Feature]
+    line_length: int | None
+    target_version: str | None
+    source_sets: List[PythonSourceSet]
+    test_paths: List[str]
+    ruff_per_file_ignores: Dict[str, List[str]]
+    deptry_package_map: Dict[str, str]
+    deptry_per_rule_ignores: Dict[str, List[str]]
+    deptry_auto_map: bool
+    importlinter_root_packages: List[str]
+    importlinter_layers: List[str]
+    importlinter_contracts: List[Dict[str, Any]]
+    coverage_source: List[str]
+    coverage_omit: List[str]
+    coverage_fail_under: int | None
+    coverage_precision: int | None
+    coverage_branch: bool | None
+    coverage_show_missing: bool | None
+    coverage_skip_empty: bool | None
+    coverage_xml_output: str | None
     quarantine: bool
     publish: bool
     ownership: OwnershipType
@@ -472,6 +550,8 @@ class PythonProject(Project):
 class PurescriptProject(Project):
     path: Path
     name: str
+    description: str | None
+    authors: List[str]
     quarantine: bool
     publish: bool
     license: str | None
@@ -499,6 +579,8 @@ class PurescriptProject(Project):
 class PremakeProject(Project):
     path: Path
     name: str
+    description: str | None
+    authors: List[str]
     quarantine: bool
     publish: bool
     license: str | None
@@ -526,6 +608,8 @@ class PremakeProject(Project):
 class DataProject(Project):
     path: Path
     name: str
+    description: str | None
+    authors: List[str]
     quarantine: bool
     publish: bool
     license: str | None
@@ -555,6 +639,8 @@ class GradleProject(Project):
     group_name: str
     name: str
     version: Version | None
+    description: str | None
+    authors: List[str]
     license: str | None
     quarantine: bool
     publish: bool
@@ -601,6 +687,18 @@ class GradleProject(Project):
 
 CONFIG_FILE = "root.clj"
 CONFIG_PRIVATE_FILE = "root.private.clj"
+
+
+@dataclass
+class PythonDefaults:
+    line_length: int | str | None = None
+    target_version: str | None = None
+    coverage_fail_under: int | str | None = None
+    coverage_precision: int | str | None = None
+    coverage_branch: bool | None = None
+    coverage_show_missing: bool | None = None
+    coverage_skip_empty: bool | None = None
+    coverage_xml_output: str | None = None
 
 
 def _coerce_jvm_version(value: int | str, field_name: str = "jvm_version") -> int:
@@ -658,7 +756,7 @@ class Config:
     disabled_checks: List[Tuple[str, str]] = dataclasses.field(default_factory=list)
 
     modules: Dict[str, Module] = dataclasses.field(default_factory=dict)
-
+    python_defaults: PythonDefaults = dataclasses.field(default_factory=PythonDefaults)
     jvm_version: int = 21
 
     @property
@@ -760,9 +858,109 @@ def load_config() -> Config:
     def jvm_kotlin_agent(main: str, jar: str | None = None) -> JvmKotlinAgent:
         return JvmKotlinAgent(main, jar)
 
+    @ctx.register(name="intellij-plugin")
+    def intellij_plugin(pluginName: str) -> IntellijPlugin:
+        return IntellijPlugin(pluginName)
+
     @ctx.register(name="kotlin-serialization")
     def kotlin_serialization() -> KotlinSerialization:
         return KotlinSerialization()
+
+    def _assert_no_unknown_kwargs(kwargs: Dict[str, Any], context: str) -> None:
+        if kwargs:
+            raise ValueError(
+                f"Unknown {context} keyword arguments: {', '.join(sorted(kwargs.keys()))}"
+            )
+
+    def _assert_kebab_case_kwargs(
+        raw_kwargs: Dict[str, Any],
+        context: str,
+        *,
+        forbidden_prefixes: List[str] | None = None,
+    ) -> None:
+        invalid_keys: List[str] = []
+        for raw_key in raw_kwargs.keys():
+            if not isinstance(raw_key, str):
+                raise ValueError(
+                    f"Expected keyword argument name as string, got {type(raw_key)}"
+                )
+            if "_" in raw_key:
+                invalid_keys.append(raw_key)
+                continue
+            if forbidden_prefixes and any(
+                raw_key.startswith(prefix) for prefix in forbidden_prefixes
+            ):
+                invalid_keys.append(raw_key)
+        if invalid_keys:
+            raise ValueError(
+                f"{context} keywords must be kebab-case without legacy prefixes: "
+                + ", ".join(sorted(set(invalid_keys)))
+            )
+
+    @ctx.register(name="python-deptry")
+    def python_deptry(**raw_kwargs: Any) -> PythonDeptry:
+        _assert_kebab_case_kwargs(raw_kwargs, "python-deptry")
+        kwargs = dict(raw_kwargs)
+        package_map = kwargs.pop("package-map", {})
+        per_rule_ignores = kwargs.pop("per-rule-ignores", {})
+        auto_package_map = kwargs.pop("auto-package-map", False)
+        _assert_no_unknown_kwargs(kwargs, "python-deptry")
+        if package_map is None:
+            package_map = {}
+        if per_rule_ignores is None:
+            per_rule_ignores = {}
+        return PythonDeptry(
+            package_map=package_map,
+            per_rule_ignores=per_rule_ignores,
+            auto_package_map=auto_package_map,
+        )
+
+    @ctx.register(name="python-importlinter")
+    def python_importlinter(**raw_kwargs: Any) -> PythonImportLinter:
+        _assert_kebab_case_kwargs(raw_kwargs, "python-importlinter")
+        kwargs = dict(raw_kwargs)
+        root_packages = kwargs.pop("root-packages", [])
+        layers = kwargs.pop("layers", [])
+        _assert_no_unknown_kwargs(kwargs, "python-importlinter")
+        if root_packages is None:
+            root_packages = []
+        if layers is None:
+            layers = []
+        return PythonImportLinter(
+            root_packages=root_packages,
+            layers=layers,
+        )
+
+    @ctx.register(name="python-defaults")
+    def python_defaults(**raw_kwargs: Any) -> None:
+        _assert_kebab_case_kwargs(raw_kwargs, "python-defaults")
+        kwargs = dict(raw_kwargs)
+        line_length = kwargs.pop("line-length", None)
+        target_version = kwargs.pop("target-version", None)
+        coverage_fail_under = kwargs.pop("coverage-fail-under", None)
+        coverage_precision = kwargs.pop("coverage-precision", None)
+        coverage_branch = kwargs.pop("coverage-branch", None)
+        coverage_show_missing = kwargs.pop("coverage-show-missing", None)
+        coverage_skip_empty = kwargs.pop("coverage-skip-empty", None)
+        coverage_xml_output = kwargs.pop("coverage-xml-output", None)
+        _assert_no_unknown_kwargs(kwargs, "python-defaults")
+        defaults = config.python_defaults
+        if line_length is not None:
+            defaults.line_length = line_length
+        if target_version is not None:
+            defaults.target_version = target_version
+        if coverage_fail_under is not None:
+            defaults.coverage_fail_under = coverage_fail_under
+        if coverage_precision is not None:
+            defaults.coverage_precision = coverage_precision
+        if coverage_branch is not None:
+            defaults.coverage_branch = coverage_branch
+        if coverage_show_missing is not None:
+            defaults.coverage_show_missing = coverage_show_missing
+        if coverage_skip_empty is not None:
+            defaults.coverage_skip_empty = coverage_skip_empty
+        if coverage_xml_output is not None:
+            defaults.coverage_xml_output = coverage_xml_output
 
     ###############################################################################################
     # Dependencies
@@ -905,6 +1103,42 @@ def load_config() -> Config:
     # Projects
     ###############################################################################################
 
+    def _coerce_int(value: int | str | None, field_name: str) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and re.fullmatch(r"-?\d+", value):
+            return int(value)
+        raise ValueError(f"{field_name} must be an int or numeric string")
+
+    def _parse_python_source_sets(
+        raw_sets: List[Any] | None,
+    ) -> List[PythonSourceSet]:
+        if not raw_sets:
+            return []
+        parsed: List[PythonSourceSet] = []
+        for item in raw_sets:
+            if isinstance(item, str):
+                parsed.append(PythonSourceSet(path=item, kind="main"))
+                continue
+            if isinstance(item, dict):
+                path = item.get("path") or item.get("dir") or item.get("root")
+                if not path:
+                    raise ValueError("python source set missing path")
+                kind = item.get("kind") or item.get("type")
+                if kind is None and "test" in item:
+                    kind = "test" if item.get("test") else "main"
+                if kind is None:
+                    kind = "main"
+                kind = str(kind)
+                if kind not in {"main", "test"}:
+                    raise ValueError(f"Unknown python source set kind: {kind}")
+                parsed.append(PythonSourceSet(path=str(path), kind=kind))
+                continue
+            raise ValueError(f"Invalid python source set entry: {item}")
+        return parsed
+
     def verify_project(project: Project) -> None:
         def is_publishable(project: Project) -> bool:
             return (
@@ -934,23 +1168,148 @@ def load_config() -> Config:
     def python_project(
         dir_name: str,
         version: Quoted[SStr],
-        name: Optional[str] = None,
-        license: str | None = "AGPL",
-        quarantine: bool = False,
-        publish: bool = True,
-        repo: str | None = None,
-        ownership: OwnershipType = OwnershipType.WABBIT,
+        **raw_kwargs: Any,
     ) -> None:
+        _assert_kebab_case_kwargs(
+            raw_kwargs,
+            "python project",
+            forbidden_prefixes=["python-"],
+        )
+        kwargs = dict(raw_kwargs)
+        name = kwargs.pop("name", None)
+        description = kwargs.pop("description", None)
+        authors = kwargs.pop("authors", None)
+        license = kwargs.pop("license", "AGPL")
+        quarantine = kwargs.pop("quarantine", False)
+        publish = kwargs.pop("publish", True)
+        requires_python = kwargs.pop("requires-python", None)
+        dependencies = kwargs.pop("dependencies", None)
+        dev_dependencies = kwargs.pop("dev-dependencies", None)
+        scripts = kwargs.pop("scripts", None)
+        features = kwargs.pop("features", None)
+        source_sets = kwargs.pop("source-sets", None)
+        line_length_input = kwargs.pop("line-length", None)
+        target_version = kwargs.pop("target-version", None)
+        test_paths = kwargs.pop("test-paths", None)
+        ruff_per_file_ignores = kwargs.pop("ruff-per-file-ignores", None)
+        deptry_package_map_input = kwargs.pop("deptry-package-map", None)
+        deptry_per_rule_ignores_input = kwargs.pop("deptry-per-rule-ignores", None)
+        importlinter_root_packages_input = kwargs.pop(
+            "importlinter-root-packages", None
+        )
+        importlinter_contracts = kwargs.pop("importlinter-contracts", None)
+        coverage_source = kwargs.pop("coverage-source", None)
+        coverage_omit = kwargs.pop("coverage-omit", None)
+        coverage_fail_under_input = kwargs.pop("coverage-fail-under", None)
+        coverage_precision_input = kwargs.pop("coverage-precision", None)
+        coverage_branch = kwargs.pop("coverage-branch", None)
+        coverage_show_missing = kwargs.pop("coverage-show-missing", None)
+        coverage_skip_empty = kwargs.pop("coverage-skip-empty", None)
+        coverage_xml_output = kwargs.pop("coverage-xml-output", None)
+        repo = kwargs.pop("repo", None)
+        ownership = kwargs.pop("ownership", OwnershipType.WABBIT)
+        _assert_no_unknown_kwargs(kwargs, "python project")
+
+        if isinstance(ownership, str):
+            ownership = OwnershipType(ownership)
+
         path = Path(f"./{dir_name}")
         name = name or dir_name
+        resolved_features = resolve_features(features or [])
+        defaults = config.python_defaults
+        line_length = (
+            _coerce_int(line_length_input, "line-length")
+            if line_length_input is not None
+            else _coerce_int(defaults.line_length, "python-defaults.line-length")
+        )
+        coverage_fail_under = (
+            _coerce_int(coverage_fail_under_input, "coverage-fail-under")
+            if coverage_fail_under_input is not None
+            else _coerce_int(
+                defaults.coverage_fail_under, "python-defaults.coverage-fail-under"
+            )
+        )
+        coverage_precision = (
+            _coerce_int(coverage_precision_input, "coverage-precision")
+            if coverage_precision_input is not None
+            else _coerce_int(
+                defaults.coverage_precision, "python-defaults.coverage-precision"
+            )
+        )
+
+        deptry_feature = resolved_features.get("python-deptry")
+        deptry_package_map = deptry_package_map_input or {}
+        deptry_per_rule_ignores = deptry_per_rule_ignores_input or {}
+        deptry_auto_map = False
+        if isinstance(deptry_feature, PythonDeptry):
+            deptry_package_map = {
+                **deptry_feature.package_map,
+                **deptry_package_map,
+            }
+            deptry_per_rule_ignores = {
+                **deptry_feature.per_rule_ignores,
+                **deptry_per_rule_ignores,
+            }
+            deptry_auto_map = deptry_feature.auto_package_map
+
+        importlinter_feature = resolved_features.get("python-importlinter")
+        importlinter_root_packages = importlinter_root_packages_input or []
+        importlinter_layers: List[str] = []
+        if isinstance(importlinter_feature, PythonImportLinter):
+            if importlinter_feature.root_packages:
+                importlinter_root_packages = importlinter_feature.root_packages
+            importlinter_layers = importlinter_feature.layers or []
+
+        parsed_source_sets = _parse_python_source_sets(source_sets)
         project_obj = PythonProject(
             path=path,
             name=name,
             quarantine=quarantine,
             publish=publish,
+            description=description,
+            authors=authors or [],
             license=license,
             github_repo=repo,
             ownership=ownership,
+            requires_python=requires_python,
+            dependencies=dependencies or [],
+            dev_dependencies=dev_dependencies or [],
+            scripts=scripts or [],
+            raw_features=features or [],
+            resolved_features=resolved_features,
+            line_length=line_length,
+            target_version=target_version or defaults.target_version,
+            source_sets=parsed_source_sets,
+            test_paths=test_paths or [],
+            ruff_per_file_ignores=ruff_per_file_ignores or {},
+            deptry_package_map=deptry_package_map,
+            deptry_per_rule_ignores=deptry_per_rule_ignores,
+            deptry_auto_map=deptry_auto_map,
+            importlinter_root_packages=importlinter_root_packages,
+            importlinter_layers=importlinter_layers,
+            importlinter_contracts=importlinter_contracts or [],
+            coverage_source=coverage_source or [],
+            coverage_omit=coverage_omit or [],
+            coverage_fail_under=coverage_fail_under,
+            coverage_precision=coverage_precision,
+            coverage_branch=(
+                coverage_branch
+                if coverage_branch is not None
+                else defaults.coverage_branch
+            ),
+            coverage_show_missing=(
+                coverage_show_missing
+                if coverage_show_missing is not None
+                else defaults.coverage_show_missing
+            ),
+            coverage_skip_empty=(
+                coverage_skip_empty
+                if coverage_skip_empty is not None
+                else defaults.coverage_skip_empty
+            ),
+            coverage_xml_output=(
+                coverage_xml_output or defaults.coverage_xml_output
+            ),
             version=Version.parse(version) if version else None,
             resolved_dependencies=[],
         )
@@ -962,6 +1321,8 @@ def load_config() -> Config:
         dir_name: str,
         version: Quoted[SStr],
         name: Optional[str] = None,
+        description: str | None = None,
+        authors: List[str] | None = None,
         quarantine: bool = False,
         license: str | None = "AGPL",
         publish: bool = True,
@@ -973,6 +1334,8 @@ def load_config() -> Config:
         project_obj = PurescriptProject(
             path=path,
             name=name,
+            description=description,
+            authors=authors or [],
             quarantine=quarantine,
             license=license,
             publish=publish,
@@ -989,6 +1352,8 @@ def load_config() -> Config:
         dir_name: str,
         version: Quoted[SStr],
         name: Optional[str] = None,
+        description: str | None = None,
+        authors: List[str] | None = None,
         license: str | None = "AGPL",
         quarantine: bool = False,
         publish: bool = True,
@@ -1000,6 +1365,8 @@ def load_config() -> Config:
         project_obj = DataProject(
             path=path,
             name=name,
+            description=description,
+            authors=authors or [],
             quarantine=quarantine,
             publish=publish,
             license=license,
@@ -1016,6 +1383,8 @@ def load_config() -> Config:
         dir_name: str,
         version: Quoted[SStr],
         name: Optional[str] = None,
+        description: str | None = None,
+        authors: List[str] | None = None,
         license: str | None = "AGPL",
         quarantine: bool = False,
         publish: bool = True,
@@ -1027,6 +1396,8 @@ def load_config() -> Config:
         project_obj = PremakeProject(
             path=path,
             name=name,
+            description=description,
+            authors=authors or [],
             github_repo=repo,
             license=license,
             quarantine=quarantine,
@@ -1043,6 +1414,8 @@ def load_config() -> Config:
         dir_name: str,
         version: Quoted[SStr],
         name: Optional[str] = None,
+        description: str | None = None,
+        authors: List[str] | None = None,
         license: str | None = "AGPL",
         quarantine: bool = False,
         publish: bool = True,
@@ -1061,18 +1434,7 @@ def load_config() -> Config:
 
         # assert repo is not None, f"Repository is required for Gradle project {name}"
 
-        resolved_features: Dict[str, Feature] = {
-            type(feature).__feature_name__: feature for feature in (features or [])
-        }
-        for feature in list(resolved_features.values()):
-            for implied in feature.implied():
-                implied_name = type(implied).__feature_name__
-                if implied_name not in resolved_features:
-                    resolved_features[implied_name] = implied
-                else:
-                    assert (
-                        resolved_features[implied_name] == implied
-                    ), f"Implied feature {implied_name} is already defined with a different configuration {resolved_features[implied_name]} != {implied} for {name}"
+        resolved_features = resolve_features(features or [])
 
         raw_dependencies: List[str | DependencyTarget | List[DependencyTarget]] = (
             dependencies or []
@@ -1101,6 +1463,8 @@ def load_config() -> Config:
             group_name=config.default_maven_project_group,
             name=name,
             version=Version.parse(version) if version else None,
+            description=description,
+            authors=authors or [],
             quarantine=quarantine,
             license=license,
             publish=publish,

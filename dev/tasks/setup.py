@@ -1,10 +1,11 @@
-from typing import List, Dict, Tuple
+from typing import Any, List, Dict, Tuple
 from enum import Enum
 from dataclasses import dataclass
 import dataclasses
 
 from pathlib import Path
 import os, io
+import ast
 import re
 
 import git
@@ -64,6 +65,7 @@ class RepoSetupContext:
     config: Config
     known_repo_names: List[str]
     known_github_repos: Dict[str, RepoInfo]
+    is_github_api_available: bool
 
     repo_template: Path
 
@@ -83,6 +85,7 @@ class RepoSetupContext:
     gradle_properties_template: jinja2.Template
     python_gitignore_template: jinja2.Template
     purescript_gitignore_template: jinja2.Template
+    python_pyproject_template: jinja2.Template
 
     mode: RepoSetupMode
 
@@ -326,6 +329,432 @@ def setup_project(
             )
 
 
+def _discover_python_packages(project_path: Path) -> List[str]:
+    ignore_dirs = {
+        ".git",
+        ".idea",
+        ".venv",
+        ".vscode",
+        "__pycache__",
+        "build",
+        "dist",
+        "venv",
+    }
+    packages: List[str] = []
+    for child in project_path.iterdir():
+        if not child.is_dir():
+            continue
+        if child.name.startswith(".") or child.name in ignore_dirs:
+            continue
+        if (child / "__init__.py").exists():
+            packages.append(child.name)
+    return sorted(packages)
+
+
+def _discover_test_paths(project_path: Path) -> List[str]:
+    ignore_dirs = {
+        ".git",
+        ".idea",
+        ".venv",
+        ".vscode",
+        "__pycache__",
+        "build",
+        "dist",
+        "venv",
+    }
+    test_paths: List[str] = []
+    for root, dirs, _ in os.walk(project_path):
+        root_path = Path(root)
+        dirs[:] = [
+            d
+            for d in dirs
+            if d not in ignore_dirs
+            and not d.startswith(".")
+            and not d.startswith("tmp.")
+            and not d.startswith("tmp-setup-")
+        ]
+        for name in dirs:
+            if name in {"tests", "test"}:
+                test_dir = root_path / name
+                rel_path = test_dir.relative_to(project_path).as_posix()
+                if rel_path not in test_paths:
+                    test_paths.append(rel_path)
+    return sorted(test_paths)
+
+
+def _iter_python_files(project_path: Path) -> List[Path]:
+    ignore_dirs = {
+        ".git",
+        ".idea",
+        ".venv",
+        ".vscode",
+        "__pycache__",
+        "build",
+        "dist",
+        "venv",
+    }
+    files: List[Path] = []
+    for root, dirs, filenames in os.walk(project_path):
+        root_path = Path(root)
+        dirs[:] = [
+            d
+            for d in dirs
+            if d not in ignore_dirs
+            and not d.startswith(".")
+            and not d.startswith("tmp.")
+            and not d.startswith("tmp-setup-")
+        ]
+        for name in filenames:
+            if not name.endswith(".py"):
+                continue
+            files.append(root_path / name)
+    return files
+
+
+def _discover_import_modules(project_path: Path) -> List[str]:
+    modules: set[str] = set()
+    for file_path in _iter_python_files(project_path):
+        try:
+            source = file_path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    modules.add(alias.name.split(".", 1)[0])
+            elif isinstance(node, ast.ImportFrom):
+                if node.level and node.level > 0:
+                    continue
+                if node.module:
+                    modules.add(node.module.split(".", 1)[0])
+    return sorted(modules)
+
+
+def _normalize_import_name(name: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", name.lower())
+    return normalized.strip("_")
+
+
+def _derive_deptry_package_map(
+    project_path: Path, dependencies: List[str]
+) -> Dict[str, str]:
+    imports = _discover_import_modules(project_path)
+    if not imports:
+        return {}
+    import_norm = {_normalize_import_name(name): name for name in imports}
+    import_norm_keys = sorted(import_norm.keys(), key=len, reverse=True)
+    mapping: Dict[str, str] = {}
+
+    for dep in dependencies:
+        dep_name, _ = _split_requirement(dep)
+        dep_name = dep_name.split("[", 1)[0]
+        if dep_name in imports:
+            continue
+        dep_norm = _normalize_import_name(dep_name)
+        if dep_norm in import_norm:
+            module = import_norm[dep_norm]
+            if module != dep_name:
+                mapping[dep_name] = module
+            continue
+
+        for prefix in ("python_", "py"):
+            if dep_norm.startswith(prefix):
+                candidate = dep_norm[len(prefix) :]
+                if candidate in import_norm:
+                    mapping[dep_name] = import_norm[candidate]
+                    break
+        if dep_name in mapping:
+            continue
+
+        for norm_module in import_norm_keys:
+            if dep_norm.startswith(norm_module) or dep_norm.endswith(norm_module):
+                mapping[dep_name] = import_norm[norm_module]
+                break
+
+    return mapping
+
+
+def _toml_list(items: List[str]) -> str:
+    quoted = [f"\"{item}\"" for item in items]
+    return f"[{', '.join(quoted)}]"
+
+
+def _toml_map_lines(map_data: Dict[str, List[str]]) -> str:
+    lines: List[str] = []
+    for key in sorted(map_data.keys()):
+        lines.append(f"\"{key}\" = {_toml_list(map_data[key])}")
+    return "\n".join(lines)
+
+
+def _toml_kv_lines(map_data: Dict[str, str]) -> str:
+    lines: List[str] = []
+    for key in sorted(map_data.keys()):
+        lines.append(f"\"{key}\" = \"{map_data[key]}\"")
+    return "\n".join(lines)
+
+
+def _toml_inline_table_list_map(map_data: Dict[str, List[str]]) -> str:
+    if not map_data:
+        return "{}"
+    parts = [f"\"{key}\" = {_toml_list(map_data[key])}" for key in map_data.keys()]
+    return "{ " + ", ".join(parts) + " }"
+
+
+def _toml_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        if re.fullmatch(r"-?\d+", value):
+            return value
+        if re.fullmatch(r"-?\d+\.\d+", value):
+            return value
+        return f"\"{value}\""
+    if isinstance(value, list):
+        return _toml_list([str(item) for item in value])
+    return f"\"{value}\""
+
+
+def _toml_contracts_blocks(contracts: List[Dict[str, Any]]) -> str:
+    blocks: List[str] = []
+    for contract in contracts:
+        lines = ["[[tool.importlinter.contracts]]"]
+        for key, value in contract.items():
+            lines.append(f"{key} = {_toml_value(value)}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def _format_toml_key(key: str) -> str:
+    if re.match(r"^[A-Za-z0-9_-]+$", key):
+        return key
+    return f"\"{key}\""
+
+
+def _split_requirement(requirement: str) -> tuple[str, str]:
+    for idx, ch in enumerate(requirement):
+        if ch in "<>!=~":
+            name = requirement[:idx].strip()
+            spec = requirement[idx:].strip()
+            return name, spec
+    return requirement.strip(), "*"
+
+
+def _write_requirements_file(
+    path: Path, deps: List[str], *, interactive: bool, project_name: str
+) -> None:
+    if not deps:
+        if path.exists():
+            warning(
+                f"No dependencies configured for {project_name}; leaving {path} untouched"
+            )
+        return
+
+    content = clean_text("\n".join(deps) + "\n")
+    dev.io.write_text_file(path, content)
+
+
+def _python_target_version(requires_python: str | None) -> str:
+    if requires_python:
+        for version in ("3.12", "3.11", "3.10", "3.9"):
+            if version in requires_python:
+                return "py" + version.replace(".", "")
+    return "py310"
+
+
+def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> str:
+    dependencies = project.dependencies
+    dev_dependencies = project.dev_dependencies
+
+    requires_python = project.requires_python or ">=3.10"
+    if project.requires_python is None:
+        warning(
+            f"No requires-python set for {project.name}; defaulting to {requires_python}"
+        )
+
+    target_version = project.target_version or _python_target_version(
+        project.requires_python
+    )
+    line_length = project.line_length or 120
+
+    version = str(project.version) if project.version else "0.0.0"
+    description = project.description or ""
+
+    packages = _discover_python_packages(project.path)
+    packages_toml = ""
+    if packages:
+        package_entries = ", ".join([f"{{ include = \"{name}\" }}" for name in packages])
+        packages_toml = f"[{package_entries}]"
+
+    dependencies_lines: List[str] = []
+    for dep in dependencies:
+        name, spec = _split_requirement(dep)
+        key = _format_toml_key(name)
+        dependencies_lines.append(f"{key} = \"{spec}\"")
+
+    dev_dependencies_lines: List[str] = []
+    for dep in dev_dependencies:
+        name, spec = _split_requirement(dep)
+        key = _format_toml_key(name)
+        dev_dependencies_lines.append(f"{key} = \"{spec}\"")
+
+    script_lines: List[str] = []
+    for script in project.scripts:
+        if "=" not in script:
+            warning(f"Invalid python script entry for {project.name}: {script}")
+            continue
+        script_name, target = script.split("=", 1)
+        script_lines.append(f"{script_name.strip()} = \"{target.strip()}\"")
+
+    source_sets = project.source_sets
+    if source_sets:
+        main_source_sets = [source.path for source in source_sets if not source.is_test]
+        test_paths = [source.path for source in source_sets if source.is_test]
+        if not main_source_sets:
+            main_source_sets = packages
+    else:
+        main_source_sets = packages
+        test_paths = (
+            project.test_paths
+            if project.test_paths
+            else _discover_test_paths(project.path)
+        )
+    ruff_per_file_ignores = (
+        project.ruff_per_file_ignores
+        if project.ruff_per_file_ignores
+        else {
+            f"{path}/**/*.py": ["B"] for path in test_paths
+        }
+    )
+
+    include_deptry = (
+        "python-deptry" in project.resolved_features
+        or project.deptry_package_map
+        or project.deptry_per_rule_ignores
+        or project.deptry_auto_map
+    )
+    include_importlinter = (
+        "python-importlinter" in project.resolved_features
+        or project.importlinter_root_packages
+        or project.importlinter_layers
+        or project.importlinter_contracts
+    )
+
+    coverage_source = (
+        project.coverage_source
+        if project.coverage_source
+        else main_source_sets
+    )
+    coverage_omit = (
+        project.coverage_omit
+        if project.coverage_omit
+        else sorted(
+            {
+                "tests/*",
+                ".venv/*",
+                "**/__pycache__/*",
+                *[f"{path}/*" for path in test_paths],
+            }
+        )
+    )
+
+    deptry_package_map = dict(project.deptry_package_map)
+    if project.deptry_auto_map:
+        auto_map = _derive_deptry_package_map(project.path, dependencies)
+        deptry_package_map = {**auto_map, **deptry_package_map}
+
+    importlinter_root_packages = (
+        project.importlinter_root_packages
+        or project.importlinter_layers
+        or main_source_sets
+        or packages
+    )
+    importlinter_contracts: List[Dict[str, Any]] = []
+    if project.importlinter_layers:
+        importlinter_contracts.append(
+            {
+                "id": "layering",
+                "name": "Layered architecture",
+                "type": "layers",
+                "layers": project.importlinter_layers,
+            }
+        )
+    importlinter_contracts.extend(project.importlinter_contracts)
+
+    context = {
+        "name": project.name,
+        "version": version,
+        "description": description,
+        "authors_toml": _toml_list(project.authors) if project.authors else "",
+        "license": project.license,
+        "readme": "README.md" if (project.path / "README.md").exists() else "",
+        "packages_toml": packages_toml,
+        "python_version": requires_python,
+        "dependencies_block": "\n".join(dependencies_lines),
+        "dev_dependencies_block": "\n".join(dev_dependencies_lines),
+        "scripts_block": "\n".join(script_lines),
+        "has_dev_dependencies": bool(dev_dependencies_lines),
+        "has_scripts": bool(script_lines),
+        "line_length": line_length,
+        "target_version": target_version,
+        "ruff_select_toml": _toml_list(["F", "E", "W", "I", "B", "UP"]),
+        "ruff_ignore_toml": _toml_list(["E501"]),
+        "ruff_per_file_ignores_block": _toml_map_lines(ruff_per_file_ignores),
+        "has_ruff_per_file_ignores": bool(ruff_per_file_ignores),
+        "testpaths_toml": _toml_list(test_paths),
+        "has_testpaths": bool(test_paths),
+        "include_deptry": include_deptry,
+        "deptry_package_map_block": _toml_kv_lines(deptry_package_map),
+        "deptry_per_rule_ignores_inline": _toml_inline_table_list_map(
+            project.deptry_per_rule_ignores
+        ),
+        "has_deptry_package_map": bool(deptry_package_map),
+        "has_deptry_rule_ignores": bool(project.deptry_per_rule_ignores),
+        "include_importlinter": include_importlinter,
+        "importlinter_root_packages_toml": _toml_list(
+            importlinter_root_packages
+        ),
+        "importlinter_contracts_block": _toml_contracts_blocks(
+            importlinter_contracts
+        ),
+        "has_importlinter_contracts": bool(importlinter_contracts),
+        "coverage_source_toml": _toml_list(coverage_source),
+        "coverage_omit_toml": _toml_list(coverage_omit),
+        "coverage_branch": (
+            project.coverage_branch
+            if project.coverage_branch is not None
+            else True
+        ),
+        "coverage_show_missing": (
+            project.coverage_show_missing
+            if project.coverage_show_missing is not None
+            else True
+        ),
+        "coverage_skip_empty": (
+            project.coverage_skip_empty
+            if project.coverage_skip_empty is not None
+            else True
+        ),
+        "coverage_fail_under": (
+            project.coverage_fail_under
+            if project.coverage_fail_under is not None
+            else 80
+        ),
+        "coverage_precision": (
+            project.coverage_precision
+            if project.coverage_precision is not None
+            else 0
+        ),
+        "coverage_xml_output": (
+            project.coverage_xml_output or "coverage.xml"
+        ),
+    }
+
+    rendered = render_template(ctx.python_pyproject_template, **context)
+    return rendered
+
 def setup_python_project(
     ctx: RepoSetupContext, project: PythonProject, interactive: bool = True
 ) -> None:
@@ -362,6 +791,31 @@ def setup_python_project(
         subtitle_font_size=None,
         padding=40,
     )
+
+    _write_requirements_file(
+        project.path / "requirements.txt",
+        project.dependencies,
+        interactive=interactive,
+        project_name=project.name,
+    )
+    _write_requirements_file(
+        project.path / "requirements-dev.txt",
+        project.dev_dependencies,
+        interactive=interactive,
+        project_name=project.name,
+    )
+
+    pyproject_path = project.path / "pyproject.toml"
+    write_pyproject = True
+    # if pyproject_path.exists():
+    #     if interactive:
+    #         write_pyproject = ask(f"Overwrite {pyproject_path}?")
+    #     else:
+    #         write_pyproject = False
+    #         info(f"Skipping existing {pyproject_path}")
+    if write_pyproject:
+        pyproject_text = render_python_pyproject(ctx, project)
+        dev.io.write_text_file(pyproject_path, clean_text(pyproject_text))
 
 
 def setup_purescript_project(
@@ -411,7 +865,7 @@ def setup_gradle_project(
 
     # subproject_dev_dependencies = [
     #     dataclasses.replace(dep, artifact=ctx.config.defined_projects[dep.name].artifact_name).as_string(local_project_ref=True)
-    #     if ctx.config.defined_projects[dep.name].github_repo is None or ctx.mode == SetupMode.IJ
+    #     if ctx.config.defined_projects[dep.name].github_repo is None or ctx.mode == SetupMode.LOCAL
     #     else dataclasses.replace(dep, artifact=ctx.config.defined_projects[dep.name].artifact_name).as_string(local_project_ref=False)
     #     for dep in project.resolved_dependencies if dep.is_subproject
     # ]
@@ -423,9 +877,9 @@ def setup_gradle_project(
         project_version=project.version,
         repositories=project.resolved_maven_repositories,
         kotlin_version=ctx.config.plugins["kotlin-jvm"].version,
-        shadow_version=ctx.config.plugins["shadow"].version,
         java_version=ctx.config.java_version,
         kotlin_jvm_target=ctx.config.kotlin_jvm_target,
+        shadow_version=ctx.config.plugins["shadow"].version,
         features=project.resolved_features,
         project_dependencies=project_dependencies,
         other_dependencies=other_dependencies,
@@ -870,25 +1324,34 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
     from github import Github
 
     assert config.github_token is not None, "Github token is not set"
-    github = Github(login_or_token=config.github_token)
+    try:
+        github = Github(login_or_token=config.github_token, retry = 0)
 
-    # list(wabbit_corp_org.get_repos()) + list(corsaircraft_org.get_repos()) +
-    # list(sir_wabbit_org.get_repos()) + \
-    all_repos = list(github.get_user().get_repos())
-    known_repo_names = [r.full_name for r in all_repos]
-    known_github_repos = {
-        r.full_name: RepoInfo(
-            organization=r.owner.login,
-            name=r.name,
-            is_private=r.private,
-        )
-        for r in all_repos
-    }
+        # list(wabbit_corp_org.get_repos()) + list(corsaircraft_org.get_repos()) +
+        # list(sir_wabbit_org.get_repos()) + \
+        all_repos = list(github.get_user().get_repos())
+        known_repo_names = [r.full_name for r in all_repos]
+        known_github_repos = {
+            r.full_name: RepoInfo(
+                organization=r.owner.login,
+                name=r.name,
+                is_private=r.private,
+            )
+            for r in all_repos
+        }
 
-    for repo in all_repos:
-        print(
-            f"Repo: {repo.name} ({repo.full_name}) - {repo.private} - {repo.clone_url}"
-        )
+        for repo in all_repos:
+            print(
+                f"Repo: {repo.name} ({repo.full_name}) - {repo.private} - {repo.clone_url}"
+            )
+
+        is_github_api_available = True
+
+    except:
+        all_repos = []
+        known_repo_names = []
+        known_github_repos = {}
+        is_github_api_available = False
 
     repo_template = Path("data-repo-template")
 
@@ -899,6 +1362,7 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
         known_repo_names=known_repo_names,
         known_github_repos=known_github_repos,
         repo_template=repo_template,
+        is_github_api_available=is_github_api_available,
         licenses={
             "AGPL": dev.io.read_text_file(
                 repo_template / "legal" / "licenses" / "AGPL.md"
@@ -944,6 +1408,9 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
         purescript_gitignore_template=dev.io.read_template(
             repo_template / "purescript-files" / "gitignore.jinja2"
         ),
+        python_pyproject_template=dev.io.read_template(
+            repo_template / "python-files" / "pyproject.toml.jinja2"
+        ),
         mode=mode,
     )
 
@@ -954,7 +1421,7 @@ def render_template(template: jinja2.Template, **kwargs) -> str:
     return result
 
 
-def setup(mode: RepoSetupMode) -> None:
+def setup(mode: RepoSetupMode, *, interactive: bool = True) -> None:
     config = load_config()
     ctx = create_repo_setup_context(config, mode)
 
@@ -981,7 +1448,7 @@ def setup(mode: RepoSetupMode) -> None:
 
     defined_projects = config.defined_projects
     for name, project in defined_projects.items():
-        setup_project(ctx, project, interactive=True)
+        setup_project(ctx, project, interactive=interactive)
 
     project_dirs = [p.path.name for p in defined_projects.values()]
     ignored_dirs = [
