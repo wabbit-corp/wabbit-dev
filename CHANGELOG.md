@@ -17,3 +17,4 @@
 - Normalize setup task typing annotations to built-in generics (`list`/`dict`/`tuple`) for Python 3.10 style consistency.
 - Remove `github` module/client name shadowing in setup context creation by renaming the GitHub client handle.
 - Deduplicate WABBIT legal/docs file generation with a shared setup helper used by Python and Gradle project setup.
+- Deduplicate setup banner generation with a shared helper used by Python and Gradle setup flows.

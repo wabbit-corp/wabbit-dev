@@ -801,6 +801,20 @@ def _write_wabbit_legal_files(ctx: RepoSetupContext, project: Project) -> None:
     dev.io.write_text_file(project.path / "CODE_OF_CONDUCT.md", ctx.coc)
 
 
+def _write_banner(ctx: RepoSetupContext, project: Project) -> None:
+    create_banner(
+        image_path=ctx.repo_template / "banner4c.png",
+        font_path=ctx.repo_template / "CooperHewitt-Light.otf",
+        main_text=project.name,
+        subtitle_text=None,
+        background_color=(0, 0, 0, 0),
+        output_path=project.path / ".banner.png",
+        font_size=60,
+        subtitle_font_size=None,
+        padding=40,
+    )
+
+
 def setup_python_project(
     ctx: RepoSetupContext, project: PythonProject, interactive: bool = True
 ) -> None:
@@ -813,17 +827,7 @@ def setup_python_project(
 
     _write_wabbit_legal_files(ctx, project)
 
-    create_banner(
-        image_path=ctx.repo_template / "banner4c.png",
-        font_path=ctx.repo_template / "CooperHewitt-Light.otf",
-        main_text=project.name,
-        subtitle_text=None,
-        background_color=(0, 0, 0, 0),
-        output_path=project.path / ".banner.png",
-        font_size=60,
-        subtitle_font_size=None,
-        padding=40,
-    )
+    _write_banner(ctx, project)
 
     _write_requirements_file(
         project.path / "requirements.txt",
@@ -992,17 +996,7 @@ def setup_gradle_project(
         project.path / "gradle" / "wrapper" / "gradle-wrapper.properties",
     )
 
-    create_banner(
-        image_path=ctx.repo_template / "banner4c.png",
-        font_path=ctx.repo_template / "CooperHewitt-Light.otf",
-        main_text=project.name,
-        subtitle_text=None,
-        background_color=(0, 0, 0, 0),
-        output_path=project.path / ".banner.png",
-        font_size=60,
-        subtitle_font_size=None,
-        padding=40,
-    )
+    _write_banner(ctx, project)
 
 
 USED_COMMIT_MESSAGES = {}
