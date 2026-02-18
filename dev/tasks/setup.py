@@ -1214,7 +1214,9 @@ def commit_repo_changes(
                 editor = os.environ.get("EDITOR", "vim")  # Use vim as fallback
                 # Use a more robust temp file location if possible, or ensure .git dir exists
                 commit_file_path = Path(repo.working_dir) / ".git" / "COMMIT_EDITMSG"
-                commit_file_path.parent.mkdir(exist_ok=True)  # Ensure .git dir exists
+                commit_file_path.parent.mkdir(
+                    parents=True, exist_ok=True
+                )  # Ensure .git dir exists
 
                 # Create a temporary commit message file
                 commit_file_text = (

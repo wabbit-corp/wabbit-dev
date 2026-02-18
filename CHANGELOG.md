@@ -18,3 +18,4 @@
 - Remove `github` module/client name shadowing in setup context creation by renaming the GitHub client handle.
 - Deduplicate WABBIT legal/docs file generation with a shared setup helper used by Python and Gradle project setup.
 - Deduplicate setup banner generation with a shared helper used by Python and Gradle setup flows.
+- Use `parents=True, exist_ok=True` for setup-time commit message parent directory creation.
