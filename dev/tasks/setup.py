@@ -8,6 +8,9 @@ import os, io
 import ast
 import re
 
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version as PythonVersion
+
 import git
 from git import Repo
 import github
@@ -556,11 +559,32 @@ def _write_requirements_file(
 
 
 def _python_target_version(requires_python: str | None) -> str:
-    if requires_python:
-        for version in ("3.12", "3.11", "3.10", "3.9"):
-            if version in requires_python:
-                return "py" + version.replace(".", "")
-    return "py310"
+    default = PythonVersion("3.10")
+    if not requires_python:
+        target = default
+    else:
+        try:
+            spec = SpecifierSet(requires_python)
+        except InvalidSpecifier:
+            warning(
+                f"Invalid requires-python specifier {requires_python!r}; defaulting to py310"
+            )
+            target = default
+        else:
+            lower_bounds: List[PythonVersion] = []
+            for item in spec:
+                if item.operator not in {">=", ">", "==", "===", "~="}:
+                    continue
+                normalized = item.version
+                if normalized.endswith(".*"):
+                    normalized = normalized[:-2]
+                try:
+                    lower_bounds.append(PythonVersion(normalized))
+                except InvalidVersion:
+                    continue
+            target = max(lower_bounds) if lower_bounds else default
+
+    return f"py{target.major}{target.minor}"
 
 
 def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> str:

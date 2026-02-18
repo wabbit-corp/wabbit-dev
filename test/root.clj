@@ -26,6 +26,7 @@
         "semanticscholar>=0.9.0,<2.0.0"
         "jinja2>=3.1.5,<4.0.0"
         "pathspec>=0.12.1,<2.0.0"
+        "packaging>=24.1,<25.0.0"
         "pygithub>=2.5.0,<3.0.0"
         "gitpython>=3.1.44,<4.0.0"
         "graphviz>=0.20.3,<1.0.0"
