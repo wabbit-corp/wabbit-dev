@@ -130,6 +130,19 @@ def setup_project(
 ) -> None:
     name = project.name
 
+    # Each project should have a directory before project-type setup writes files.
+    if not project.path.exists():
+        error(f"Directory for {project.name} does not exist")
+        if not interactive or ask(f"Create directory for {project.name}?"):
+            project.path.mkdir(parents=True, exist_ok=True)
+        else:
+            raise Exception("Directory does not exist")
+
+    # Project directory should be a directory (lol).
+    if not project.path.is_dir():
+        error(f"{project.path} is not a directory")
+        return
+
     with Scope() as scope:
         if isinstance(project, GradleProject):
             setup_gradle_project(ctx, project, interactive=interactive)
@@ -151,20 +164,6 @@ def setup_project(
         #     if repo.active_branch.name == 'master':
         #         if repo.active_branch.tracking_branch() is None:
         #             repo.git.push('--set-upstream', 'origin', 'master')
-
-        # Each project should have a directory.
-        does_dir_exist = project.path.exists()
-        if not does_dir_exist:
-            error(f"Directory for {project.name} does not exist")
-            if not interactive or ask(f"Create directory for {project.name}?"):
-                project.path.mkdir()
-            else:
-                raise Exception("Directory does not exist")
-
-        # Project directory should be a directory (lol).
-        if not project.path.is_dir():
-            error(f"{project.path} is not a directory")
-            return
 
         is_github_repo_set = False
         if project.github_repo is not None:

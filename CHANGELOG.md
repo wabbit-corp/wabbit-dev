@@ -10,3 +10,4 @@
 - Split CLI entrypoint into `dev/cli.py` and add `setup --local` mode marker handling.
 - Normalize Python config keywords to kebab-case and drop legacy `python_*` keyword forms.
 - Simplify `PythonProject` internals by removing redundant `python_` field prefixes.
+- Ensure project directories are created/validated before per-project setup writes files.
