@@ -107,7 +107,10 @@ def _make_dependency_strings(
                 other_dependencies.append(dep.as_string())
 
             case DependencyTarget.Project(name):
-                subproject = ctx.config.defined_projects[name]
+                subproject = ctx.config.defined_projects.get(name)
+                if subproject is None:
+                    error(f"Unknown subproject dependency: {name}")
+                    continue
 
                 has_github_repo = subproject.github_repo is not None
                 artifact_name = subproject.artifact_name
@@ -789,9 +792,11 @@ def setup_python_project(
 
     if project.ownership == OwnershipType.WABBIT:
         if project.license is not None:
-            dev.io.write_text_file(
-                project.path / "LICENSE.md", ctx.licenses[project.license]
-            )
+            license_text = ctx.licenses.get(project.license)
+            if license_text is None:
+                error(f"Unknown license key: {project.license}")
+            else:
+                dev.io.write_text_file(project.path / "LICENSE.md", license_text)
         dev.io.write_text_file(project.path / "CLA.md", render_template(ctx.cla))
         dev.io.write_text_file(
             project.path / "CLA_EXPLANATIONS.md", render_template(ctx.cla_explanations)
@@ -958,9 +963,11 @@ def setup_gradle_project(
 
     if project.ownership == OwnershipType.WABBIT:
         if project.license is not None:
-            dev.io.write_text_file(
-                project.path / "LICENSE.md", ctx.licenses[project.license]
-            )
+            license_text = ctx.licenses.get(project.license)
+            if license_text is None:
+                error(f"Unknown license key: {project.license}")
+            else:
+                dev.io.write_text_file(project.path / "LICENSE.md", license_text)
         dev.io.write_text_file(project.path / "CLA.md", render_template(ctx.cla))
         dev.io.write_text_file(
             project.path / "CLA_EXPLANATIONS.md", render_template(ctx.cla_explanations)
