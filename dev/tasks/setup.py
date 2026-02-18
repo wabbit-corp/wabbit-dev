@@ -41,7 +41,7 @@ from dev.git_changes import compute_repo_diffs, FileType, ChangeType, FileDiff
 class RepoSetupMode(Enum):
     PROD = "prod"
     DEV = "dev"
-    IJ = "ij"
+    LOCAL = "local"
 
 
 @dataclass
@@ -112,7 +112,7 @@ def _make_dependency_strings(
                     ),
                 )
 
-                if has_github_repo and ctx.mode != RepoSetupMode.IJ:
+                if has_github_repo and ctx.mode != RepoSetupMode.LOCAL:
                     project_dependencies.append(artifact_dep.as_string())
                 else:
                     project_dependencies.append(
@@ -251,7 +251,7 @@ def setup_project(
                 repo.index.commit("Initial commit")
 
         # R3.2: The origin remote should be set
-        if repo is not None:
+        if repo is not None and ctx.mode != RepoSetupMode.LOCAL:
             if not repo.remotes:
                 origin_url = None
             else:
@@ -438,9 +438,10 @@ def setup_gradle_project(
     dev.io.write_text_file(project.path / "build.gradle.kts", result)
 
     match ctx.mode:
-        case RepoSetupMode.IJ:
+        case RepoSetupMode.LOCAL:
             dev.io.delete_if_exists(project.path / "settings.gradle.kts")
-            dev.io.touch(project.path / ".is-ij-mode")
+            dev.io.touch(project.path / ".is-local-mode")
+            dev.io.delete_if_exists(project.path / ".is-ij-mode")
             dev.io.delete_if_exists(project.path / ".is-dev-mode")
 
         case RepoSetupMode.DEV:
@@ -448,6 +449,7 @@ def setup_gradle_project(
                 project.path / "settings.gradle.kts",
                 clean_gradle_build_text(render_template(ctx.settings_template, project_name=project.name)),
             )
+            dev.io.delete_if_exists(project.path / ".is-local-mode")
             dev.io.delete_if_exists(project.path / ".is-ij-mode")
             dev.io.touch(project.path / ".is-dev-mode")
 
@@ -458,6 +460,7 @@ def setup_gradle_project(
                     ctx.subproject_settings_template, project_name=project.name
                 )),
             )
+            dev.io.delete_if_exists(project.path / ".is-local-mode")
             dev.io.delete_if_exists(project.path / ".is-ij-mode")
             dev.io.delete_if_exists(project.path / ".is-dev-mode")
 

@@ -1,5 +1,3 @@
-#!python3 -X utf8
-
 from dev.cli import main
 
 
