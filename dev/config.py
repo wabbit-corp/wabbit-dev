@@ -155,6 +155,40 @@ class JvmScalaLibrary(Feature):
         return [Scala(), Jvm()]
 
 
+def _normalize_jar_names(
+    *, jar: str | None, shaded: str | None, unshaded: str | None
+) -> tuple[str | None, str | None, str | None]:
+    provided = sum(value is not None for value in (jar, shaded, unshaded))
+    if provided > 1:
+        raise ValueError(
+            "Provide only one of jarName/shadedJarName/unshadedJarName"
+        )
+
+    def _validate_jar_name(value: str | None, field_name: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError(f"Expected string for {field_name}, got {type(value)}")
+        if not value.endswith(".jar"):
+            raise ValueError(f"Expected .jar file, got {value}")
+        return value
+
+    if jar is not None:
+        jar = _validate_jar_name(jar, "jarName")
+        base, _ = os.path.splitext(jar)
+        return jar, jar, f"{base}-unshaded.jar"
+
+    if shaded is not None:
+        shaded = _validate_jar_name(shaded, "shadedJarName")
+        base, _ = os.path.splitext(shaded)
+        return shaded, shaded, f"{base}-unshaded.jar"
+
+    if unshaded is not None:
+        unshaded = _validate_jar_name(unshaded, "unshadedJarName")
+        base, _ = os.path.splitext(unshaded)
+        return unshaded, f"{base}-shaded.jar", unshaded
+
+    return None, None, None
+
+
 @dataclass
 class JvmKotlinApplication(Feature):
     __feature_name__ = "jvm-kotlin-application"
@@ -164,36 +198,11 @@ class JvmKotlinApplication(Feature):
     unshadedJarName: Optional[str] = None
 
     def __post_init__(self):
-        if self.jarName:
-            assert isinstance(
-                self.jarName, str
-            ), f"Expected string, got {type(self.jarName)}"
-            assert self.jarName.endswith(
-                ".jar"
-            ), f"Expected .jar file, got {self.jarName}"
-            base, _ = os.path.splitext(self.jarName)
-            self.shadedJarName = self.jarName
-            self.unshadedJarName = f"{base}-unshaded.jar"
-        elif self.shadedJarName:
-            assert isinstance(
-                self.shadedJarName, str
-            ), f"Expected string, got {type(self.shadedJarName)}"
-            assert self.shadedJarName.endswith(
-                ".jar"
-            ), f"Expected .jar file, got {self.shadedJarName}"
-            base, _ = os.path.splitext(self.shadedJarName)
-            self.jarName = self.shadedJarName
-            self.unshadedJarName = f"{base}-unshaded.jar"
-        elif self.unshadedJarName:
-            assert isinstance(
-                self.unshadedJarName, str
-            ), f"Expected string, got {type(self.unshadedJarName)}"
-            assert self.unshadedJarName.endswith(
-                ".jar"
-            ), f"Expected .jar file, got {self.unshadedJarName}"
-            base, _ = os.path.splitext(self.unshadedJarName)
-            self.jarName = self.unshadedJarName
-            self.shadedJarName = f"{base}-shaded.jar"
+        self.jarName, self.shadedJarName, self.unshadedJarName = _normalize_jar_names(
+            jar=self.jarName,
+            shaded=self.shadedJarName,
+            unshaded=self.unshadedJarName,
+        )
 
     def implied(self) -> List[Feature]:
         return [
@@ -227,36 +236,11 @@ class JvmKotlinAgent(Feature):
     unshadedJarName: Optional[str] = None
 
     def __post_init__(self):
-        if self.jarName:
-            assert isinstance(
-                self.jarName, str
-            ), f"Expected string, got {type(self.jarName)}"
-            assert self.jarName.endswith(
-                ".jar"
-            ), f"Expected .jar file, got {self.jarName}"
-            base, _ = os.path.splitext(self.jarName)
-            self.shadedJarName = self.jarName
-            self.unshadedJarName = f"{base}-unshaded.jar"
-        elif self.shadedJarName:
-            assert isinstance(
-                self.shadedJarName, str
-            ), f"Expected string, got {type(self.shadedJarName)}"
-            assert self.shadedJarName.endswith(
-                ".jar"
-            ), f"Expected .jar file, got {self.shadedJarName}"
-            base, _ = os.path.splitext(self.shadedJarName)
-            self.jarName = self.shadedJarName
-            self.unshadedJarName = f"{base}-unshaded.jar"
-        elif self.unshadedJarName:
-            assert isinstance(
-                self.unshadedJarName, str
-            ), f"Expected string, got {type(self.unshadedJarName)}"
-            assert self.unshadedJarName.endswith(
-                ".jar"
-            ), f"Expected .jar file, got {self.unshadedJarName}"
-            base, _ = os.path.splitext(self.unshadedJarName)
-            self.jarName = self.unshadedJarName
-            self.shadedJarName = f"{base}-shaded.jar"
+        self.jarName, self.shadedJarName, self.unshadedJarName = _normalize_jar_names(
+            jar=self.jarName,
+            shaded=self.shadedJarName,
+            unshaded=self.unshadedJarName,
+        )
 
     def implied(self) -> List[Feature]:
         return [
