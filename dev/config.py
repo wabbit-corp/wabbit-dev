@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
+from abc import ABC, abstractmethod
 import dataclasses
 from dataclasses import dataclass
 from enum import Enum
@@ -475,7 +476,7 @@ DependencyTarget.Maven = MavenDependencyTarget
 ################################################################################
 
 
-class Project:
+class Project(ABC):
     path: Path
     name: str
     description: str | None
@@ -486,11 +487,13 @@ class Project:
     ownership: OwnershipType
     resolved_dependencies: List[Dependency]
 
-    def get_coarse_file_scope(self, path: Path) -> CoarseFileScope:
+    @abstractmethod
+    def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
         raise NotImplementedError(f"get_file_scope not implemented for {type(self)}")
 
     @property
-    def coarse_project_type(self) -> CoarseProjectType:
+    @abstractmethod
+    def coarse_project_type(self) -> Optional[CoarseProjectType]:
         raise NotImplementedError(
             f"coarse_project_type not implemented for {type(self)}"
         )

@@ -26,3 +26,4 @@
 - Parse Kotlin plugin definitions using right-split so `group:artifact:version` and `id:version` formats both work.
 - Build `GradleProject.artifact_name` from configured `group_name` and raise clear errors when group/version are missing.
 - Normalize jar `Dependency.as_string()` fileTree paths to POSIX form and escape Kotlin string literals safely.
+- Align `Project` base class coarse-scope/type contracts with subclasses by making both return types optional and abstract.
