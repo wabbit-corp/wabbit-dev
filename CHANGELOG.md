@@ -32,3 +32,4 @@
 - Tighten `Version.parse_or_null` to full-match version strings so tags like `1.2.3-alpha` are rejected instead of mis-parsed.
 - Allow offline `create_repo_setup_context()` without GitHub token and replace bare exception handling with explicit API-related exceptions.
 - Throttle JitPack polling on not-found responses to avoid tight-loop API hammering.
+- Parse Python requirements with `packaging.Requirement` and render Poetry dependency tables correctly for extras, markers, and URL requirements.

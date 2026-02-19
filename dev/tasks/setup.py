@@ -9,6 +9,7 @@ import ast
 import re
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import InvalidVersion, Version as PythonVersion
 
 import git
@@ -451,8 +452,13 @@ def _derive_deptry_package_map(
     mapping: dict[str, str] = {}
 
     for dep in dependencies:
-        dep_name, _ = _split_requirement(dep)
-        dep_name = dep_name.split("[", 1)[0]
+        try:
+            dep_name = Requirement(dep).name
+        except InvalidRequirement:
+            warning(
+                f"Invalid dependency requirement {dep!r}; skipping deptry auto-map"
+            )
+            continue
         if dep_name in imports:
             continue
         dep_norm = _normalize_import_name(dep_name)
@@ -537,13 +543,50 @@ def _format_toml_key(key: str) -> str:
     return f"\"{key}\""
 
 
-def _split_requirement(requirement: str) -> tuple[str, str]:
-    for idx, ch in enumerate(requirement):
-        if ch in "<>!=~":
-            name = requirement[:idx].strip()
-            spec = requirement[idx:].strip()
-            return name, spec
-    return requirement.strip(), "*"
+def _toml_string(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f"\"{escaped}\""
+
+
+def _format_poetry_dependency(requirement: str) -> tuple[str, str]:
+    try:
+        parsed = Requirement(requirement)
+    except InvalidRequirement as ex:
+        raise ValueError(f"Invalid dependency requirement: {requirement}") from ex
+
+    key = _format_toml_key(parsed.name)
+    specifier = str(parsed.specifier) or "*"
+    marker = str(parsed.marker) if parsed.marker is not None else None
+    extras = sorted(parsed.extras)
+
+    core = requirement.split(";", 1)[0].strip()
+    remainder = core
+    if core.lower().startswith(parsed.name.lower()):
+        remainder = core[len(parsed.name):].lstrip()
+    if remainder.startswith("["):
+        extras_end = remainder.find("]")
+        if extras_end != -1:
+            remainder = remainder[extras_end + 1 :].lstrip()
+    if remainder and not remainder.startswith("@"):
+        specifier = remainder
+
+    if parsed.url is None and not extras and marker is None:
+        return key, _toml_string(specifier)
+
+    table_fields: list[str] = []
+    if parsed.url is not None:
+        table_fields.append(f"url = {_toml_string(parsed.url)}")
+    else:
+        table_fields.append(f"version = {_toml_string(specifier)}")
+
+    if extras:
+        table_fields.append(f"extras = {_toml_list(extras)}")
+
+    if marker is not None:
+        table_fields.append(f"markers = {_toml_string(marker)}")
+
+    value = "{ " + ", ".join(table_fields) + " }"
+    return key, value
 
 
 def _write_requirements_file(
@@ -615,15 +658,13 @@ def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> st
 
     dependencies_lines: list[str] = []
     for dep in dependencies:
-        name, spec = _split_requirement(dep)
-        key = _format_toml_key(name)
-        dependencies_lines.append(f"{key} = \"{spec}\"")
+        key, value = _format_poetry_dependency(dep)
+        dependencies_lines.append(f"{key} = {value}")
 
     dev_dependencies_lines: list[str] = []
     for dep in dev_dependencies:
-        name, spec = _split_requirement(dep)
-        key = _format_toml_key(name)
-        dev_dependencies_lines.append(f"{key} = \"{spec}\"")
+        key, value = _format_poetry_dependency(dep)
+        dev_dependencies_lines.append(f"{key} = {value}")
 
     script_lines: list[str] = []
     for script in project.scripts:
