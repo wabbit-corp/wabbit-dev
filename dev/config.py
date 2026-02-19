@@ -1009,7 +1009,7 @@ def load_config() -> Config:
         ), f"Expected string or None, got {type(repo)}"
         assert name not in config.plugins, f"Plugin {name} already exists"
         assert ":" in value, f"Invalid plugin definition: {value}"
-        artifact_name, version = value.split(":")
+        artifact_name, version = value.rsplit(":", 1)
         config.plugins[name] = KotlinPluginDefinition(artifact_name, version, repo)
 
     @ctx.register(name="define-maven-library")
