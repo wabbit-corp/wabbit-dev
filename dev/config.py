@@ -301,11 +301,15 @@ def resolve_features(features: List[Feature]) -> Dict[str, Feature]:
     resolved_features: Dict[str, Feature] = {
         type(feature).__feature_name__: feature for feature in features
     }
-    for feature in list(resolved_features.values()):
+    queue: List[Feature] = list(resolved_features.values())
+
+    while queue:
+        feature = queue.pop()
         for implied in feature.implied():
             implied_name = type(implied).__feature_name__
             if implied_name not in resolved_features:
                 resolved_features[implied_name] = implied
+                queue.append(implied)
             else:
                 assert (
                     resolved_features[implied_name] == implied

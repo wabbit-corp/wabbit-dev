@@ -19,3 +19,4 @@
 - Deduplicate WABBIT legal/docs file generation with a shared setup helper used by Python and Gradle project setup.
 - Deduplicate setup banner generation with a shared helper used by Python and Gradle setup flows.
 - Use `parents=True, exist_ok=True` for setup-time commit message parent directory creation.
+- Make `resolve_features()` transitive by processing implied features with a worklist until fixed point.
