@@ -1055,20 +1055,13 @@ def commit_repo_changes(
             else:
                 raise Exception("Unstaged changes exist")
 
-    # -------------------------------------------------------------------------
-    # Now let's see if there are changes relative to HEAD (after possible staging).
-    # If HEAD is valid and changes exist, warn the user and show diffs.
-    # -------------------------------------------------------------------------
-    # Re-check changes after staging, so HEAD->WORKING is up to date.
-    if repo.head.is_valid():
-        post_stage_diffs = repo.head.commit.diff(None)  # HEAD vs. working
-        changed_paths = [d.a_path for d in post_stage_diffs if d.a_path]
-    else:
-        # If HEAD is invalid (no commits), compare index to nothing
-        post_stage_diffs = repo.index.diff(None)
-        changed_paths = [d.a_path for d in post_stage_diffs]
+    # Re-gather changes after optional staging and use this as the single source of truth.
+    final_diffs: list[FileDiff] = compute_repo_diffs(repo, include_untracked=True)
+    has_changes = any(
+        diff_item.change_type != ChangeType.UNCHANGED for diff_item in final_diffs
+    )
 
-    if changed_paths:
+    if has_changes:
         warning(f"{project.name}: Changes on master")
 
         # ---------------------------------------------------------------------
@@ -1076,9 +1069,6 @@ def commit_repo_changes(
         # using the FileDiff objects from gather_changes again (or we can re-run).
         # We'll do a single pass and write all info into buf.
         # ---------------------------------------------------------------------
-        # Re-gather to see final state
-        final_diffs: list[FileDiff] = compute_repo_diffs(repo, include_untracked=True)
-
         buf = io.StringIO()
         for diff_item in final_diffs:
             # Skip unchanged files (shouldn't normally be returned, but check anyway)

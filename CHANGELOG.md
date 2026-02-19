@@ -28,3 +28,4 @@
 - Normalize jar `Dependency.as_string()` fileTree paths to POSIX form and escape Kotlin string literals safely.
 - Align `Project` base class coarse-scope/type contracts with subclasses by making both return types optional and abstract.
 - Fix publish tag handling so existing tags still bind `tag_commit` instead of crashing on later JitPack checks.
+- Use computed `final_diffs` as commit truth in setup commit flow so added-only files are never skipped.
