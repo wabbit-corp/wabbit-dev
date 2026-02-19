@@ -686,7 +686,11 @@ class GradleProject(Project):
 
     @property
     def artifact_name(self) -> str:
-        return f"com.github.wabbit-corp:{self.name}:{self.version}"
+        if not self.group_name:
+            raise ValueError(f"GradleProject {self.name} missing group_name")
+        if not self.version:
+            raise ValueError(f"GradleProject {self.name} missing version")
+        return f"{self.group_name}:{self.name}:{self.version}"
 
     @property
     def coarse_project_type(self) -> Optional[CoarseProjectType]:
