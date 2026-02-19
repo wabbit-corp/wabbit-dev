@@ -33,3 +33,4 @@
 - Allow offline `create_repo_setup_context()` without GitHub token and replace bare exception handling with explicit API-related exceptions.
 - Throttle JitPack polling on not-found responses to avoid tight-loop API hammering.
 - Parse Python requirements with `packaging.Requirement` and render Poetry dependency tables correctly for extras, markers, and URL requirements.
+- Add timeout and request-exception handling for CoC download to avoid indefinite hangs during setup.

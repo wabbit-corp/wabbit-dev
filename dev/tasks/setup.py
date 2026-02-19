@@ -1359,12 +1359,14 @@ def get_coc_file() -> str:
 
     # https://raw.githubusercontent.com/wabbit-corp/code-of-excellence/refs/heads/master/CODE_OF_CONDUCT.md
     coc_url = "https://raw.githubusercontent.com/wabbit-corp/code-of-excellence/refs/heads/master/CODE_OF_CONDUCT.md"
-    response = requests.get(coc_url)
-    if response.status_code == 200:
-        return response.text
-    else:
-        error(f"Failed to fetch CoC file: {response.status_code}")
-        raise Exception(f"Failed to fetch CoC file: {response.status_code}")
+    try:
+        response = requests.get(coc_url, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as ex:
+        error(f"Failed to fetch CoC file: {ex}")
+        raise RuntimeError("Failed to fetch CoC file") from ex
+
+    return response.text
 
 
 def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupContext:
