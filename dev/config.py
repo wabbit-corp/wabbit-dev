@@ -776,7 +776,7 @@ class Config:
     libraries: OrderedDict[str, MavenLibraryDefinition] = dataclasses.field(
         default_factory=OrderedDict
     )
-    library_groups: OrderedDict[str, List[str]] = dataclasses.field(
+    library_groups: OrderedDict[str, List[str | Dependency | List[Dependency]]] = dataclasses.field(
         default_factory=OrderedDict
     )
     defined_projects: OrderedDict[str, Project] = dataclasses.field(
@@ -1027,15 +1027,33 @@ def load_config() -> Config:
     def library_group(
         name: str, children: List[str | Dependency | List[Dependency]]
     ) -> None:
-        assert isinstance(name, str), f"Expected string, got {type(name)}"
-        assert name not in config.library_groups, f"Library group {name} already exists"
-        assert isinstance(
-            children, list
-        ), f"Expected list of libraries, got {type(children)}"
-        # assert all(isinstance(lib, str) or isinstance(lib, Dependency) for lib in children), f"Expected list of strings, got {children}"
-        assert all(
-            lib in children for lib in children
-        ), f"Unknown libraries: {children}"
+        if not isinstance(name, str):
+            raise TypeError(f"Expected string, got {type(name)}")
+        if name in config.library_groups:
+            raise ValueError(f"Library group {name} already exists")
+        if not isinstance(children, list):
+            raise TypeError(f"Expected list of libraries, got {type(children)}")
+
+        for child in children:
+            if isinstance(child, str):
+                if (
+                    child in config.libraries
+                    or child in config.library_groups
+                    or is_valid_maven_coordinate(child)
+                    or child.startswith((".", "/", ":"))
+                ):
+                    continue
+                raise ValueError(f"Unknown library/group in group {name}: {child}")
+            if isinstance(child, Dependency):
+                continue
+            if isinstance(child, list) and all(
+                isinstance(item, Dependency) for item in child
+            ):
+                continue
+            raise TypeError(
+                f"Invalid group child in {name}: {child} ({type(child)})"
+            )
+
         config.library_groups[name] = children
 
     def parse_gradle_dependency(

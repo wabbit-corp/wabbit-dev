@@ -22,3 +22,4 @@
 - Make `resolve_features()` transitive by processing implied features with a worklist until fixed point.
 - Merge same-type features in `resolve_features()` by filling `None` fields and raising only on real contradictions.
 - Deduplicate JVM Kotlin jar-name normalization and reject multiple jar-name inputs in feature constructors.
+- Replace no-op maven library-group assertions with explicit child validation and clear errors for unknown/invalid entries.
