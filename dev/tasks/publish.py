@@ -221,6 +221,7 @@ async def poll_jitpack_build_status(
             versions = await api.get_versions(group_id, artifact_id, "reload")
         except JitPackNotFoundError:
             error(f"JitPack build not found for {group_id}:{artifact_id}:{version}")
+            await asyncio.sleep(3)
             continue
         except JitPackAuthError:
             error("JitPackAuthError: Check your session cookie or token!")
