@@ -25,3 +25,4 @@
 - Replace no-op maven library-group assertions with explicit child validation and clear errors for unknown/invalid entries.
 - Parse Kotlin plugin definitions using right-split so `group:artifact:version` and `id:version` formats both work.
 - Build `GradleProject.artifact_name` from configured `group_name` and raise clear errors when group/version are missing.
+- Normalize jar `Dependency.as_string()` fileTree paths to POSIX form and escape Kotlin string literals safely.

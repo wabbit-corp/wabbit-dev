@@ -421,8 +421,16 @@ class Dependency:
 
         match self.target:
             case DependencyTarget.JarFile(path):
-                dirname, basename = os.path.split(path)
-                return f'{modifier}(fileTree(mapOf("dir" to "{dirname}", "include" to listOf("{basename}"))))'
+                dirname = path.parent.as_posix() or "."
+                basename = path.name
+
+                escaped_dirname = dirname.replace("\\", "\\\\").replace('"', '\\"')
+                escaped_basename = basename.replace("\\", "\\\\").replace('"', '\\"')
+
+                return (
+                    f'{modifier}(fileTree(mapOf("dir" to "{escaped_dirname}", '
+                    f'"include" to listOf("{escaped_basename}"))))'
+                )
 
             case DependencyTarget.Project(project):
                 return f'{modifier}(project(":{project}"))'
