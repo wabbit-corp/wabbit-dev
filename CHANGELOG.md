@@ -20,3 +20,4 @@
 - Deduplicate setup banner generation with a shared helper used by Python and Gradle setup flows.
 - Use `parents=True, exist_ok=True` for setup-time commit message parent directory creation.
 - Make `resolve_features()` transitive by processing implied features with a worklist until fixed point.
+- Merge same-type features in `resolve_features()` by filling `None` fields and raising only on real contradictions.

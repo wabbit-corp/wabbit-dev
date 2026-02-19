@@ -297,23 +297,65 @@ class PythonImportLinter(Feature):
     layers: List[str] = dataclasses.field(default_factory=list)
 
 
+def _merge_feature(existing: Feature, incoming: Feature) -> Feature:
+    if type(existing) is not type(incoming):
+        raise TypeError(
+            f"Cannot merge features with different types: {type(existing)} vs {type(incoming)}"
+        )
+
+    if dataclasses.is_dataclass(existing):
+        merged_kwargs: Dict[str, Any] = {}
+        for field in dataclasses.fields(existing):
+            existing_value = getattr(existing, field.name)
+            incoming_value = getattr(incoming, field.name)
+            if existing_value is None and incoming_value is not None:
+                merged_kwargs[field.name] = incoming_value
+            elif incoming_value is None or existing_value == incoming_value:
+                merged_kwargs[field.name] = existing_value
+            else:
+                raise ValueError(
+                    f"Implied feature {type(existing).__feature_name__} conflicts on "
+                    f"{field.name}: {existing_value} != {incoming_value}"
+                )
+        return type(existing)(**merged_kwargs)
+
+    if existing != incoming:
+        raise ValueError(
+            f"Implied feature {type(existing).__feature_name__} conflicts: "
+            f"{existing} != {incoming}"
+        )
+    return existing
+
+
 def resolve_features(features: List[Feature]) -> Dict[str, Feature]:
-    resolved_features: Dict[str, Feature] = {
-        type(feature).__feature_name__: feature for feature in features
-    }
-    queue: List[Feature] = list(resolved_features.values())
+    resolved_features: Dict[str, Feature] = {}
+    queue: List[Feature] = []
+    for feature in features:
+        feature_name = type(feature).__feature_name__
+        existing = resolved_features.get(feature_name)
+        if existing is None:
+            resolved_features[feature_name] = feature
+            queue.append(feature)
+            continue
+
+        merged = _merge_feature(existing, feature)
+        if merged != existing:
+            resolved_features[feature_name] = merged
+            queue.append(merged)
 
     while queue:
         feature = queue.pop()
         for implied in feature.implied():
             implied_name = type(implied).__feature_name__
-            if implied_name not in resolved_features:
+            existing = resolved_features.get(implied_name)
+            if existing is None:
                 resolved_features[implied_name] = implied
                 queue.append(implied)
             else:
-                assert (
-                    resolved_features[implied_name] == implied
-                ), f"Implied feature {implied_name} is already defined with a different configuration {resolved_features[implied_name]} != {implied}"
+                merged = _merge_feature(existing, implied)
+                if merged != existing:
+                    resolved_features[implied_name] = merged
+                    queue.append(merged)
     return resolved_features
 
 
