@@ -58,7 +58,9 @@ class Version:
     @classmethod
     def parse_or_null(cls, version: Quoted[SStr] | str) -> Union["Version", None]:
         value = version.value.value if isinstance(version, Quoted) else version
-        match = re.match(r"(\d+)\.(\d+)\.(\d+)(\+dev-SNAPSHOT)?", value)
+        match = re.fullmatch(
+            r"(\d+)\.(\d+)\.(\d+)(\+dev-SNAPSHOT)?", value.strip()
+        )
         if not match:
             return None
 
