@@ -30,3 +30,4 @@
 - Fix publish tag handling so existing tags still bind `tag_commit` instead of crashing on later JitPack checks.
 - Use computed `final_diffs` as commit truth in setup commit flow so added-only files are never skipped.
 - Tighten `Version.parse_or_null` to full-match version strings so tags like `1.2.3-alpha` are rejected instead of mis-parsed.
+- Allow offline `create_repo_setup_context()` without GitHub token and replace bare exception handling with explicit API-related exceptions.

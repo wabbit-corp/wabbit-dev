@@ -1328,36 +1328,50 @@ def get_coc_file() -> str:
 
 def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupContext:
     from github import Github
+    from github.GithubException import GithubException
+    from requests.exceptions import RequestException
 
-    assert config.github_token is not None, "Github token is not set"
-    try:
-        gh = Github(login_or_token=config.github_token, retry=0)
+    all_repos: list[Any] = []
+    known_repo_names: list[str] = []
+    known_github_repos: dict[str, RepoInfo] = {}
+    is_github_api_available = False
 
-        # list(wabbit_corp_org.get_repos()) + list(corsaircraft_org.get_repos()) +
-        # list(sir_wabbit_org.get_repos()) + \
-        all_repos = list(gh.get_user().get_repos())
-        known_repo_names = [r.full_name for r in all_repos]
-        known_github_repos = {
-            r.full_name: RepoInfo(
-                organization=r.owner.login,
-                name=r.name,
-                is_private=r.private,
-            )
-            for r in all_repos
-        }
+    if not config.github_token:
+        warning("GitHub token not set; proceeding without GitHub API.")
+    else:
+        try:
+            gh = Github(login_or_token=config.github_token, retry=0)
 
-        for repo in all_repos:
-            print(
-                f"Repo: {repo.name} ({repo.full_name}) - {repo.private} - {repo.clone_url}"
-            )
+            # list(wabbit_corp_org.get_repos()) + list(corsaircraft_org.get_repos()) +
+            # list(sir_wabbit_org.get_repos()) + \
+            all_repos = list(gh.get_user().get_repos())
+            known_repo_names = [r.full_name for r in all_repos]
+            known_github_repos = {
+                r.full_name: RepoInfo(
+                    organization=r.owner.login,
+                    name=r.name,
+                    is_private=r.private,
+                )
+                for r in all_repos
+            }
 
-        is_github_api_available = True
+            for repo in all_repos:
+                print(
+                    f"Repo: {repo.name} ({repo.full_name}) - {repo.private} - {repo.clone_url}"
+                )
 
-    except:
+            is_github_api_available = True
+        except (GithubException, RequestException, OSError) as ex:
+            warning(f"GitHub API unavailable; proceeding without API: {ex}")
+        except TimeoutError as ex:
+            warning(f"GitHub API timed out; proceeding without API: {ex}")
+        except ValueError as ex:
+            warning(f"GitHub API error; proceeding without API: {ex}")
+
+    if not is_github_api_available:
         all_repos = []
         known_repo_names = []
         known_github_repos = {}
-        is_github_api_available = False
 
     repo_template = Path("data-repo-template")
 
