@@ -27,3 +27,4 @@
 - Build `GradleProject.artifact_name` from configured `group_name` and raise clear errors when group/version are missing.
 - Normalize jar `Dependency.as_string()` fileTree paths to POSIX form and escape Kotlin string literals safely.
 - Align `Project` base class coarse-scope/type contracts with subclasses by making both return types optional and abstract.
+- Fix publish tag handling so existing tags still bind `tag_commit` instead of crashing on later JitPack checks.

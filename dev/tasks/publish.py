@@ -77,6 +77,16 @@ def get_latest_version(repo) -> Tuple[Version | None, git.Commit | None]:
     return latest_version, latest_version_commit
 
 
+def _resolve_tag_commit(repo: git.Repo, tag_name: str, project_name: str) -> git.Commit:
+    tag_ref = next((t for t in repo.tags if t.name == tag_name), None)
+    if tag_ref is not None:
+        warning(f"Tag {tag_name} already exists for {project_name}.")
+        return tag_ref.commit
+
+    repo.create_tag(tag_name, message=f"Release {tag_name}")
+    return repo.head.commit
+
+
 ##############################################################################
 # 2. Updating root.clj (naive string search)
 ##############################################################################
@@ -564,13 +574,7 @@ async def publish_single_project(
         tag_name = new_version_str
         if last_repo_version != new_version:
             # Step 3: Tag & push
-            existing_tags = [t.name for t in repo.tags]
-            if tag_name in existing_tags:
-                warning(f"Tag {tag_name} already exists for {proj.name}.")
-                # Optionally remove or do nothing. We'll do nothing for now.
-            else:
-                repo.create_tag(tag_name, message=f"Release {tag_name}")
-                tag_commit = repo.head.commit
+            tag_commit = _resolve_tag_commit(repo, tag_name, proj.name)
         else:
             tag_commit = last_repo_version_tag_commit
 
