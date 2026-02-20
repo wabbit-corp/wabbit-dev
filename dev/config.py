@@ -15,8 +15,10 @@ from dev.checks.base import CoarseFileScope, CoarseProjectType
 
 from mu.types import SAtom, SStr, SDoc
 from mu.parser import sexpr
-from mu.exec import ExecutionContext, Quoted, eval_sexpr
+from mu.exec import Quoted
+from mu.typed import MuDecodeError, decode_expr
 from dev.base import Module
+import dev.config_typed as config_typed
 
 ################################################################################
 # Ownership Type
@@ -819,354 +821,45 @@ class Config:
 
 def load_config() -> Config:
     with open(CONFIG_FILE, "rt", encoding="utf-8") as f:
-        root = sexpr(f.read())
+        root = sexpr(f.read(), no_spans=False)
     with open(CONFIG_PRIVATE_FILE, "rt", encoding="utf-8") as f:
-        root_private = sexpr(f.read())
+        root_private = sexpr(f.read(), no_spans=False)
 
     config = Config(raw=root)
-    ctx = ExecutionContext()
 
     modules = Module.load_modules()
-    for module in modules.values():
-        module.register_script_commands(ctx)
     config.modules = modules
 
-    ctx.env["true"] = True
-    ctx.env["false"] = False
-    ctx.env["null"] = None
-
-    @ctx.register(name="checks/disable")
-    def disable_check(error_name: str, pathspec: str):
-        config.disabled_checks.append((error_name, pathspec))
-
-    @ctx.register(name="define")
-    def define(name: Quoted[SAtom], value: Any):
-        assert isinstance(name.value, SAtom), f"Expected atom, got {type(name)}"
-        # print(f"Defined {name.value} as {value}")
-        ctx.env[name.value.value] = value
-
-    @ctx.register(name="openai-key")
-    def openai_key(key: str):
-        config.openai_key = key
-
-    @ctx.register(name="github-token")
-    def github_token(token: str):
-        config.github_token = token
-
-    @ctx.register(name="jitpack-cookie")
-    def jitpack_cookie(cookie: str):
-        config.jitpack_cookie = cookie
-
-    @ctx.register(name="default-maven-project-group")
-    def default_maven_project_group(group: str):
-        config.default_maven_project_group = group
-
-    @ctx.register(name="git-user")
-    def git_user(name: str, email: str):
-        config.default_git_user_name = name
-        config.default_git_user_email = email
-
-    @ctx.register(name="git-censor")
-    def git_censor(name: str | None = None, email: str | None = None):
-        pass
-
-    @ctx.register(name="anthropic-key")
-    def anthropic_key(key: str):
-        config.anthropic_key = key
-
-    @ctx.register(name="jvm-version")
-    def jvm_version(version: int | str):
-        config.jvm_version = _coerce_jvm_version(version, "jvm-version")
-
-    @ctx.register(name="jvm-defaults")
-    def jvm_defaults(version: int | str | None = None):
-        if version is not None:
-            config.jvm_version = _coerce_jvm_version(version, "jvm-defaults.version")
-
-    @ctx.register(name="jvm-kotlin-library")
-    def jvm_kotlin_library() -> JvmKotlinLibrary:
-        return JvmKotlinLibrary()
-
-    @ctx.register(name="jvm-scala-library")
-    def jvm_scala_library() -> JvmScalaLibrary:
-        return JvmScalaLibrary()
-
-    @ctx.register(name="jvm-kotlin-application")
-    def jvm_kotlin_application(
-        main: str, jar: str | None = None
-    ) -> JvmKotlinApplication:
-        return JvmKotlinApplication(main, jar)
-
-    @ctx.register(name="paper-plugin")
-    def paper_plugin(name: str, main: str, apiVersion: str) -> PaperPlugin:
-        return PaperPlugin(main, name, apiVersion)
-
-    @ctx.register(name="jvm-kotlin-agent")
-    def jvm_kotlin_agent(main: str, jar: str | None = None) -> JvmKotlinAgent:
-        return JvmKotlinAgent(main, jar)
-
-    @ctx.register(name="intellij-plugin")
-    def intellij_plugin(pluginName: str) -> IntellijPlugin:
-        return IntellijPlugin(pluginName)
-
-    @ctx.register(name="kotlin-serialization")
-    def kotlin_serialization() -> KotlinSerialization:
-        return KotlinSerialization()
-
-    def _assert_no_unknown_kwargs(kwargs: Dict[str, Any], context: str) -> None:
-        if kwargs:
-            raise ValueError(
-                f"Unknown {context} keyword arguments: {', '.join(sorted(kwargs.keys()))}"
-            )
-
-    def _assert_kebab_case_kwargs(
-        raw_kwargs: Dict[str, Any],
-        context: str,
-        *,
-        forbidden_prefixes: List[str] | None = None,
-    ) -> None:
-        invalid_keys: List[str] = []
-        for raw_key in raw_kwargs.keys():
-            if not isinstance(raw_key, str):
+    module_command_handlers: dict[type[Any], Any] = {}
+    module_command_types: list[type[Any]] = []
+    for module in modules.values():
+        for registration in module.register_typed_config_commands():
+            if registration.command_type in module_command_handlers:
                 raise ValueError(
-                    f"Expected keyword argument name as string, got {type(raw_key)}"
+                    f"Duplicate typed config command registration for "
+                    f"{registration.command_type}"
                 )
-            if "_" in raw_key:
-                invalid_keys.append(raw_key)
+            module_command_handlers[registration.command_type] = registration.apply
+            module_command_types.append(registration.command_type)
+
+    top_level_target = config_typed.make_top_level_target(module_command_types)
+    defines: dict[str, Any] = {}
+
+    def _extract_expr_span(expr: Any) -> Any | None:
+        if isinstance(expr, (SAtom, SStr)):
+            span = expr.span
+            if span is None:
+                return None
+            token = getattr(span, "token", None)
+            return token if token is not None else span
+
+        for attr in ("open_bracket", "span"):
+            value = getattr(expr, attr, None)
+            if value is None:
                 continue
-            if forbidden_prefixes and any(
-                raw_key.startswith(prefix) for prefix in forbidden_prefixes
-            ):
-                invalid_keys.append(raw_key)
-        if invalid_keys:
-            raise ValueError(
-                f"{context} keywords must be kebab-case without legacy prefixes: "
-                + ", ".join(sorted(set(invalid_keys)))
-            )
-
-    @ctx.register(name="python-deptry")
-    def python_deptry(**raw_kwargs: Any) -> PythonDeptry:
-        _assert_kebab_case_kwargs(raw_kwargs, "python-deptry")
-        kwargs = dict(raw_kwargs)
-        package_map = kwargs.pop("package-map", {})
-        per_rule_ignores = kwargs.pop("per-rule-ignores", {})
-        auto_package_map = kwargs.pop("auto-package-map", False)
-        _assert_no_unknown_kwargs(kwargs, "python-deptry")
-        if package_map is None:
-            package_map = {}
-        if per_rule_ignores is None:
-            per_rule_ignores = {}
-        return PythonDeptry(
-            package_map=package_map,
-            per_rule_ignores=per_rule_ignores,
-            auto_package_map=auto_package_map,
-        )
-
-    @ctx.register(name="python-importlinter")
-    def python_importlinter(**raw_kwargs: Any) -> PythonImportLinter:
-        _assert_kebab_case_kwargs(raw_kwargs, "python-importlinter")
-        kwargs = dict(raw_kwargs)
-        root_packages = kwargs.pop("root-packages", [])
-        layers = kwargs.pop("layers", [])
-        _assert_no_unknown_kwargs(kwargs, "python-importlinter")
-        if root_packages is None:
-            root_packages = []
-        if layers is None:
-            layers = []
-        return PythonImportLinter(
-            root_packages=root_packages,
-            layers=layers,
-        )
-
-    @ctx.register(name="python-defaults")
-    def python_defaults(**raw_kwargs: Any) -> None:
-        _assert_kebab_case_kwargs(raw_kwargs, "python-defaults")
-        kwargs = dict(raw_kwargs)
-        line_length = kwargs.pop("line-length", None)
-        target_version = kwargs.pop("target-version", None)
-        coverage_fail_under = kwargs.pop("coverage-fail-under", None)
-        coverage_precision = kwargs.pop("coverage-precision", None)
-        coverage_branch = kwargs.pop("coverage-branch", None)
-        coverage_show_missing = kwargs.pop("coverage-show-missing", None)
-        coverage_skip_empty = kwargs.pop("coverage-skip-empty", None)
-        coverage_xml_output = kwargs.pop("coverage-xml-output", None)
-        _assert_no_unknown_kwargs(kwargs, "python-defaults")
-        defaults = config.python_defaults
-        if line_length is not None:
-            defaults.line_length = line_length
-        if target_version is not None:
-            defaults.target_version = target_version
-        if coverage_fail_under is not None:
-            defaults.coverage_fail_under = coverage_fail_under
-        if coverage_precision is not None:
-            defaults.coverage_precision = coverage_precision
-        if coverage_branch is not None:
-            defaults.coverage_branch = coverage_branch
-        if coverage_show_missing is not None:
-            defaults.coverage_show_missing = coverage_show_missing
-        if coverage_skip_empty is not None:
-            defaults.coverage_skip_empty = coverage_skip_empty
-        if coverage_xml_output is not None:
-            defaults.coverage_xml_output = coverage_xml_output
-
-    ###############################################################################################
-    # Dependencies
-    ###############################################################################################
-
-    @ctx.register(name="define-maven-repo")
-    def maven_repository(name: str, url: str):
-        config.repositories[name] = MavenRepositoryDefinition(name, url)
-
-    @ctx.register(name="define-kotlin-plugin")
-    def plugin_dep(name: str, value: str, repo: str | None = None):
-        assert isinstance(name, str), f"Expected string, got {type(name)}"
-        assert isinstance(value, str), f"Expected string, got {type(value)}"
-        assert (
-            isinstance(repo, str) or repo is None
-        ), f"Expected string or None, got {type(repo)}"
-        assert name not in config.plugins, f"Plugin {name} already exists"
-        assert ":" in value, f"Invalid plugin definition: {value}"
-        artifact_name, version = value.rsplit(":", 1)
-        config.plugins[name] = KotlinPluginDefinition(artifact_name, version, repo)
-
-    @ctx.register(name="define-maven-library")
-    def library(name: str, maven_urn: str, repo: str | None = None) -> None:
-        assert isinstance(name, str), f"Expected string, got {type(name)}"
-        assert isinstance(maven_urn, str), f"Expected string, got {type(maven_urn)}"
-        assert is_valid_maven_coordinate(
-            maven_urn
-        ), f"Invalid Maven coordinate: {maven_urn}"
-        assert name not in config.libraries, f"Library {name} already exists"
-        coord = MavenCoordinate.parse(maven_urn)
-        config.libraries[name] = MavenLibraryDefinition(name, coord, repo)
-
-    @ctx.register(name="define-maven-library-group")
-    def library_group(
-        name: str, children: List[str | Dependency | List[Dependency]]
-    ) -> None:
-        if not isinstance(name, str):
-            raise TypeError(f"Expected string, got {type(name)}")
-        if name in config.library_groups:
-            raise ValueError(f"Library group {name} already exists")
-        if not isinstance(children, list):
-            raise TypeError(f"Expected list of libraries, got {type(children)}")
-
-        for child in children:
-            if isinstance(child, str):
-                if (
-                    child in config.libraries
-                    or child in config.library_groups
-                    or is_valid_maven_coordinate(child)
-                    or child.startswith((".", "/", ":"))
-                ):
-                    continue
-                raise ValueError(f"Unknown library/group in group {name}: {child}")
-            if isinstance(child, Dependency):
-                continue
-            if isinstance(child, list) and all(
-                isinstance(item, Dependency) for item in child
-            ):
-                continue
-            raise TypeError(
-                f"Invalid group child in {name}: {child} ({type(child)})"
-            )
-
-        config.library_groups[name] = children
-
-    def parse_gradle_dependency(
-        dep: str | Dependency, modifier: str | None = None
-    ) -> List[Dependency]:
-        if isinstance(dep, Dependency):
-            return [dep]
-
-        if isinstance(dep, list):
-            result = []
-            for item in dep:
-                if isinstance(item, str):
-                    result.extend(parse_gradle_dependency(item, modifier))
-                elif isinstance(item, Dependency):
-                    result.append(item)
-                else:
-                    raise ValueError(f"Unknown dependency type: {item}")
-            return result
-
-        assert isinstance(dep, str), f"Expected string or Dependency, got {type(dep)}"
-
-        if modifier is not None:
-            assert modifier in [
-                "test",
-                "implementation",
-                "api",
-                "compileOnly",
-                "runtimeOnly",
-                "testImplementation",
-                "testCompileOnly",
-                "testRuntimeOnly",
-            ], f"Unknown modifier: {modifier}"
-
-        if dep.startswith(".") or dep.startswith("/"):
-            path = Path(dep)
-            # FIXME: Check if file exists
-            # assert path.exists(), f"File {path} does not exist"
-            return [
-                Dependency(scope=modifier, target=JarFileDependencyTarget(path=path))
-            ]
-
-        if dep.startswith(":"):
-            project_name = dep[1:]
-            assert (
-                project_name in config.defined_projects
-            ), f"Project {project_name} is not defined"
-            return [
-                Dependency(
-                    scope=modifier, target=ProjectDependencyTarget(project=project_name)
-                )
-            ]
-
-        if dep in config.library_groups:
-            result = []
-            for lib in config.library_groups[dep]:
-                result.extend(parse_gradle_dependency(lib, modifier))
-            return result
-
-        if dep in config.libraries:
-            maven_urn = config.libraries[dep].maven_urn.__str__()
-            maven_repo = config.libraries[dep].repo
-            return [
-                Dependency(
-                    scope=modifier,
-                    target=MavenDependencyTarget(
-                        artifact=maven_urn, maven_repo=maven_repo
-                    ),
-                )
-            ]
-
-        if is_valid_maven_coordinate(dep):
-            return [
-                Dependency(scope=modifier, target=MavenDependencyTarget(artifact=dep))
-            ]
-
-        raise ValueError(f"Unknown library or library group: {dep}")
-
-    @ctx.register(name="dep")
-    def dep(name: str, modifier: str | None = None) -> List[Dependency]:
-        if modifier is not None:
-            assert isinstance(modifier, str), f"Expected string, got {type(modifier)}"
-            assert modifier in [
-                "test",
-                "implementation",
-                "api",
-                "compileOnly",
-                "runtimeOnly",
-                "testImplementation",
-                "testCompileOnly",
-                "testRuntimeOnly",
-            ], f"Unknown modifier: {modifier}"
-        return parse_gradle_dependency(name, modifier)
-
-    ###############################################################################################
-    # Projects
-    ###############################################################################################
+            token = getattr(value, "token", None)
+            return token if token is not None else value
+        return None
 
     def _coerce_int(value: int | str | None, field_name: str) -> int | None:
         if value is None:
@@ -1204,349 +897,547 @@ def load_config() -> Config:
             raise ValueError(f"Invalid python source set entry: {item}")
         return parsed
 
+    def _coerce_ownership(value: str | None) -> OwnershipType:
+        if value is None:
+            return OwnershipType.WABBIT
+        return OwnershipType(value)
+
+    def _resolve_maven_version(value: config_typed.Value[str]) -> str:
+        if isinstance(value, config_typed.Const):
+            return value.value
+        if isinstance(value, config_typed.VarName):
+            if value.name not in defines:
+                raise ValueError(f"Undefined variable referenced in maven version: {value.name}")
+            resolved = defines[value.name]
+            if not isinstance(resolved, str):
+                raise ValueError(
+                    f"Maven version variable {value.name} must resolve to string, got {type(resolved)}"
+                )
+            return resolved
+        raise TypeError(f"Unknown maven version value: {value}")
+
+    def _render_maven_coordinate(expr: config_typed.MavenCoordinateExpr) -> str:
+        version_value = _resolve_maven_version(expr.version)
+        rendered = f"{expr.group_id}:{expr.artifact_id}:{version_value}"
+        if expr.suffix:
+            rendered = f"{rendered}:{expr.suffix}"
+        return rendered
+
+    def _feature_from_command(command: config_typed.FeatureCommand) -> Feature:
+        if isinstance(command, config_typed.JvmKotlinLibraryCommand):
+            return JvmKotlinLibrary()
+        if isinstance(command, config_typed.JvmScalaLibraryCommand):
+            return JvmScalaLibrary()
+        if isinstance(command, config_typed.JvmKotlinApplicationCommand):
+            return JvmKotlinApplication(command.main, command.jar)
+        if isinstance(command, config_typed.PaperPluginCommand):
+            return PaperPlugin(command.main, command.name, command.apiVersion)
+        if isinstance(command, config_typed.JvmKotlinAgentCommand):
+            return JvmKotlinAgent(command.main, command.jar)
+        if isinstance(command, config_typed.IntellijPluginCommand):
+            return IntellijPlugin(command.pluginName)
+        if isinstance(command, config_typed.KotlinSerializationCommand):
+            return KotlinSerialization()
+        if isinstance(command, config_typed.PythonDeptryCommand):
+            return PythonDeptry(
+                package_map=command.package_map or {},
+                per_rule_ignores=command.per_rule_ignores or {},
+                auto_package_map=command.auto_package_map,
+            )
+        if isinstance(command, config_typed.PythonImportlinterCommand):
+            return PythonImportLinter(
+                root_packages=command.root_packages or [],
+                layers=command.layers or [],
+            )
+        raise TypeError(f"Unknown feature command: {type(command)}")
+
+    def _validate_modifier(modifier: str | None) -> str | None:
+        if modifier is None:
+            return None
+        if modifier not in [
+            "test",
+            "implementation",
+            "api",
+            "compileOnly",
+            "runtimeOnly",
+            "testImplementation",
+            "testCompileOnly",
+            "testRuntimeOnly",
+        ]:
+            raise ValueError(f"Unknown modifier: {modifier}")
+        return modifier
+
+    def parse_gradle_dependency(
+        dep: str | Dependency | config_typed.DepCall | list[Dependency],
+        modifier: str | None = None,
+    ) -> List[Dependency]:
+        if isinstance(dep, config_typed.DepCall):
+            effective_modifier = dep.modifier if dep.modifier is not None else modifier
+            return parse_gradle_dependency(dep.name, effective_modifier)
+
+        if isinstance(dep, Dependency):
+            return [dep]
+
+        if isinstance(dep, list):
+            result: list[Dependency] = []
+            for item in dep:
+                if isinstance(item, Dependency):
+                    result.append(item)
+                else:
+                    raise ValueError(f"Unknown dependency type: {item}")
+            return result
+
+        if not isinstance(dep, str):
+            raise TypeError(f"Expected string, Dependency, or DepCall, got {type(dep)}")
+
+        modifier = _validate_modifier(modifier)
+
+        if dep.startswith(".") or dep.startswith("/"):
+            path = Path(dep)
+            return [Dependency(scope=modifier, target=JarFileDependencyTarget(path=path))]
+
+        if dep.startswith(":"):
+            project_name = dep[1:]
+            if project_name not in config.defined_projects:
+                raise ValueError(f"Project {project_name} is not defined")
+            return [
+                Dependency(
+                    scope=modifier,
+                    target=ProjectDependencyTarget(project=project_name),
+                )
+            ]
+
+        if dep in config.library_groups:
+            result: list[Dependency] = []
+            for lib in config.library_groups[dep]:
+                if isinstance(lib, str):
+                    result.extend(parse_gradle_dependency(lib, modifier))
+                elif isinstance(lib, list):
+                    result.extend(parse_gradle_dependency(lib, modifier))
+                elif isinstance(lib, Dependency):
+                    result.extend(parse_gradle_dependency(lib, modifier))
+                else:
+                    raise ValueError(f"Unknown library-group child type: {lib}")
+            return result
+
+        if dep in config.libraries:
+            maven_urn = config.libraries[dep].maven_urn.__str__()
+            maven_repo = config.libraries[dep].repo
+            return [
+                Dependency(
+                    scope=modifier,
+                    target=MavenDependencyTarget(
+                        artifact=maven_urn,
+                        maven_repo=maven_repo,
+                    ),
+                )
+            ]
+
+        if is_valid_maven_coordinate(dep):
+            return [Dependency(scope=modifier, target=MavenDependencyTarget(artifact=dep))]
+
+        raise ValueError(f"Unknown library or library group: {dep}")
+
     def verify_project(project: Project) -> None:
-        def is_publishable(project: Project) -> bool:
+        def is_publishable(input_project: Project) -> bool:
             return (
-                project.publish
-                and project.github_repo is not None
-                and (not project.quarantine)
+                input_project.publish
+                and input_project.github_repo is not None
+                and (not input_project.quarantine)
             )
 
-        # Verify that IF there is a github_repo (project is publishable),
-        # then ALL projects in the dependency chain are also publishable.
         for dep in project.resolved_dependencies:
-            if isinstance(dep.target, ProjectDependencyTarget):
-                dep_project = config.defined_projects[dep.target.project]
-                if is_publishable(project):
-                    assert is_publishable(dep_project), (
-                        f"Project {project.name} depends on {dep_project.name}. "
-                        f"Project {dep_project.name} is not publishable, but {project.name} is publishable. "
-                        f"{project.name}.github_repo = {project.github_repo}, "
-                        f"{dep_project.name}.github_repo = {dep_project.github_repo}, "
-                        f"{project.name}.quarantine = {project.quarantine}, "
-                        f"{dep_project.name}.quarantine = {dep_project.quarantine}"
-                        f"{project.name}.publish = {project.publish}, "
-                        f"{dep_project.name}.publish = {dep_project.publish}"
+            if not isinstance(dep.target, ProjectDependencyTarget):
+                continue
+            dep_project = config.defined_projects[dep.target.project]
+            if is_publishable(project):
+                assert is_publishable(dep_project), (
+                    f"Project {project.name} depends on {dep_project.name}. "
+                    f"Project {dep_project.name} is not publishable, but {project.name} is publishable. "
+                    f"{project.name}.github_repo = {project.github_repo}, "
+                    f"{dep_project.name}.github_repo = {dep_project.github_repo}, "
+                    f"{project.name}.quarantine = {project.quarantine}, "
+                    f"{dep_project.name}.quarantine = {dep_project.quarantine}"
+                    f"{project.name}.publish = {project.publish}, "
+                    f"{dep_project.name}.publish = {dep_project.publish}"
+                )
+
+    def _apply_builtin_command(command: config_typed.BuiltinTopLevelCommand) -> None:
+        if isinstance(command, config_typed.ChecksDisableCommand):
+            config.disabled_checks.append((command.error_name, command.pathspec))
+            return
+
+        if isinstance(command, config_typed.DefineCommand):
+            defines[command.name] = command.value
+            return
+
+        if isinstance(command, config_typed.OpenaiKeyCommand):
+            config.openai_key = command.key
+            return
+
+        if isinstance(command, config_typed.GithubTokenCommand):
+            config.github_token = command.token
+            return
+
+        if isinstance(command, config_typed.JitpackCookieCommand):
+            config.jitpack_cookie = command.cookie
+            return
+
+        if isinstance(command, config_typed.AnthropicKeyCommand):
+            config.anthropic_key = command.key
+            return
+
+        if isinstance(command, config_typed.DefaultMavenProjectGroupCommand):
+            config.default_maven_project_group = command.group
+            return
+
+        if isinstance(command, config_typed.GitUserCommand):
+            config.default_git_user_name = command.name
+            config.default_git_user_email = command.email
+            return
+
+        if isinstance(command, config_typed.GitCensorCommand):
+            return
+
+        if isinstance(command, config_typed.JvmVersionCommand):
+            config.jvm_version = _coerce_jvm_version(command.version, "jvm-version")
+            return
+
+        if isinstance(command, config_typed.JvmDefaultsCommand):
+            if command.version is not None:
+                config.jvm_version = _coerce_jvm_version(
+                    command.version, "jvm-defaults.version"
+                )
+            return
+
+        if isinstance(command, config_typed.PythonDefaultsCommand):
+            defaults = config.python_defaults
+            if command.line_length is not None:
+                defaults.line_length = command.line_length
+            if command.target_version is not None:
+                defaults.target_version = command.target_version
+            if command.coverage_fail_under is not None:
+                defaults.coverage_fail_under = command.coverage_fail_under
+            if command.coverage_precision is not None:
+                defaults.coverage_precision = command.coverage_precision
+            if command.coverage_branch is not None:
+                defaults.coverage_branch = command.coverage_branch
+            if command.coverage_show_missing is not None:
+                defaults.coverage_show_missing = command.coverage_show_missing
+            if command.coverage_skip_empty is not None:
+                defaults.coverage_skip_empty = command.coverage_skip_empty
+            if command.coverage_xml_output is not None:
+                defaults.coverage_xml_output = command.coverage_xml_output
+            return
+
+        if isinstance(command, config_typed.DefineMavenRepoCommand):
+            config.repositories[command.name] = MavenRepositoryDefinition(
+                command.name, command.url
+            )
+            return
+
+        if isinstance(command, config_typed.DefineKotlinPluginCommand):
+            if command.name in config.plugins:
+                raise ValueError(f"Plugin {command.name} already exists")
+            if ":" not in command.value:
+                raise ValueError(f"Invalid plugin definition: {command.value}")
+            artifact_name, version = command.value.rsplit(":", 1)
+            config.plugins[command.name] = KotlinPluginDefinition(
+                artifact_name, version, command.repo
+            )
+            return
+
+        if isinstance(command, config_typed.DefineMavenLibraryCommand):
+            if command.name in config.libraries:
+                raise ValueError(f"Library {command.name} already exists")
+            maven_urn = _render_maven_coordinate(command.maven_urn)
+            if not is_valid_maven_coordinate(maven_urn):
+                raise ValueError(f"Invalid Maven coordinate: {maven_urn}")
+            coord = MavenCoordinate.parse(maven_urn)
+            config.libraries[command.name] = MavenLibraryDefinition(
+                command.name,
+                coord,
+                command.repo,
+            )
+            return
+
+        if isinstance(command, config_typed.DefineMavenLibraryGroupCommand):
+            if command.name in config.library_groups:
+                raise ValueError(f"Library group {command.name} already exists")
+
+            normalized_children: list[str | Dependency | list[Dependency]] = []
+            for child in command.children:
+                if isinstance(child, str):
+                    if (
+                        child in config.libraries
+                        or child in config.library_groups
+                        or is_valid_maven_coordinate(child)
+                        or child.startswith((".", "/", ":"))
+                    ):
+                        normalized_children.append(child)
+                        continue
+                    raise ValueError(
+                        f"Unknown library/group in group {command.name}: {child}"
                     )
 
-    @ctx.register(name="python")
-    def python_project(
-        dir_name: str,
-        version: Quoted[SStr],
-        **raw_kwargs: Any,
-    ) -> None:
-        _assert_kebab_case_kwargs(
-            raw_kwargs,
-            "python project",
-            forbidden_prefixes=["python-"],
-        )
-        kwargs = dict(raw_kwargs)
-        name = kwargs.pop("name", None)
-        description = kwargs.pop("description", None)
-        authors = kwargs.pop("authors", None)
-        license = kwargs.pop("license", "AGPL")
-        quarantine = kwargs.pop("quarantine", False)
-        publish = kwargs.pop("publish", True)
-        requires_python = kwargs.pop("requires-python", None)
-        dependencies = kwargs.pop("dependencies", None)
-        dev_dependencies = kwargs.pop("dev-dependencies", None)
-        scripts = kwargs.pop("scripts", None)
-        features = kwargs.pop("features", None)
-        source_sets = kwargs.pop("source-sets", None)
-        line_length_input = kwargs.pop("line-length", None)
-        target_version = kwargs.pop("target-version", None)
-        test_paths = kwargs.pop("test-paths", None)
-        ruff_per_file_ignores = kwargs.pop("ruff-per-file-ignores", None)
-        deptry_package_map_input = kwargs.pop("deptry-package-map", None)
-        deptry_per_rule_ignores_input = kwargs.pop("deptry-per-rule-ignores", None)
-        importlinter_root_packages_input = kwargs.pop(
-            "importlinter-root-packages", None
-        )
-        importlinter_contracts = kwargs.pop("importlinter-contracts", None)
-        coverage_source = kwargs.pop("coverage-source", None)
-        coverage_omit = kwargs.pop("coverage-omit", None)
-        coverage_fail_under_input = kwargs.pop("coverage-fail-under", None)
-        coverage_precision_input = kwargs.pop("coverage-precision", None)
-        coverage_branch = kwargs.pop("coverage-branch", None)
-        coverage_show_missing = kwargs.pop("coverage-show-missing", None)
-        coverage_skip_empty = kwargs.pop("coverage-skip-empty", None)
-        coverage_xml_output = kwargs.pop("coverage-xml-output", None)
-        repo = kwargs.pop("repo", None)
-        ownership = kwargs.pop("ownership", OwnershipType.WABBIT)
-        _assert_no_unknown_kwargs(kwargs, "python project")
+                if isinstance(child, config_typed.DepCall):
+                    normalized_children.append(parse_gradle_dependency(child))
+                    continue
 
-        if isinstance(ownership, str):
-            ownership = OwnershipType(ownership)
+                raise TypeError(
+                    f"Invalid group child in {command.name}: {child} ({type(child)})"
+                )
 
-        path = Path(f"./{dir_name}")
-        name = name or dir_name
-        resolved_features = resolve_features(features or [])
-        defaults = config.python_defaults
-        line_length = (
-            _coerce_int(line_length_input, "line-length")
-            if line_length_input is not None
-            else _coerce_int(defaults.line_length, "python-defaults.line-length")
-        )
-        coverage_fail_under = (
-            _coerce_int(coverage_fail_under_input, "coverage-fail-under")
-            if coverage_fail_under_input is not None
-            else _coerce_int(
-                defaults.coverage_fail_under, "python-defaults.coverage-fail-under"
+            config.library_groups[command.name] = normalized_children
+            return
+
+        if isinstance(command, config_typed.PythonProjectCommand):
+            ownership = _coerce_ownership(command.ownership)
+            path = Path(f"./{command.dir_name}")
+            name = command.name or command.dir_name
+            raw_features = [_feature_from_command(item) for item in (command.features or [])]
+            resolved_features = resolve_features(raw_features)
+
+            defaults = config.python_defaults
+            line_length = (
+                _coerce_int(command.line_length, "line-length")
+                if command.line_length is not None
+                else _coerce_int(defaults.line_length, "python-defaults.line-length")
             )
-        )
-        coverage_precision = (
-            _coerce_int(coverage_precision_input, "coverage-precision")
-            if coverage_precision_input is not None
-            else _coerce_int(
-                defaults.coverage_precision, "python-defaults.coverage-precision"
+            coverage_fail_under = (
+                _coerce_int(command.coverage_fail_under, "coverage-fail-under")
+                if command.coverage_fail_under is not None
+                else _coerce_int(
+                    defaults.coverage_fail_under,
+                    "python-defaults.coverage-fail-under",
+                )
             )
-        )
+            coverage_precision = (
+                _coerce_int(command.coverage_precision, "coverage-precision")
+                if command.coverage_precision is not None
+                else _coerce_int(
+                    defaults.coverage_precision,
+                    "python-defaults.coverage-precision",
+                )
+            )
 
-        deptry_feature = resolved_features.get("python-deptry")
-        deptry_package_map = deptry_package_map_input or {}
-        deptry_per_rule_ignores = deptry_per_rule_ignores_input or {}
-        deptry_auto_map = False
-        if isinstance(deptry_feature, PythonDeptry):
-            deptry_package_map = {
-                **deptry_feature.package_map,
-                **deptry_package_map,
-            }
-            deptry_per_rule_ignores = {
-                **deptry_feature.per_rule_ignores,
-                **deptry_per_rule_ignores,
-            }
-            deptry_auto_map = deptry_feature.auto_package_map
+            deptry_feature = resolved_features.get("python-deptry")
+            deptry_package_map = command.deptry_package_map or {}
+            deptry_per_rule_ignores = command.deptry_per_rule_ignores or {}
+            deptry_auto_map = False
+            if isinstance(deptry_feature, PythonDeptry):
+                deptry_package_map = {
+                    **deptry_feature.package_map,
+                    **deptry_package_map,
+                }
+                deptry_per_rule_ignores = {
+                    **deptry_feature.per_rule_ignores,
+                    **deptry_per_rule_ignores,
+                }
+                deptry_auto_map = deptry_feature.auto_package_map
 
-        importlinter_feature = resolved_features.get("python-importlinter")
-        importlinter_root_packages = importlinter_root_packages_input or []
-        importlinter_layers: List[str] = []
-        if isinstance(importlinter_feature, PythonImportLinter):
-            if importlinter_feature.root_packages:
-                importlinter_root_packages = importlinter_feature.root_packages
-            importlinter_layers = importlinter_feature.layers or []
+            importlinter_feature = resolved_features.get("python-importlinter")
+            importlinter_root_packages = command.importlinter_root_packages or []
+            importlinter_layers: List[str] = []
+            if isinstance(importlinter_feature, PythonImportLinter):
+                if importlinter_feature.root_packages:
+                    importlinter_root_packages = importlinter_feature.root_packages
+                importlinter_layers = importlinter_feature.layers or []
 
-        parsed_source_sets = _parse_python_source_sets(source_sets)
-        project_obj = PythonProject(
-            path=path,
-            name=name,
-            quarantine=quarantine,
-            publish=publish,
-            description=description,
-            authors=authors or [],
-            license=license,
-            github_repo=repo,
-            ownership=ownership,
-            requires_python=requires_python,
-            dependencies=dependencies or [],
-            dev_dependencies=dev_dependencies or [],
-            scripts=scripts or [],
-            raw_features=features or [],
-            resolved_features=resolved_features,
-            line_length=line_length,
-            target_version=target_version or defaults.target_version,
-            source_sets=parsed_source_sets,
-            test_paths=test_paths or [],
-            ruff_per_file_ignores=ruff_per_file_ignores or {},
-            deptry_package_map=deptry_package_map,
-            deptry_per_rule_ignores=deptry_per_rule_ignores,
-            deptry_auto_map=deptry_auto_map,
-            importlinter_root_packages=importlinter_root_packages,
-            importlinter_layers=importlinter_layers,
-            importlinter_contracts=importlinter_contracts or [],
-            coverage_source=coverage_source or [],
-            coverage_omit=coverage_omit or [],
-            coverage_fail_under=coverage_fail_under,
-            coverage_precision=coverage_precision,
-            coverage_branch=(
-                coverage_branch
-                if coverage_branch is not None
-                else defaults.coverage_branch
-            ),
-            coverage_show_missing=(
-                coverage_show_missing
-                if coverage_show_missing is not None
-                else defaults.coverage_show_missing
-            ),
-            coverage_skip_empty=(
-                coverage_skip_empty
-                if coverage_skip_empty is not None
-                else defaults.coverage_skip_empty
-            ),
-            coverage_xml_output=(
-                coverage_xml_output or defaults.coverage_xml_output
-            ),
-            version=Version.parse(version) if version else None,
-            resolved_dependencies=[],
-        )
-        verify_project(project_obj)
-        config.defined_projects[name] = project_obj
+            parsed_source_sets = _parse_python_source_sets(command.source_sets)
+            project_obj = PythonProject(
+                path=path,
+                name=name,
+                quarantine=command.quarantine,
+                publish=command.publish,
+                description=command.description,
+                authors=command.authors or [],
+                license=command.license,
+                github_repo=command.repo,
+                ownership=ownership,
+                requires_python=command.requires_python,
+                dependencies=command.dependencies or [],
+                dev_dependencies=command.dev_dependencies or [],
+                scripts=command.scripts or [],
+                raw_features=raw_features,
+                resolved_features=resolved_features,
+                line_length=line_length,
+                target_version=command.target_version or defaults.target_version,
+                source_sets=parsed_source_sets,
+                test_paths=command.test_paths or [],
+                ruff_per_file_ignores=command.ruff_per_file_ignores or {},
+                deptry_package_map=deptry_package_map,
+                deptry_per_rule_ignores=deptry_per_rule_ignores,
+                deptry_auto_map=deptry_auto_map,
+                importlinter_root_packages=importlinter_root_packages,
+                importlinter_layers=importlinter_layers,
+                importlinter_contracts=command.importlinter_contracts or [],
+                coverage_source=command.coverage_source or [],
+                coverage_omit=command.coverage_omit or [],
+                coverage_fail_under=coverage_fail_under,
+                coverage_precision=coverage_precision,
+                coverage_branch=(
+                    command.coverage_branch
+                    if command.coverage_branch is not None
+                    else defaults.coverage_branch
+                ),
+                coverage_show_missing=(
+                    command.coverage_show_missing
+                    if command.coverage_show_missing is not None
+                    else defaults.coverage_show_missing
+                ),
+                coverage_skip_empty=(
+                    command.coverage_skip_empty
+                    if command.coverage_skip_empty is not None
+                    else defaults.coverage_skip_empty
+                ),
+                coverage_xml_output=(
+                    command.coverage_xml_output or defaults.coverage_xml_output
+                ),
+                version=Version.parse(command.version) if command.version else None,
+                resolved_dependencies=[],
+            )
+            verify_project(project_obj)
+            config.defined_projects[name] = project_obj
+            return
 
-    @ctx.register(name="purescript")
-    def purescript_project(
-        dir_name: str,
-        version: Quoted[SStr],
-        name: Optional[str] = None,
-        description: str | None = None,
-        authors: List[str] | None = None,
-        quarantine: bool = False,
-        license: str | None = "AGPL",
-        publish: bool = True,
-        repo: str | None = None,
-        ownership: OwnershipType = OwnershipType.WABBIT,
-    ) -> None:
-        path = Path(f"./{dir_name}")
-        name = name or dir_name
-        project_obj = PurescriptProject(
-            path=path,
-            name=name,
-            description=description,
-            authors=authors or [],
-            quarantine=quarantine,
-            license=license,
-            publish=publish,
-            github_repo=repo,
-            ownership=ownership,
-            version=Version.parse(version) if version else None,
-            resolved_dependencies=[],
-        )
-        verify_project(project_obj)
-        config.defined_projects[name] = project_obj
+        if isinstance(command, config_typed.PurescriptProjectCommand):
+            ownership = _coerce_ownership(command.ownership)
+            name = command.name or command.dir_name
+            project_obj = PurescriptProject(
+                path=Path(f"./{command.dir_name}"),
+                name=name,
+                description=command.description,
+                authors=command.authors or [],
+                quarantine=command.quarantine,
+                license=command.license,
+                publish=command.publish,
+                github_repo=command.repo,
+                ownership=ownership,
+                version=Version.parse(command.version) if command.version else None,
+                resolved_dependencies=[],
+            )
+            verify_project(project_obj)
+            config.defined_projects[name] = project_obj
+            return
 
-    @ctx.register(name="data")
-    def data_project(
-        dir_name: str,
-        version: Quoted[SStr],
-        name: Optional[str] = None,
-        description: str | None = None,
-        authors: List[str] | None = None,
-        license: str | None = "AGPL",
-        quarantine: bool = False,
-        publish: bool = True,
-        repo: str | None = None,
-        ownership: OwnershipType = OwnershipType.WABBIT,
-    ) -> None:
-        path = Path(f"./{dir_name}")
-        name = name or dir_name
-        project_obj = DataProject(
-            path=path,
-            name=name,
-            description=description,
-            authors=authors or [],
-            quarantine=quarantine,
-            publish=publish,
-            license=license,
-            github_repo=repo,
-            ownership=ownership,
-            version=Version.parse(version) if version else None,
-            resolved_dependencies=[],
-        )
-        verify_project(project_obj)
-        config.defined_projects[name] = project_obj
+        if isinstance(command, config_typed.DataProjectCommand):
+            ownership = _coerce_ownership(command.ownership)
+            name = command.name or command.dir_name
+            project_obj = DataProject(
+                path=Path(f"./{command.dir_name}"),
+                name=name,
+                description=command.description,
+                authors=command.authors or [],
+                quarantine=command.quarantine,
+                publish=command.publish,
+                license=command.license,
+                github_repo=command.repo,
+                ownership=ownership,
+                version=Version.parse(command.version) if command.version else None,
+                resolved_dependencies=[],
+            )
+            verify_project(project_obj)
+            config.defined_projects[name] = project_obj
+            return
 
-    @ctx.register(name="premake")
-    def premake_project(
-        dir_name: str,
-        version: Quoted[SStr],
-        name: Optional[str] = None,
-        description: str | None = None,
-        authors: List[str] | None = None,
-        license: str | None = "AGPL",
-        quarantine: bool = False,
-        publish: bool = True,
-        repo: str | None = None,
-        ownership: OwnershipType = OwnershipType.WABBIT,
-    ) -> None:
-        path = Path(f"./{dir_name}")
-        name = name or dir_name
-        project_obj = PremakeProject(
-            path=path,
-            name=name,
-            description=description,
-            authors=authors or [],
-            github_repo=repo,
-            license=license,
-            quarantine=quarantine,
-            publish=publish,
-            ownership=ownership,
-            version=Version.parse(version) if version else None,
-            resolved_dependencies=[],
-        )
-        verify_project(project_obj)
-        config.defined_projects[name] = project_obj
+        if isinstance(command, config_typed.PremakeProjectCommand):
+            ownership = _coerce_ownership(command.ownership)
+            name = command.name or command.dir_name
+            project_obj = PremakeProject(
+                path=Path(f"./{command.dir_name}"),
+                name=name,
+                description=command.description,
+                authors=command.authors or [],
+                github_repo=command.repo,
+                license=command.license,
+                quarantine=command.quarantine,
+                publish=command.publish,
+                ownership=ownership,
+                version=Version.parse(command.version) if command.version else None,
+                resolved_dependencies=[],
+            )
+            verify_project(project_obj)
+            config.defined_projects[name] = project_obj
+            return
 
-    @ctx.register(name="gradle")
-    def gradle_project(
-        dir_name: str,
-        version: Quoted[SStr],
-        name: Optional[str] = None,
-        description: str | None = None,
-        authors: List[str] | None = None,
-        license: str | None = "AGPL",
-        quarantine: bool = False,
-        publish: bool = True,
-        dependencies: (
-            List[str | DependencyTarget | List[DependencyTarget]] | None
-        ) = None,
-        features: List[Feature] | None = None,
-        repo: str | None = None,
-        ownership: OwnershipType = OwnershipType.WABBIT,
-    ) -> None:
-        # This makes no sense from typechecking perspective, but it's necessary since we're using eval_sexpr
-        if isinstance(ownership, str):
-            ownership = OwnershipType(ownership)
+        if isinstance(command, config_typed.GradleProjectCommand):
+            ownership = _coerce_ownership(command.ownership)
+            name = command.name or command.dir_name
+            raw_features = [_feature_from_command(item) for item in (command.features or [])]
+            resolved_features = resolve_features(raw_features)
 
-        name = name or dir_name
+            raw_dependencies: list[str | Dependency | list[Dependency]] = []
+            resolved_dependencies: list[Dependency] = []
+            for item in command.dependencies or []:
+                if isinstance(item, str):
+                    raw_dependencies.append(item)
+                    resolved_dependencies.extend(parse_gradle_dependency(item))
+                elif isinstance(item, config_typed.DepCall):
+                    resolved = parse_gradle_dependency(item)
+                    raw_dependencies.append(resolved)
+                    resolved_dependencies.extend(resolved)
+                else:
+                    raise TypeError(f"Unknown gradle dependency value: {item}")
 
-        # assert repo is not None, f"Repository is required for Gradle project {name}"
+            maven_repositories: List[MavenRepositoryDefinition] = []
+            for dep in resolved_dependencies:
+                if isinstance(dep.target, MavenDependencyTarget) and dep.target.maven_repo:
+                    maven_repo = config.repositories[dep.target.maven_repo]
+                    if maven_repo not in maven_repositories:
+                        maven_repositories.append(maven_repo)
 
-        resolved_features = resolve_features(features or [])
+            project_obj = GradleProject(
+                path=Path(f"./{command.dir_name}"),
+                group_name=config.default_maven_project_group,
+                name=name,
+                version=Version.parse(command.version) if command.version else None,
+                description=command.description,
+                authors=command.authors or [],
+                quarantine=command.quarantine,
+                license=command.license,
+                publish=command.publish,
+                github_repo=command.repo,
+                raw_dependencies=raw_dependencies,
+                raw_features=raw_features,
+                resolved_maven_repositories=maven_repositories,
+                resolved_features=resolved_features,
+                resolved_dependencies=resolved_dependencies,
+                ownership=ownership,
+            )
+            verify_project(project_obj)
+            config.defined_projects[name] = project_obj
+            return
 
-        raw_dependencies: List[str | DependencyTarget | List[DependencyTarget]] = (
-            dependencies or []
-        )
-        resolved_dependencies: List[DependencyTarget] = []
-        for dep in raw_dependencies:
-            if isinstance(dep, list):
-                resolved_dependencies.extend(dep)
-            elif isinstance(dep, str):
-                resolved_dependencies.extend(parse_gradle_dependency(dep))
-            else:
-                assert isinstance(
-                    dep, DependencyTarget
-                ), f"Expected string or Dependency, got {type(dep)}"
-                resolved_dependencies.append(dep)
+        raise ValueError(f"Unknown builtin command: {type(command)}")
 
-        maven_repositories: List[MavenRepositoryDefinition] = []
-        for dep in resolved_dependencies:
-            if isinstance(dep.target, MavenDependencyTarget) and dep.target.maven_repo:
-                maven_repo = config.repositories[dep.target.maven_repo]
-                if maven_repo not in maven_repositories:
-                    maven_repositories.append(maven_repo)
+    def _apply_command(command: Any) -> None:
+        command_handler = module_command_handlers.get(type(command))
+        if command_handler is not None:
+            command_handler(command)
+            return
+        _apply_builtin_command(command)
 
-        project_obj = GradleProject(
-            path=Path(f"./{dir_name}"),
-            group_name=config.default_maven_project_group,
-            name=name,
-            version=Version.parse(version) if version else None,
-            description=description,
-            authors=authors or [],
-            quarantine=quarantine,
-            license=license,
-            publish=publish,
-            github_repo=repo,
-            raw_dependencies=raw_dependencies,
-            raw_features=features or [],
-            resolved_maven_repositories=maven_repositories,
-            resolved_features=resolved_features,
-            resolved_dependencies=resolved_dependencies,
-            ownership=ownership,
-        )
+    def _decode_and_apply(doc: SDoc, source_name: str) -> None:
+        for index, expr in enumerate(doc.exprs):
+            path = f"{source_name}[{index}]"
+            command = decode_expr(expr, top_level_target, path=path)
+            try:
+                _apply_command(command)
+            except TypeError:
+                raise
+            except MuDecodeError:
+                raise
+            except Exception as cause:
+                raise MuDecodeError(
+                    path=path,
+                    expected=f"valid config command ({type(command).__name__})",
+                    got=type(expr).__name__,
+                    span=_extract_expr_span(expr),
+                    cause=cause,
+                ) from cause
 
-        verify_project(project_obj)
-
-        config.defined_projects[name] = project_obj
-
-    eval_sexpr(ctx, root, ignore_toplevel_exceptions=True)
-    eval_sexpr(ctx, root_private, ignore_toplevel_exceptions=True)
+    _decode_and_apply(root, "root")
+    _decode_and_apply(root_private, "root.private")
 
     return config

@@ -9,6 +9,10 @@
 - Ignore temporary setup cache artifacts (`.dev.cache.db`, `test/tmp-setup-*`, `*.bak`).
 - Split CLI entrypoint into `dev/cli.py` and add `setup --local` mode marker handling.
 - Normalize Python config keywords to kebab-case and drop legacy `python_*` keyword forms.
+- Replace eval-based config loading with typed decoding in `load_config()`, preserving strict source-order apply semantics across `root.clj` and `root.private.clj`.
+- Add typed config command schema + module extension hooks, including typed check commands for stale TODO age and censored word error sets.
+- Support Maven version references via `${var}` in `define-maven-library` using declaration-ordered `define` resolution, with fail-fast decode/validation errors and spans.
+- Add typed loader regression tests for Maven var resolution, forward/undefined reference failures, strict kebab-case enforcement, module command application, and nested `dep` handling.
 - Simplify `PythonProject` internals by removing redundant `python_` field prefixes.
 - Ensure project directories are created/validated before per-project setup writes files.
 - Fix Python target-version derivation to use the minimum supported version from `requires-python` specifiers.

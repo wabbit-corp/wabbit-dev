@@ -3,12 +3,15 @@
 """
 
 import re
+from dataclasses import dataclass
 from typing import List, Set, Optional, Tuple, Pattern
 
 from mu.exec import ExecutionContext
+from mu.typed import mu_tag
 
 # Import necessary components from your base framework
 # (Adjust the import path if necessary)
+from dev.base import TypedConfigCommandRegistration
 from dev.checks.base import (
     FileCheck,
     IssueType,
@@ -19,6 +22,12 @@ E_CENSORED_KEYWORD = IssueType(
     "E_CENSORED_KEYWORD",
     "Found censored keyword '{keyword}'.",
 )
+
+
+@mu_tag("checks/censored-words/error-on")
+@dataclass(frozen=True)
+class CensoredWordsErrorOnCommand:
+    words: list[str]
 
 
 class CensoredKeywords(FileCheck):
@@ -52,6 +61,18 @@ class CensoredKeywords(FileCheck):
         ctx.register(
             name="checks/censored-words/error-on", func=censored_words_error_on
         )
+
+    def register_typed_config_commands(self) -> list[TypedConfigCommandRegistration]:
+        def apply(command: CensoredWordsErrorOnCommand) -> None:
+            self.error_on = set(command.words)
+            self._update_error_on_regex()
+
+        return [
+            TypedConfigCommandRegistration(
+                command_type=CensoredWordsErrorOnCommand,
+                apply=apply,
+            )
+        ]
 
     def check(self, ctx: FileContext):
         if not ctx.path.is_file():

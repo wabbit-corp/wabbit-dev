@@ -9,17 +9,26 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import List
 
 from mu.exec import ExecutionContext
+from mu.typed import mu_tag
 
+from dev.base import TypedConfigCommandRegistration
 from dev.checks.base import FileCheck, IssueType, IssueList, FileContext
 
 
 E_DEBUG_CODE = IssueType("E_DEBUG_CODE", "Possible leftover debug statement.")
 E_STALE_TODO = IssueType("E_STALE_TODO", "Stale TODO/FIXME comment.")
+
+
+@mu_tag("checks/stale-todo/age-days")
+@dataclass(frozen=True)
+class StaleTodoAgeDaysCommand:
+    age_days: int
 
 
 class StaleCodeCheck(FileCheck):
@@ -38,6 +47,17 @@ class StaleCodeCheck(FileCheck):
             return self.todo_age_days
 
         ctx.register(name="checks/stale-todo/age-days", func=stale_code_todo_age_days)
+
+    def register_typed_config_commands(self) -> list[TypedConfigCommandRegistration]:
+        def apply(command: StaleTodoAgeDaysCommand) -> None:
+            self.todo_age_days = command.age_days
+
+        return [
+            TypedConfigCommandRegistration(
+                command_type=StaleTodoAgeDaysCommand,
+                apply=apply,
+            )
+        ]
 
     def check(self, ctx: FileContext):
         if not ctx.path.is_file():

@@ -1,4 +1,4 @@
-from typing import List, Callable, TypeAlias
+from typing import Any, List, Callable, TypeAlias
 from dataclasses import dataclass
 from dev.messages import error
 import traceback
@@ -11,6 +11,12 @@ from mu.exec import ExecutionContext
 
 class Callback:
     pass
+
+
+@dataclass(frozen=True)
+class TypedConfigCommandRegistration:
+    command_type: type[Any]
+    apply: Callable[[Any], None]
 
 
 @dataclass
@@ -81,6 +87,9 @@ class Module(abc.ABC):
 
     def register_script_commands(self, ctx: ExecutionContext) -> None:
         pass
+
+    def register_typed_config_commands(self) -> list[TypedConfigCommandRegistration]:
+        return []
 
     @staticmethod
     def load_modules() -> dict[str, "Module"]:
