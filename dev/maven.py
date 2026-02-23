@@ -63,13 +63,9 @@ class MavenVersionCoordinate:
         if upper_s == "MILESTONE":
             return MavenVersionCoordinate(axis=VersionAxis.MILESTONE, version=0)
         elif upper_s.startswith("MILESTONE"):
-            return MavenVersionCoordinate(
-                axis=VersionAxis.MILESTONE, version=int(s[9:])
-            )
+            return MavenVersionCoordinate(axis=VersionAxis.MILESTONE, version=int(s[9:]))
         elif upper_s.startswith("M"):
-            return MavenVersionCoordinate(
-                axis=VersionAxis.MILESTONE, version=int(s[1:])
-            )
+            return MavenVersionCoordinate(axis=VersionAxis.MILESTONE, version=int(s[1:]))
 
         if upper_s == "RC":
             return MavenVersionCoordinate(axis=VersionAxis.RC, version=0)
@@ -148,18 +144,14 @@ class MavenVersion:
     @property
     def major(self) -> int:
         assert len(self.components) > 0, "No major version component"
-        assert (
-            self.components[0].axis == VersionAxis.NUMBER
-        ), "Major version is not a number"
+        assert self.components[0].axis == VersionAxis.NUMBER, "Major version is not a number"
         return int(self.components[0].version)
 
     @property
     def minor(self) -> int:
         if len(self.components) < 2:
             return 0
-        assert (
-            self.components[1].axis == VersionAxis.NUMBER
-        ), "Minor version is not a number"
+        assert self.components[1].axis == VersionAxis.NUMBER, "Minor version is not a number"
         return int(self.components[1].version)
 
     @property
@@ -190,16 +182,8 @@ class MavenVersion:
         v1 = self._version_tuple()
         v2 = other._version_tuple()
         for i in range(max(len(v1), len(v2))):
-            c1 = (
-                v1[i]
-                if i < len(v1)
-                else MavenVersionCoordinate(axis=VersionAxis.NUMBER, version=0)
-            )
-            c2 = (
-                v2[i]
-                if i < len(v2)
-                else MavenVersionCoordinate(axis=VersionAxis.NUMBER, version=0)
-            )
+            c1 = v1[i] if i < len(v1) else MavenVersionCoordinate(axis=VersionAxis.NUMBER, version=0)
+            c2 = v2[i] if i < len(v2) else MavenVersionCoordinate(axis=VersionAxis.NUMBER, version=0)
             if c1 < c2:
                 return True
             if c1 > c2:
@@ -210,16 +194,8 @@ class MavenVersion:
         v1 = self._version_tuple()
         v2 = other._version_tuple()
         for i in range(max(len(v1), len(v2))):
-            c1 = (
-                v1[i]
-                if i < len(v1)
-                else MavenVersionCoordinate(axis=VersionAxis.NUMBER, version=0)
-            )
-            c2 = (
-                v2[i]
-                if i < len(v2)
-                else MavenVersionCoordinate(axis=VersionAxis.NUMBER, version=0)
-            )
+            c1 = v1[i] if i < len(v1) else MavenVersionCoordinate(axis=VersionAxis.NUMBER, version=0)
+            c2 = v2[i] if i < len(v2) else MavenVersionCoordinate(axis=VersionAxis.NUMBER, version=0)
             if c1 != c2:
                 return False
         return True
@@ -228,16 +204,8 @@ class MavenVersion:
         v1 = self._version_tuple()
         v2 = other._version_tuple()
         for i in range(max(len(v1), len(v2))):
-            c1 = (
-                v1[i]
-                if i < len(v1)
-                else MavenVersionCoordinate(axis=VersionAxis.NUMBER, version=0)
-            )
-            c2 = (
-                v2[i]
-                if i < len(v2)
-                else MavenVersionCoordinate(axis=VersionAxis.NUMBER, version=0)
-            )
+            c1 = v1[i] if i < len(v1) else MavenVersionCoordinate(axis=VersionAxis.NUMBER, version=0)
+            c2 = v2[i] if i < len(v2) else MavenVersionCoordinate(axis=VersionAxis.NUMBER, version=0)
             if c1 != c2:
                 return False
         return True
@@ -299,17 +267,13 @@ from dev.caching import cache
 def fetch_raw_metadata(repo_base_url: str, group_id: str, artifact_id: str) -> str:
     import requests
 
-    url = (
-        f"{repo_base_url}{group_id.replace('.', '/')}/{artifact_id}/maven-metadata.xml"
-    )
+    url = f"{repo_base_url}{group_id.replace('.', '/')}/{artifact_id}/maven-metadata.xml"
     response = requests.get(url)
     response.raise_for_status()
     return response.text
 
 
 @cache(path=".dev.cache.db")
-def fetch_metadata(
-    repo_base_url: str, group_id: str, artifact_id: str
-) -> MavenMetadata:
+def fetch_metadata(repo_base_url: str, group_id: str, artifact_id: str) -> MavenMetadata:
     response = fetch_raw_metadata(repo_base_url, group_id, artifact_id)
     return MavenMetadata.parse(response)

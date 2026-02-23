@@ -63,10 +63,7 @@ def test_parse_black_reformat() -> None:
 
 
 def test_parse_mypy_text() -> None:
-    raw = (
-        "sample.py:2: error: Incompatible return value type "
-        "(got \"str\", expected \"int\")  [return-value]"
-    )
+    raw = "sample.py:2: error: Incompatible return value type " '(got "str", expected "int")  [return-value]'
     issues = list(parse_mypy_issues(raw))
     assert len(issues) == 1
     issue = issues[0]

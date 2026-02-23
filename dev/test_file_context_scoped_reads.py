@@ -9,7 +9,6 @@ from dev.checks.base import (
     ScopedReadSuppressions,
 )
 
-
 E_TEST_SCOPED_READ = IssueType("E_TEST_SCOPED_READ", "scoped read")
 E_TEST_SCOPED_OTHER = IssueType("E_TEST_SCOPED_OTHER", "scoped read other")
 
@@ -21,8 +20,7 @@ def _newline_positions(text: str) -> list[int]:
 def test_inline_ignore_masks_entire_line_for_matching_issue(tmp_path: Path) -> None:
     path = tmp_path / "sample.py"
     path.write_text(
-        'host = "10.0.0.0"  # check:ignore E_TEST_SCOPED_READ\n'
-        'other = "172.16.0.1"\n',
+        'host = "10.0.0.0"  # check:ignore E_TEST_SCOPED_READ\n' 'other = "172.16.0.1"\n',
         encoding="utf-8",
     )
 
@@ -38,8 +36,7 @@ def test_inline_ignore_masks_entire_line_for_matching_issue(tmp_path: Path) -> N
 def test_inline_ignore_value_masks_only_matching_value(tmp_path: Path) -> None:
     path = tmp_path / "sample.py"
     path.write_text(
-        'host = "10.0.0.0"  # check:ignore E_TEST_SCOPED_READ value=10.0.0.0\n'
-        'other = "172.16.0.1"\n',
+        'host = "10.0.0.0"  # check:ignore E_TEST_SCOPED_READ value=10.0.0.0\n' 'other = "172.16.0.1"\n',
         encoding="utf-8",
     )
 

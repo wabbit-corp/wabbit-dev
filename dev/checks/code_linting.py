@@ -12,16 +12,9 @@ import subprocess
 from dev.checks.base import FileCheck, IssueType, FileContext
 from dev.messages import error
 
-
-E_KTLINT_MISSING = IssueType(
-    "E_KTLINT_MISSING", "The 'ktlint' formatter is not installed."
-)
-E_KTFMT_MISSING = IssueType(
-    "E_KTFMT_MISSING", "The 'ktfmt' formatter is not installed."
-)
-E_KOTLIN_NOT_FORMATTED = IssueType(
-    "E_KOTLIN_NOT_FORMATTED", "Kotlin file is not formatted with ktfmt."
-)
+E_KTLINT_MISSING = IssueType("E_KTLINT_MISSING", "The 'ktlint' formatter is not installed.")
+E_KTFMT_MISSING = IssueType("E_KTFMT_MISSING", "The 'ktfmt' formatter is not installed.")
+E_KOTLIN_NOT_FORMATTED = IssueType("E_KOTLIN_NOT_FORMATTED", "Kotlin file is not formatted with ktfmt.")
 
 
 class KotlinFormattingCheck(FileCheck):
@@ -118,22 +111,15 @@ class KotlinFormattingCheck(FileCheck):
 #             ctx.add_issue(E_KTLINT_MISSING)
 
 
-E_CLANG_FORMAT_MISSING = IssueType(
-    "E_CLANG_FORMAT_MISSING", "The 'clang-format' formatter is not installed."
-)
-E_CPP_NOT_FORMATTED = IssueType(
-    "E_CPP_NOT_FORMATTED", "C/C++ file is not formatted with clang-format."
-)
+E_CLANG_FORMAT_MISSING = IssueType("E_CLANG_FORMAT_MISSING", "The 'clang-format' formatter is not installed.")
+E_CPP_NOT_FORMATTED = IssueType("E_CPP_NOT_FORMATTED", "C/C++ file is not formatted with clang-format.")
 
 
 class CppFormattingCheck(FileCheck):
     """Check C/C++ source files with ``clang-format``."""
 
     def check(self, ctx: FileContext):
-        if (
-            ctx.path.suffix not in {".c", ".cpp", ".cc", ".h", ".hpp"}
-            or not ctx.path.is_file()
-        ):
+        if ctx.path.suffix not in {".c", ".cpp", ".cc", ".h", ".hpp"} or not ctx.path.is_file():
             return
 
         try:
@@ -162,12 +148,8 @@ class CppFormattingCheck(FileCheck):
         return ctx.issues
 
 
-E_PURSTIDY_MISSING = IssueType(
-    "E_PURSTIDY_MISSING", "The 'purs-tidy' formatter is not installed."
-)
-E_PURESCRIPT_NOT_FORMATTED = IssueType(
-    "E_PURESCRIPT_NOT_FORMATTED", "Purescript file is not formatted with purs-tidy."
-)
+E_PURSTIDY_MISSING = IssueType("E_PURSTIDY_MISSING", "The 'purs-tidy' formatter is not installed.")
+E_PURESCRIPT_NOT_FORMATTED = IssueType("E_PURESCRIPT_NOT_FORMATTED", "Purescript file is not formatted with purs-tidy.")
 
 
 class PurescriptFormattingCheck(FileCheck):
@@ -204,12 +186,8 @@ class PurescriptFormattingCheck(FileCheck):
         return ctx.issues
 
 
-E_CSHARPIER_MISSING = IssueType(
-    "E_CSHARPIER_MISSING", "The 'csharpier' formatter is not installed."
-)
-E_CS_NOT_FORMATTED = IssueType(
-    "E_CS_NOT_FORMATTED", "C# file is not formatted with csharpier."
-)
+E_CSHARPIER_MISSING = IssueType("E_CSHARPIER_MISSING", "The 'csharpier' formatter is not installed.")
+E_CS_NOT_FORMATTED = IssueType("E_CS_NOT_FORMATTED", "C# file is not formatted with csharpier.")
 
 
 class CSharpFormattingCheck(FileCheck):

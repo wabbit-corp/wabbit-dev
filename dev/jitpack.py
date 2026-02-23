@@ -159,9 +159,7 @@ class JitPackAPI:
         self._session: Optional[ClientSession] = None
 
     async def __aenter__(self) -> "JitPackAPI":
-        self._session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=self.timeout)
-        )
+        self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout))
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -189,9 +187,7 @@ class JitPackAPI:
         :raises JitPackAPIError: for non-2xx responses
         """
         if not self._session:
-            raise RuntimeError(
-                "ClientSession not initialized. Use `async with JitPackAPI(...) as api:`"
-            )
+            raise RuntimeError("ClientSession not initialized. Use `async with JitPackAPI(...) as api:`")
 
         url = f"{self.base_url}{path}"
 
@@ -246,13 +242,9 @@ class JitPackAPI:
         status = response.status
 
         if status in (401, 403):
-            raise JitPackAuthError(
-                f"Authentication/permission error (HTTP {status}). Response body: {body}"
-            )
+            raise JitPackAuthError(f"Authentication/permission error (HTTP {status}). Response body: {body}")
         elif status == 404:
-            raise JitPackNotFoundError(
-                f"Resource not found (HTTP 404). Response body: {body}"
-            )
+            raise JitPackNotFoundError(f"Resource not found (HTTP 404). Response body: {body}")
         else:
             raise JitPackAPIError(f"HTTP {status} error. Body: {body}")
 
@@ -378,9 +370,7 @@ class JitPackAPI:
 
         path = f"/com/github/{group}/{project}/{version}/build.log"
 
-        logger.info(
-            f"Getting build log for: group={group}, project={project}, version={version}"
-        )
+        logger.info(f"Getting build log for: group={group}, project={project}, version={version}")
 
         async with self._session.request(
             "GET",
@@ -391,9 +381,7 @@ class JitPackAPI:
             await self._raise_for_status(resp)
             return await resp.text()
 
-    async def get_commits(
-        self, group: str, project: str, branch: Optional[str] = None
-    ) -> List[Commit]:
+    async def get_commits(self, group: str, project: str, branch: Optional[str] = None) -> List[Commit]:
         """
         GET /api/commits/{group}/{project}?branch=<branch>
 
@@ -418,9 +406,7 @@ class JitPackAPI:
 
         return commits
 
-    async def get_build_info(
-        self, group: str, artifact: str, version: str
-    ) -> Build | None:
+    async def get_build_info(self, group: str, artifact: str, version: str) -> Build | None:
         """
         GET /api/builds/{group}/{artifact}/{version}
         Retrieve info about a single build.
@@ -467,13 +453,9 @@ class JitPackAPI:
         """
         path = f"/api/builds/{group}/{artifact}/{version}"
         await self._request("DELETE", path)
-        logger.info(
-            "Deleted build: group=%s, artifact=%s, version=%s", group, artifact, version
-        )
+        logger.info("Deleted build: group=%s, artifact=%s, version=%s", group, artifact, version)
 
-    async def get_versions(
-        self, group: str, project: str, query: Optional[str] = None
-    ) -> List[Version]:
+    async def get_versions(self, group: str, project: str, query: Optional[str] = None) -> List[Version]:
         """
         GET /api/versions/{group}/{project}?{query}
 
@@ -545,9 +527,7 @@ class JitPackAPI:
         )
         return s
 
-    async def put_settings(
-        self, group: str, project: str, new_settings: Dict[str, Any]
-    ) -> Settings:
+    async def put_settings(self, group: str, project: str, new_settings: Dict[str, Any]) -> Settings:
         """
         PUT /api/settings/{group}/{project}
 
@@ -571,9 +551,7 @@ class JitPackAPI:
             raw=data,
         )
 
-    async def post_trial(
-        self, git_owner_url: str, login: str, plan: str
-    ) -> Dict[str, Any]:
+    async def post_trial(self, git_owner_url: str, login: str, plan: str) -> Dict[str, Any]:
         """
         POST /api/service/trial?gitOwnerUrl=...&login=...&plan=...
 

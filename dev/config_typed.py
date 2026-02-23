@@ -8,7 +8,6 @@ import re
 from mu.typed import MuDecodeContext, MuDecodeError, MuDeserialize, mu_tag
 from mu.types import SAtom, SExpr, SStr
 
-
 T = TypeVar("T")
 
 

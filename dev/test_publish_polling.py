@@ -33,9 +33,7 @@ def test_poll_jitpack_build_status_sleeps_on_not_found(monkeypatch) -> None:
     monkeypatch.setattr(publish_module.time, "time", lambda: next(times))
 
     result = asyncio.run(
-        publish_module.poll_jitpack_build_status(
-            DummyAPI(), "com.github.example", "sample-artifact", "1.2.3"
-        )
+        publish_module.poll_jitpack_build_status(DummyAPI(), "com.github.example", "sample-artifact", "1.2.3")
     )
 
     assert result is None

@@ -22,14 +22,10 @@ class IntRangeSet:
                 if not isinstance(start, int) or not isinstance(end, int):
                     raise TypeError(f"Range endpoints must be integers: {value}")
                 if start > end:
-                    raise ValueError(
-                        f"Invalid range: start ({start}) cannot be greater than end ({end}) in {value}"
-                    )
+                    raise ValueError(f"Invalid range: start ({start}) cannot be greater than end ({end}) in {value}")
                 processed_ranges.append(value)
             else:
-                raise TypeError(
-                    f"Invalid value type: {value}. Must be int or tuple[int, int]."
-                )
+                raise TypeError(f"Invalid value type: {value}. Must be int or tuple[int, int].")
 
         # Sort ranges primarily by start, secondarily by end for merging logic
         processed_ranges.sort()
@@ -63,9 +59,7 @@ class IntRangeSet:
         # Iterate while there are ranges in either list
         while i < len(self.ranges) or j < len(other.ranges):
             # Determine the next range to consider (one with the smaller start)
-            if i < len(self.ranges) and (
-                j == len(other.ranges) or self.ranges[i][0] <= other.ranges[j][0]
-            ):
+            if i < len(self.ranges) and (j == len(other.ranges) or self.ranges[i][0] <= other.ranges[j][0]):
                 # Next range is from self
                 current_start, current_end = self.ranges[i]
                 i += 1

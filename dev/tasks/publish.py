@@ -114,29 +114,21 @@ def set_project_version_in_root_clj(
     """
 
     if not os.path.isfile(root_file):
-        raise ValueError(
-            f"No {root_file} found, cannot update version for {project_name}."
-        )
+        raise ValueError(f"No {root_file} found, cannot update version for {project_name}.")
 
     with open(root_file, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
     updated_lines = []
-    in_target_gradle_block = (
-        False  # True if we are inside the (gradle "project_name" ...) form
-    )
+    in_target_gradle_block = False  # True if we are inside the (gradle "project_name" ...) form
     found_and_replaced = False
     block_start_index = None  # The index of the line containing (gradle "project_name"
 
     project_types = ["gradle", "python", "data", "purescript", "premake"]
     import re
 
-    re_project_type_no_name = re.compile(
-        rf"\((?:{'|'.join(project_types)})\s+\"[^\"]+\""
-    )
-    re_project_type = re.compile(
-        rf"\((?:{'|'.join(project_types)})\s+\"{project_name}\""
-    )
+    re_project_type_no_name = re.compile(rf"\((?:{'|'.join(project_types)})\s+\"[^\"]+\"")
+    re_project_type = re.compile(rf"\((?:{'|'.join(project_types)})\s+\"{project_name}\"")
 
     # We'll walk through lines, and once we detect `(gradle "project_name"`,
     # we know we are in that block until the matching `)` or until we see next (gradle ...
@@ -195,9 +187,7 @@ def set_project_version_in_root_clj(
     with open(root_file, "w", encoding="utf-8") as f:
         f.writelines(updated_lines)
 
-    print(
-        f"Updated version for '{project_name}' from '{current_version}' to '{new_version}' in {root_file}"
-    )
+    print(f"Updated version for '{project_name}' from '{current_version}' to '{new_version}' in {root_file}")
 
 
 ##############################################################################
@@ -205,9 +195,7 @@ def set_project_version_in_root_clj(
 ##############################################################################
 
 
-async def poll_jitpack_build_status(
-    api: JitPackAPI, group_id: str, artifact_id: str, version: str
-) -> bool | None:
+async def poll_jitpack_build_status(api: JitPackAPI, group_id: str, artifact_id: str, version: str) -> bool | None:
     """
     Asynchronously poll JitPack for build status. Return True if success,
     False if error, or None if not found/timed out.
@@ -239,9 +227,7 @@ async def poll_jitpack_build_status(
         status = version_obj.status
         if last_status != status:
             print(version_obj)
-            info(
-                f"JitPack build status for {group_id}:{artifact_id}:{version}: {status}"
-            )
+            info(f"JitPack build status for {group_id}:{artifact_id}:{version}: {status}")
             last_status = status
         if status == BuildStatus.ERROR:
             return False
@@ -320,9 +306,7 @@ async def _check_jitpack_status_cached(
     This function is cached.
     """
     expected_commit_prefix = expected_commit_sha[:7]
-    info(
-        f"CACHE CHECK: Querying JitPack status for {group_id}:{artifact_id}:{version} ({expected_commit_prefix})"
-    )
+    info(f"CACHE CHECK: Querying JitPack status for {group_id}:{artifact_id}:{version} ({expected_commit_prefix})")
     try:
         # Use 'reload' to ensure we query JitPack directly before caching
         versions = await jitpack_api.get_versions(group_id, artifact_id, "reload")
@@ -342,9 +326,7 @@ async def _check_jitpack_status_cached(
         current_commit_prefix = (version_obj.commit or "")[:7]
         if current_commit_prefix == expected_commit_prefix:
             status = version_obj.status
-            info(
-                f"CACHE CHECK: Found version {version} ({current_commit_prefix}), status: {status}"
-            )
+            info(f"CACHE CHECK: Found version {version} ({current_commit_prefix}), status: {status}")
             # Optionally adjust TTL based on status here if decorator supported it,
             # otherwise, rely on the default TTL (1 hour). A successful 'OK' will likely
             # be hit again within the hour if needed, effectively extending its cache life.
@@ -417,9 +399,7 @@ async def publish_single_project(
 
         repo_is_private = repo_info.is_private
         if repo_is_private:
-            info(
-                f"Project {proj.name} is configured as private. JitPack steps will be skipped."
-            )
+            info(f"Project {proj.name} is configured as private. JitPack steps will be skipped.")
 
         try:
             repo = git.Repo(path)
@@ -436,9 +416,7 @@ async def publish_single_project(
         # No working tree (bare repo).
         repo_working_tree_dir = repo.working_tree_dir
         if repo_working_tree_dir is None:
-            raise PublishError(
-                f"Cannot publish project {proj.name} with a bare repository."
-            )
+            raise PublishError(f"Cannot publish project {proj.name} with a bare repository.")
 
         # No commits.
         if not repo.head.is_valid():
@@ -456,18 +434,14 @@ async def publish_single_project(
 
         info(f"Current config version for {proj.name}: {config_version}")
         if last_repo_version:
-            info(
-                f"Latest repo version for {proj.name}: {last_repo_version} at {last_repo_version_tag_commit}"
-            )
+            info(f"Latest repo version for {proj.name}: {last_repo_version} at {last_repo_version_tag_commit}")
 
         if last_repo_version and last_repo_version > config_version:
             # This may mean that the version in the config is outdated.
             info(f"Version in config is outdated for {proj.name}.")
             if ask("Bump version in config to match repo? [Y/n]", result_type="YN"):
                 new_version_str = str(last_repo_version)
-                set_project_version_in_root_clj(
-                    proj.name, str(config_version), new_version_str, "root.clj"
-                )
+                set_project_version_in_root_clj(proj.name, str(config_version), new_version_str, "root.clj")
                 config_version = last_repo_version
                 info(f"Updated config version for {proj.name} to {new_version_str}")
                 proj.version = last_repo_version
@@ -489,21 +463,13 @@ async def publish_single_project(
 
         if last_repo_version_tag_commit is not None:
             if str(last_repo_version_tag_commit) != str(repo.head.commit):
-                commits = list(
-                    repo.iter_commits(f"{last_repo_version_tag_commit}..HEAD")
-                )[::-1]
+                commits = list(repo.iter_commits(f"{last_repo_version_tag_commit}..HEAD"))[::-1]
                 commit_msgs = [c.message.strip() for c in commits]
-                info(
-                    "\n\n".join(
-                        textwrap.indent(m, "> ", lambda line: True) for m in commit_msgs
-                    )
-                )
+                info("\n\n".join(textwrap.indent(m, "> ", lambda line: True) for m in commit_msgs))
                 recommended, rationale, commit_rationales = suggest_version_number(
                     commit_msgs, config_version.__str__(), api_key=openai_key
                 )
-                info(
-                    f"AI recommended version for {proj.name}: {recommended} (Reason: {rationale})"
-                )
+                info(f"AI recommended version for {proj.name}: {recommended} (Reason: {rationale})")
                 info("\n".join(f"  * {m}" for m in commit_rationales))
 
                 recommended_version = Version.parse(recommended)
@@ -512,9 +478,7 @@ async def publish_single_project(
                         f"Recommended version {recommended_version} is not greater than the last tag {last_repo_version} for {proj.name}."
                     )
                 elif recommended_version == last_repo_version:
-                    info(
-                        f"Recommended version {recommended_version} is the same as the last tag for {proj.name}."
-                    )
+                    info(f"Recommended version {recommended_version} is the same as the last tag for {proj.name}.")
                     # info("Incrementing the patch version.")
                     # recommended_version = recommended_version.next_patch()
                     pass
@@ -524,17 +488,11 @@ async def publish_single_project(
         else:
             commits = list(repo.iter_commits("HEAD"))[::-1]
             commit_msgs = [c.message.strip() for c in commits]
-            info(
-                "\n\n".join(
-                    textwrap.indent(m, "> ", lambda line: True) for m in commit_msgs
-                )
-            )
+            info("\n\n".join(textwrap.indent(m, "> ", lambda line: True) for m in commit_msgs))
             recommended, rationale, commit_rationales = suggest_version_number(
                 commit_msgs, config_version.__str__(), api_key=openai_key
             )
-            info(
-                f"AI recommended version for {proj.name}: {recommended} (Reason: {rationale})"
-            )
+            info(f"AI recommended version for {proj.name}: {recommended} (Reason: {rationale})")
             info("\n".join(f"  * {m}" for m in commit_rationales))
             recommended_version = Version.parse(recommended)
 
@@ -559,9 +517,7 @@ async def publish_single_project(
             info(f"Bumping version for {proj.name} to {new_version_str.__str__()} ...")
 
             # Update root.clj
-            set_project_version_in_root_clj(
-                proj.name, config_version.__str__(), new_version_str, "root.clj"
-            )
+            set_project_version_in_root_clj(proj.name, config_version.__str__(), new_version_str, "root.clj")
             proj.version = new_version
 
             # Step 2.5: Re-render build.gradle + other files
@@ -599,9 +555,7 @@ async def publish_single_project(
         return True
 
     if not isinstance(proj, GradleProject):
-        warning(
-            f"Skipping publishing to jitpack for {proj.name}: not a Gradle project."
-        )
+        warning(f"Skipping publishing to jitpack for {proj.name}: not a Gradle project.")
         return True
 
     # Step 4: poll JitPack
@@ -610,9 +564,7 @@ async def publish_single_project(
         group_id = f"com.github.{github_org}"
         artifact_id = proj.name
 
-        info(
-            f"Checking JitPack status for {group_id}:{artifact_id}:{tag_name} (commit {tag_commit.hexsha[:7]})"
-        )
+        info(f"Checking JitPack status for {group_id}:{artifact_id}:{tag_name} (commit {tag_commit.hexsha[:7]})")
 
         cached_status = await _check_jitpack_status_cached(
             jitpack_api, group_id, artifact_id, tag_name, tag_commit.hexsha
@@ -648,16 +600,12 @@ async def publish_single_project(
             info(versions)
 
             if not ref_was_found:
-                warning(
-                    f"JitPack ref not found for {group_id}:{artifact_id}:{tag_name}"
-                )
+                warning(f"JitPack ref not found for {group_id}:{artifact_id}:{tag_name}")
             else:
                 success(f"JitPack ref found for {group_id}:{artifact_id}:{tag_name}")
 
             if found_build_for_wrong_commit:
-                error(
-                    f"JitPack build found for {group_id}:{artifact_id}:{tag_name} but with a different commit."
-                )
+                error(f"JitPack build found for {group_id}:{artifact_id}:{tag_name} but with a different commit.")
                 if ask("Remove build on JitPack? [Y/n]", result_type="YN"):
                     try:
                         await jitpack_api.delete_build(group_id, artifact_id, tag_name)
@@ -668,9 +616,7 @@ async def publish_single_project(
 
             success(f"Polling JitPack for {group_id}:{artifact_id}:{tag_name} ...")
             await jitpack_api.force_build(group_id, artifact_id, tag_name)
-            build_ok = await poll_jitpack_build_status(
-                jitpack_api, group_id, artifact_id, tag_name
-            )
+            build_ok = await poll_jitpack_build_status(jitpack_api, group_id, artifact_id, tag_name)
 
         if build_ok is True:
             success(f"JitPack build success for {proj.name}, version {tag_name}")
@@ -728,9 +674,7 @@ async def publish_main(project_name=None):
                 warning(f"Skipping {proj.name}: in quarantine.")
                 continue
 
-            ok = await publish_single_project(
-                proj, jitpack_api, repo_setup_context, openai_key=config.openai_key
-            )
+            ok = await publish_single_project(proj, jitpack_api, repo_setup_context, openai_key=config.openai_key)
             if not ok:
                 warning(f"Stopped after {proj.name} failed.")
                 break

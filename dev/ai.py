@@ -14,8 +14,7 @@ from dev.caching import cache
 from dev.io import read_text_file, read_ignore_file, walk_files
 
 # Keep this prompt aligned with AGENTS.md > Commit Message Policy.
-SUGGEST_COMMIT_PROMPT = textwrap.dedent(
-    """
+SUGGEST_COMMIT_PROMPT = textwrap.dedent("""
 I have made some changes to a repository.
 
 Modified files:
@@ -56,13 +55,10 @@ Finally, at the end of the commit message, explicitly include a line stating the
      {
          "full_commit_message": "<your commit message here>"
      }
-"""
-).strip()
+""").strip()
 
 
-SEMVER_IMPACT_PATTERN = re.compile(
-    r"^Semver Impact:\s*(MAJOR|MINOR|PATCH|NONE)\s*$", re.MULTILINE | re.IGNORECASE
-)
+SEMVER_IMPACT_PATTERN = re.compile(r"^Semver Impact:\s*(MAJOR|MINOR|PATCH|NONE)\s*$", re.MULTILINE | re.IGNORECASE)
 
 
 def ensure_semver_impact_line(commit_message: str) -> str:
@@ -80,11 +76,7 @@ def suggest_commit_name(modified: str, /, api_key: str) -> str:
     client = openai.Client(api_key=api_key)
 
     h = hashlib.sha256()
-    h.update(
-        json.dumps(
-            {"modified": modified, "prompt": SUGGEST_COMMIT_PROMPT}, sort_keys=True
-        ).encode("utf-8")
-    )
+    h.update(json.dumps({"modified": modified, "prompt": SUGGEST_COMMIT_PROMPT}, sort_keys=True).encode("utf-8"))
     key = h.hexdigest()
 
     response = client.chat.completions.create(
@@ -122,8 +114,7 @@ def suggest_commit_name(modified: str, /, api_key: str) -> str:
         return ensure_semver_impact_line("Unknown")
 
 
-SUGGEST_VERSION_NUMBER = textwrap.dedent(
-    """
+SUGGEST_VERSION_NUMBER = textwrap.dedent("""
 Since the last release {last_version}, here are the commit messages:
 
 {commits}
@@ -163,14 +154,11 @@ Respond with a JSON object like:
     // The new version number based on "rationale", "commit_rationales", and "last_version".
     "version": "<new version number>"
 }
-"""
-).strip()
+""").strip()
 
 
 @cache(path=".dev.cache.db", ttl=7 * 24 * 3600)
-def suggest_version_number(
-    commits: List[str], last_version: str, /, api_key: str
-) -> tuple[str, str, List[str]]:
+def suggest_version_number(commits: List[str], last_version: str, /, api_key: str) -> tuple[str, str, List[str]]:
     assert commits, "No commits"
     client = openai.Client(api_key=api_key)
 
@@ -193,9 +181,9 @@ def suggest_version_number(
         messages=[
             {
                 "role": "user",
-                "content": SUGGEST_VERSION_NUMBER.replace(
-                    "{commits}", commits_str
-                ).replace("{last_version}", str(last_version)),
+                "content": SUGGEST_VERSION_NUMBER.replace("{commits}", commits_str).replace(
+                    "{last_version}", str(last_version)
+                ),
             }
         ],
         model="gpt-5",
@@ -377,9 +365,7 @@ def agent_call(
 
         non_existent_files = [path for path in paths if not (root / path).exists()]
         if non_existent_files:
-            return {
-                "error": f"Files do not exist: {non_existent_files}. Known files: {known_files}"
-            }
+            return {"error": f"Files do not exist: {non_existent_files}. Known files: {known_files}"}
 
         non_file_paths = [path for path in paths if not os.path.isfile(root / path)]
         if non_file_paths:
@@ -387,19 +373,13 @@ def agent_call(
                 "error": f"Paths are directories: {non_file_paths}. Please provide paths to files, not directories."
             }
 
-        return answer_about_file(
-            [root / path for path in paths], question, api_key=api_key, client=client
-        )
+        return answer_about_file([root / path for path in paths], question, api_key=api_key, client=client)
 
     initial_prompt = ""
     initial_prompt += "You are given a repository with the following files:\n"
     initial_prompt += f"<existing-files>{json.dumps(known_files)}</existing-files>\n\n"
-    initial_prompt += (
-        "Solve the task by asking questions about the files in the repository.\n"
-    )
-    initial_prompt += (
-        "There is no limit to the number of questions you can ask, so make sure to "
-    )
+    initial_prompt += "Solve the task by asking questions about the files in the repository.\n"
+    initial_prompt += "There is no limit to the number of questions you can ask, so make sure to "
     initial_prompt += "ask as many questions as you need to clarify everything.\n\n"
     initial_prompt += f"<task>{task}</task>\n\n"
 
@@ -431,18 +411,14 @@ def agent_call(
 
         if message.tool_calls:
             for tool_call in message.tool_calls:
-                assert (
-                    tool_call.type == "function"
-                ), f"Unknown tool call type: {tool_call.type}"
+                assert tool_call.type == "function", f"Unknown tool call type: {tool_call.type}"
                 tool_id = tool_call.id
                 tool_function = tool_call.function
 
                 tool_name = tool_function.name
                 tool_arguments = json.loads(tool_function.arguments)
 
-                logging.info(
-                    f"Calling tool {tool_name} with arguments {tool_arguments}"
-                )
+                logging.info(f"Calling tool {tool_name} with arguments {tool_arguments}")
 
                 if tool_name == "request_to_developer":
                     paths = tool_arguments["paths"]
@@ -471,42 +447,29 @@ def create_readme(project_name: str, root: Path, /, api_key: str) -> str:
 
     overview = agent_call(
         root,
-        textwrap.dedent(
-            """
+        textwrap.dedent("""
              Create an overview of the repository as if you were writing a README file.
              Focus primarily on the high-level picture of the codebase, its purpose, and the main components.
-             """
-        ).strip(),
+             """).strip(),
         client=client,
     )
 
     usage = agent_call(
         root,
-        textwrap.dedent(
-            """
+        textwrap.dedent("""
             Collect or create code usage examples for the repository.
             IF there are tests, use the tests to demonstrate usage.
             IF there are no tests, learn from the codebase and write examples.
-            """
-        ).strip(),
+            """).strip(),
         client=client,
     )
 
-    notes = (
-        textwrap.dedent(
-            """
+    notes = textwrap.dedent("""
      <overview>{overview}</overview>
      <usage>{usage}</usage>
-     """
-        )
-        .strip()
-        .replace("{overview}", overview)
-        .replace("{usage}", usage)
-    )
+     """).strip().replace("{overview}", overview).replace("{usage}", usage)
 
-    prompt_template = read_text_file(
-        Path("data-repo-template/repo_template_prompt.txt")
-    )
+    prompt_template = read_text_file(Path("data-repo-template/repo_template_prompt.txt"))
     prompt_template = prompt_template.replace("{{project-id}}", project_name)
     prompt_template = prompt_template.replace("{{notes}}", notes)
 

@@ -4,9 +4,7 @@ from pathlib import Path
 # Read the requirements from requirements.txt
 reqs_path = Path(__file__).parent / "requirements.txt"
 requirements = [
-    line.strip()
-    for line in reqs_path.read_text().splitlines()
-    if line.strip() and not line.startswith("#")
+    line.strip() for line in reqs_path.read_text().splitlines() if line.strip() and not line.startswith("#")
 ]
 
 setup(

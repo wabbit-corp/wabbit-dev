@@ -48,29 +48,17 @@ from dev.checks.base import (
 )
 
 E_MISSING_README = IssueType("E_MISSING_README", "Missing README file")
-E_README_NO_BANNER = IssueType(
-    "E_README_NO_BANNER", "README file does not contain a project banner"
-)
-E_README_NO_BADGES = IssueType(
-    "E_README_NO_BADGES", "README file does not contain badges"
-)
-E_README_NO_INSTALL = IssueType(
-    "E_README_NO_INSTALL", "README file does not contain installation instructions"
-)
-E_README_NO_USAGE = IssueType(
-    "E_README_NO_USAGE", "README file does not contain usage instructions"
-)
-E_README_NO_LICENSE = IssueType(
-    "E_README_NO_LICENSE", "README file does not contain license information"
-)
+E_README_NO_BANNER = IssueType("E_README_NO_BANNER", "README file does not contain a project banner")
+E_README_NO_BADGES = IssueType("E_README_NO_BADGES", "README file does not contain badges")
+E_README_NO_INSTALL = IssueType("E_README_NO_INSTALL", "README file does not contain installation instructions")
+E_README_NO_USAGE = IssueType("E_README_NO_USAGE", "README file does not contain usage instructions")
+E_README_NO_LICENSE = IssueType("E_README_NO_LICENSE", "README file does not contain license information")
 E_README_NO_CONTRIBUTING = IssueType(
     "E_README_NO_CONTRIBUTING", "README file does not contain contributing instructions"
 )
 E_MISSING_LICENSE = IssueType("E_MISSING_LICENSE", "Missing LICENSE file")
 E_MISSING_CLA = IssueType("E_MISSING_CLA", "Missing CLA file")
-E_MISSING_CLA_SIMPLE = IssueType(
-    "E_MISSING_CLA_SIMPLE", "Missing CLA explanations file"
-)
+E_MISSING_CLA_SIMPLE = IssueType("E_MISSING_CLA_SIMPLE", "Missing CLA explanations file")
 E_MISSING_GITIGNORE = IssueType("E_MISSING_GITIGNORE", "Missing .gitignore file")
 
 

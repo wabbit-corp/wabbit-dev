@@ -42,9 +42,7 @@ def check_main(
     config_path = Path("./root.clj").absolute()
     config = load_config() if config_path.exists() else None
     if config is None:
-        warning(
-            "No config file found. Some checks may not have sufficient context to run."
-        )
+        warning("No config file found. Some checks may not have sufficient context to run.")
 
     projects_by_path: Dict[Path, Project] = {}
     if config is not None:
@@ -111,27 +109,17 @@ def check_main(
             key=lambda c: (getattr(c, "order", 1000), c.__class__.__name__),
         )
 
-    repo_checks: list[RepoCheck] = sort_checks(
-        [v for v in all_checks.values() if isinstance(v, RepoCheck)]
-    )
-    project_checks: list[ProjectCheck] = sort_checks(
-        [v for v in all_checks.values() if isinstance(v, ProjectCheck)]
-    )
-    file_checks: list[FileCheck] = sort_checks(
-        [v for v in all_checks.values() if isinstance(v, FileCheck)]
-    )
-    dir_checks: list[DirectoryCheck] = sort_checks(
-        [v for v in all_checks.values() if isinstance(v, DirectoryCheck)]
-    )
+    repo_checks: list[RepoCheck] = sort_checks([v for v in all_checks.values() if isinstance(v, RepoCheck)])
+    project_checks: list[ProjectCheck] = sort_checks([v for v in all_checks.values() if isinstance(v, ProjectCheck)])
+    file_checks: list[FileCheck] = sort_checks([v for v in all_checks.values() if isinstance(v, FileCheck)])
+    dir_checks: list[DirectoryCheck] = sort_checks([v for v in all_checks.values() if isinstance(v, DirectoryCheck)])
 
     disabled_checks: dict[str, pathspec.PathSpec] = {}
     ignored_findings: list[tuple[str, pathspec.PathSpec, str]] = []
     if config is not None:
         patterns_by_error_name: Dict[str, List[str]] = {}
         for error_name, pattern in config.disabled_checks:
-            assert isinstance(
-                error_name, str
-            ), f"Expected string, got {type(error_name)}"
+            assert isinstance(error_name, str), f"Expected string, got {type(error_name)}"
             assert isinstance(pattern, str), f"Expected string, got {type(pattern)}"
             assert (
                 error_name in _KNOWN_TYPES or error_name == "*"
@@ -153,9 +141,7 @@ def check_main(
             )
 
         for error_name, pattern, value in config.ignored_findings:
-            assert isinstance(
-                error_name, str
-            ), f"Expected string, got {type(error_name)}"
+            assert isinstance(error_name, str), f"Expected string, got {type(error_name)}"
             assert isinstance(pattern, str), f"Expected string, got {type(pattern)}"
             assert isinstance(value, str), f"Expected string, got {type(value)}"
             assert (
@@ -179,9 +165,7 @@ def check_main(
             return issue.issue_type.message.format(**(issue.data or {}))
         except Exception as e:
             if report_format_error:
-                error(
-                    f"Error formatting issue message: {e} with type: {issue.issue_type} and data: {issue.data}"
-                )
+                error(f"Error formatting issue message: {e} with type: {issue.issue_type} and data: {issue.data}")
             return issue.issue_type.message
 
     def issue_relative_path(path: Path) -> str:
@@ -303,11 +287,7 @@ def check_main(
         Reads a gitignore-style ignore file and returns active patterns.
         """
         with path.open("rt", encoding="utf-8") as f:
-            return [
-                line.strip()
-                for line in f
-                if line.strip() and not line.strip().startswith("#")
-            ]
+            return [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
 
     def find_repo_root(path: Path) -> Path | None:
         current = path.absolute()
@@ -333,9 +313,7 @@ def check_main(
 
     # print(f"project_paths: {projects_by_path.keys()}")
 
-    def go(
-        path: Path, project: Project | None = None, repo: RepoContext | None = None
-    ) -> None:
+    def go(path: Path, project: Project | None = None, repo: RepoContext | None = None) -> None:
         if repo is not None:
             if repo.spec.match_file(path.relative_to(repo.root)):
                 # info(f"Skipping {path} due to .gitignore")
@@ -443,12 +421,8 @@ if __name__ == "__main__":
         type=str,
         help="Project or directory or file to check.",
     )
-    parser.add_argument(
-        "--checks", nargs="+", default=[], help="List of checks to run."
-    )
-    parser.add_argument(
-        "--fix", action="store_true", help="Fix issues found during checks."
-    )
+    parser.add_argument("--checks", nargs="+", default=[], help="List of checks to run.")
+    parser.add_argument("--fix", action="store_true", help="Fix issues found during checks.")
 
     args = parser.parse_args()
 

@@ -7,7 +7,6 @@ import pytest
 from dev.checks.base import FileCheck, FileContext, IssueType, RepoCheck, Severity
 from dev.tasks import check as check_task
 
-
 E_TEST_ERROR = IssueType("E_TEST_RUNNER_ERROR", "runner error")
 E_TEST_WARNING = IssueType(
     "E_TEST_RUNNER_WARNING",
@@ -180,9 +179,7 @@ def test_check_main_exit_code_zero_for_warnings(tmp_path: Path, monkeypatch: pyt
     assert check_task.check_main(str(tmp_path)) == 0
 
 
-def test_checkignore_applies_without_git_repo(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_checkignore_applies_without_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".checkignore").write_text("skip.txt\n", encoding="utf-8")
     (tmp_path / "skip.txt").write_text("skip\n", encoding="utf-8")
     (tmp_path / "keep.txt").write_text("keep\n", encoding="utf-8")
@@ -199,9 +196,7 @@ def test_checkignore_applies_without_git_repo(
     assert "skip.txt" not in joined
 
 
-def test_checkignore_overrides_gitignore(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_checkignore_overrides_gitignore(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _make_repo(tmp_path)
     (tmp_path / ".gitignore").write_text("*.py\n", encoding="utf-8")
     (tmp_path / ".checkignore").write_text("!keep.py\n", encoding="utf-8")
@@ -220,9 +215,7 @@ def test_checkignore_overrides_gitignore(
     assert "drop.py" not in joined
 
 
-def test_nested_checkignore_applies_only_to_subtree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_nested_checkignore_applies_only_to_subtree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     src = tmp_path / "src"
     src.mkdir()
     (src / ".checkignore").write_text("skip.txt\n", encoding="utf-8")
@@ -244,9 +237,7 @@ def test_nested_checkignore_applies_only_to_subtree(
     assert "/src/skip.txt" not in joined
 
 
-def test_ignore_finding_config_suppresses_matching_value(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_ignore_finding_config_suppresses_matching_value(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _make_repo(tmp_path)
     _write_minimal_config(
         tmp_path,
@@ -284,9 +275,7 @@ def test_ignore_finding_config_non_matching_value_still_reports(
     assert check_task.check_main(str(tmp_path)) == 1
 
 
-def test_ignore_finding_config_wildcard_issue_id(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_ignore_finding_config_wildcard_issue_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _make_repo(tmp_path)
     _write_minimal_config(
         tmp_path,
@@ -304,9 +293,7 @@ def test_ignore_finding_config_wildcard_issue_id(
     assert check_task.check_main(str(tmp_path)) == 0
 
 
-def test_inline_check_ignore_works_without_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_inline_check_ignore_works_without_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _make_repo(tmp_path)
     (tmp_path / "sample.py").write_text(
         'HOST = "10.0.0.0"  # check:ignore E_TEST_VALUE_MATCH value=10.0.0.0\n',
@@ -321,9 +308,7 @@ def test_inline_check_ignore_works_without_config(
     assert check_task.check_main(str(tmp_path)) == 0
 
 
-def test_ignore_finding_applies_to_repo_checks_at_report_time(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_ignore_finding_applies_to_repo_checks_at_report_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _make_repo(tmp_path)
     _write_minimal_config(
         tmp_path,

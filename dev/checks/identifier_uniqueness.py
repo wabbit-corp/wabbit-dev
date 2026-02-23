@@ -23,9 +23,7 @@ from dev.file_properties import get_expected_file_properties
 # --- Constants ---
 
 # "2ecbfb56-85d7-4e32-84cb-b2f175acf240" - Note: Captures the quotes
-UUID_PATTERN = re.compile(
-    r"(\"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\")"
-)
+UUID_PATTERN = re.compile(r"(\"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\")")
 # "01FY323KTHD29NRQC6D7BYBP51" - Note: Captures the quotes. Adjusted regex slightly to avoid ^LI inside character class if unintended.
 # If you specifically want to exclude L and I, it should be outside: "[A-Z0-9][A-Z0-9^LI]*" pattern is complex.
 # Assuming Crockford's Base32 alphabet for ULID (no I, L, O, U). Let's refine the pattern.
@@ -97,9 +95,7 @@ DEFAULT_IGNORE_FILES: Set[str] = {".DS_Store", "Thumbs.db", "desktop.ini"}
 
 # --- Issue Types ---
 
-E_DUPLICATE_IDENTIFIER = IssueType(
-    "E_DUPLICATE_IDENTIFIER", "Duplicate identifier found."
-)
+E_DUPLICATE_IDENTIFIER = IssueType("E_DUPLICATE_IDENTIFIER", "Duplicate identifier found.")
 
 # --- The Check ---
 
@@ -128,11 +124,7 @@ class IgnoreContext:
 
 def read_ignore_patterns(path: Path) -> List[str]:
     with path.open("rt", encoding="utf-8", errors="replace") as f:
-        return [
-            line.strip()
-            for line in f
-            if line.strip() and not line.strip().startswith("#")
-        ]
+        return [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
 
 
 class UniqueIdentifiersCheck(ProjectCheck):
@@ -152,12 +144,8 @@ class UniqueIdentifiersCheck(ProjectCheck):
             ignore_dirs: Set of directory names to ignore during the scan. Defaults to common build/VCS dirs.
             ignore_files: Set of file names to ignore during the scan. Defaults to common system files.
         """
-        self.ignore_dirs = (
-            ignore_dirs if ignore_dirs is not None else DEFAULT_IGNORE_DIRS
-        )
-        self.ignore_files = (
-            ignore_files if ignore_files is not None else DEFAULT_IGNORE_FILES
-        )
+        self.ignore_dirs = ignore_dirs if ignore_dirs is not None else DEFAULT_IGNORE_DIRS
+        self.ignore_files = ignore_files if ignore_files is not None else DEFAULT_IGNORE_FILES
         # Precompile regex patterns (already done at module level)
         self.uuid_pattern = UUID_PATTERN
         self.ulid_pattern = ULID_PATTERN

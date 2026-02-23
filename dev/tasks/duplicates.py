@@ -50,9 +50,7 @@ def get_hash(filename, first_chunk_only=False, hash_algo=hashlib.sha1):
     return hashobj.digest()
 
 
-def check_for_duplicates(
-    paths, exclude_filters, include_filters, min_size, no_default_excludes
-):
+def check_for_duplicates(paths, exclude_filters, include_filters, min_size, no_default_excludes):
     files_by_size = defaultdict(list)
     files_by_small_hash = defaultdict(list)
     files_by_full_hash = defaultdict(list)
@@ -140,9 +138,7 @@ def check_for_duplicates(
 
     file_groups.sort(key=lambda x: x.total_size, reverse=True)
     for file_group in file_groups:
-        print(
-            f"Total size: {file_group.total_size} bytes, Total count: {file_group.total_count}"
-        )
+        print(f"Total size: {file_group.total_size} bytes, Total count: {file_group.total_count}")
         for filename in file_group.files:
             print("  ", filename)
         print()
@@ -175,9 +171,7 @@ if __name__ == "__main__":
         help="Include only files matching the filter",
         nargs="+",
     )
-    parser.add_argument(
-        "-s", "--size", type=int, default=1, help="Minimum file size to consider"
-    )
+    parser.add_argument("-s", "--size", type=int, default=1, help="Minimum file size to consider")
     parser.add_argument(
         "--no-default-excludes",
         action="store_true",
@@ -186,6 +180,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    check_for_duplicates(
-        args.folders, args.exclude, args.filter, args.size, args.no_default_excludes
-    )
+    check_for_duplicates(args.folders, args.exclude, args.filter, args.size, args.no_default_excludes)

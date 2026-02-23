@@ -110,16 +110,12 @@ def write_text_file(path: Path, content: str) -> None:
         new_content_hash = hashlib.sha256(content_bytes).hexdigest()
         # print("hash: ", old_content_hash, new_content_hash)
 
-        if (path.stat().st_size != len(content_bytes)) or (
-            old_content_hash != new_content_hash
-        ):
+        if (path.stat().st_size != len(content_bytes)) or (old_content_hash != new_content_hash):
 
             # Compute diff:
             from difflib import unified_diff
 
-            diff = unified_diff(
-                old_content.splitlines(), content.splitlines(), lineterm=""
-            )
+            diff = unified_diff(old_content.splitlines(), content.splitlines(), lineterm="")
             total_added = 0
             total_removed = 0
             for line in diff:
@@ -128,9 +124,7 @@ def write_text_file(path: Path, content: str) -> None:
                 elif line.startswith("-"):
                     total_removed += 1
 
-            info(
-                f"Modifying {path}: {total_removed} lines removed, {total_added} lines added"
-            )
+            info(f"Modifying {path}: {total_removed} lines removed, {total_added} lines added")
             with open(path, "wb+") as f:
                 f.write(content_bytes)
         else:
@@ -141,9 +135,7 @@ def write_text_file(path: Path, content: str) -> None:
             f.write(content_bytes)
 
 
-def walk_files(
-    path: Path, predicate: Callable[[Path], bool] | None = None
-) -> Generator[Path, None, None]:
+def walk_files(path: Path, predicate: Callable[[Path], bool] | None = None) -> Generator[Path, None, None]:
     assert isinstance(path, Path), f"Expected Path, got {type(path)}"
     if predicate is not None and not predicate(path):
         return

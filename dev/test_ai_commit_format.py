@@ -12,7 +12,4 @@ def test_ensure_semver_impact_line_appends_none_if_missing() -> None:
 
 
 def test_ensure_semver_impact_line_defaults_empty_messages() -> None:
-    assert (
-        ensure_semver_impact_line("")
-        == "chore: update repository\n\nSemver Impact: NONE"
-    )
+    assert ensure_semver_impact_line("") == "chore: update repository\n\nSemver Impact: NONE"

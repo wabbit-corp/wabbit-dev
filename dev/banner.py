@@ -56,12 +56,8 @@ def prepare_icon(icon_path, target_size, corner_radius_factor=0.15):
     # Draw the rounded rectangle on the mask.
     # Pieslices for corners and rectangles for the body.
     draw.pieslice((0, 0, 2 * radius, 2 * radius), 180, 270, fill=255)  # Top-left
-    draw.pieslice(
-        (new_width - 2 * radius, 0, new_width, 2 * radius), 270, 360, fill=255
-    )  # Top-right
-    draw.pieslice(
-        (0, new_height - 2 * radius, 2 * radius, new_height), 90, 180, fill=255
-    )  # Bottom-left
+    draw.pieslice((new_width - 2 * radius, 0, new_width, 2 * radius), 270, 360, fill=255)  # Top-right
+    draw.pieslice((0, new_height - 2 * radius, 2 * radius, new_height), 90, 180, fill=255)  # Bottom-left
     draw.pieslice(
         (new_width - 2 * radius, new_height - 2 * radius, new_width, new_height),
         0,
@@ -70,12 +66,8 @@ def prepare_icon(icon_path, target_size, corner_radius_factor=0.15):
     )  # Bottom-right
 
     # Fill in the connecting rectangles
-    draw.rectangle(
-        (radius, 0, new_width - radius, new_height), fill=255
-    )  # Vertical body
-    draw.rectangle(
-        (0, radius, new_width, new_height - radius), fill=255
-    )  # Horizontal body
+    draw.rectangle((radius, 0, new_width - radius, new_height), fill=255)  # Vertical body
+    draw.rectangle((0, radius, new_width, new_height - radius), fill=255)  # Horizontal body
 
     # Create a fully transparent background of the same size as the resized icon
     transparent_background = Image.new("RGBA", icon_resized.size, (0, 0, 0, 0))
@@ -84,9 +76,7 @@ def prepare_icon(icon_path, target_size, corner_radius_factor=0.15):
     # The 'corner_mask' dictates the shape:
     # - Where 'corner_mask' is white (255), pixels from 'icon_resized' (with their original alpha) are used.
     # - Where 'corner_mask' is black (0), pixels from 'transparent_background' are used (i.e., fully transparent).
-    rounded_icon_with_original_alpha = Image.composite(
-        icon_resized, transparent_background, corner_mask
-    )
+    rounded_icon_with_original_alpha = Image.composite(icon_resized, transparent_background, corner_mask)
 
     return rounded_icon_with_original_alpha
 
@@ -130,9 +120,7 @@ def create_banner(
 
     # Resolve the background color as an RGBA tuple
     background_color = (
-        ImageColor.getrgb(background_color) + (255,)
-        if isinstance(background_color, str)
-        else background_color
+        ImageColor.getrgb(background_color) + (255,) if isinstance(background_color, str) else background_color
     )
 
     # 2. Load the original PNG
@@ -148,9 +136,7 @@ def create_banner(
 
     subtitle_text_width, subtitle_text_height = 0, 0
     if subtitle_text and subtitle_font:
-        subtitle_text_width, subtitle_text_height = get_text_dimensions(
-            subtitle_font, subtitle_text
-        )
+        subtitle_text_width, subtitle_text_height = get_text_dimensions(subtitle_font, subtitle_text)
 
     # 4. Calculate total banner width & height
     text_block_width = max(main_text_width, subtitle_text_width)
@@ -171,26 +157,18 @@ def create_banner(
                 # For named colors, getrgb returns RGB. We add Alpha for RGBA.
                 final_banner_bg_color = ImageColor.getrgb(background_color) + (255,)
             except ValueError:
-                print(
-                    f"Warning: Unknown background color string '{background_color}'. Defaulting to transparent."
-                )
+                print(f"Warning: Unknown background color string '{background_color}'. Defaulting to transparent.")
                 final_banner_bg_color = (0, 0, 0, 0)  # Fallback to transparent
-    elif (
-        isinstance(background_color, tuple) and len(background_color) == 3
-    ):  # RGB tuple
+    elif isinstance(background_color, tuple) and len(background_color) == 3:  # RGB tuple
         final_banner_bg_color = background_color + (255,)  # Add opaque alpha
-    elif (
-        isinstance(background_color, tuple) and len(background_color) == 4
-    ):  # RGBA tuple
+    elif isinstance(background_color, tuple) and len(background_color) == 4:  # RGBA tuple
         final_banner_bg_color = background_color
     else:
         print(f"Warning: Invalid background_color format. Defaulting to transparent.")
         final_banner_bg_color = (0, 0, 0, 0)  # Fallback
 
     # Create the blank banner
-    banner = Image.new(
-        "RGBA", (banner_width, banner_height), color=final_banner_bg_color
-    )
+    banner = Image.new("RGBA", (banner_width, banner_height), color=final_banner_bg_color)
     draw = ImageDraw.Draw(banner)
 
     # 6. Paste the image into the banner (vertically centered)
@@ -209,9 +187,7 @@ def create_banner(
     # main_text_x = text_start_x + (text_block_width - main_text_width) // 2 # Centered in text block
     main_text_x = text_start_x  # Left-aligned in text block
     main_text_y = text_block_y_start
-    draw.text(
-        (main_text_x, main_text_y), main_text, font=main_font, fill=text_color_rgb
-    )
+    draw.text((main_text_x, main_text_y), main_text, font=main_font, fill=text_color_rgb)
 
     if subtitle_text and subtitle_font:
         # subtitle_text_x = text_start_x + (text_block_width - subtitle_text_width) // 2 # Centered

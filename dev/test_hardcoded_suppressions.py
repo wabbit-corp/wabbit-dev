@@ -41,8 +41,7 @@ def test_hardcoded_internal_host_ip_inline_suppression(tmp_path: Path) -> None:
 def test_hardcoded_internal_host_ip_config_suppression(tmp_path: Path) -> None:
     path = tmp_path / "sample.py"
     path.write_text(
-        'first = "10.0.0.0"\n'
-        'second = "172.16.0.1"\n',
+        'first = "10.0.0.0"\n' 'second = "172.16.0.1"\n',
         encoding="utf-8",
     )
 

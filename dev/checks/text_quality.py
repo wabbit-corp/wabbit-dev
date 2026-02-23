@@ -46,7 +46,6 @@ import unicodedata  # Needed for Unicode checks
 
 from dev.file_properties import ExpectedFileProperties, get_expected_file_properties
 
-
 CHUNK_BYTE_SIZE = 1024 * 1024  # 1 MB
 
 
@@ -174,9 +173,7 @@ def fix_trailing_whitespace(file: Path) -> None:
             f.write(line.rstrip() + nl)
 
 
-def fix_mixed_spaces_tabs(
-    file: Path, tab_width: int = 4, prefer_tabs: bool = False
-) -> None:
+def fix_mixed_spaces_tabs(file: Path, tab_width: int = 4, prefer_tabs: bool = False) -> None:
     """
     Normalize *leading* indentation on lines that mix tabs and spaces.
 
@@ -234,24 +231,14 @@ MAX_CODE_LINE_LENGTH = 200  # Default maximum line length for code files
 
 
 E_NO_NEWLINE = IssueType("E_NO_NEWLINE", "File does not end with a newline character.")
-E_BOM_AT_START = IssueType(
-    "E_BOM_AT_START", "File starts with a UTF-8 BOM (Byte Order Mark)."
-)
+E_BOM_AT_START = IssueType("E_BOM_AT_START", "File starts with a UTF-8 BOM (Byte Order Mark).")
 E_LINE_ENDINGS = IssueType("E_LINE_ENDINGS", "File contains incorrect line endings.")
 E_NOT_UTF8 = IssueType("E_NOT_UTF8", "File is not valid UTF-8 encoded.")
-E_GIT_CONFLICT_MARKER = IssueType(
-    "E_GIT_CONFLICT_MARKER", "File contains a Git conflict marker."
-)
+E_GIT_CONFLICT_MARKER = IssueType("E_GIT_CONFLICT_MARKER", "File contains a Git conflict marker.")
 E_LINE_TOO_LONG = IssueType("E_LINE_TOO_LONG", "Line exceeds maximum length.")
-E_TRAILING_WHITESPACE = IssueType(
-    "E_TRAILING_WHITESPACE", "Line contains trailing whitespace."
-)
-E_MIXED_SPACES_TABS = IssueType(
-    "E_MIXED_SPACES_TABS", "Line contains mixed spaces and tabs in indentation."
-)
-E_UNICODE_HOMOGLYPH = IssueType(
-    "E_UNICODE_HOMOGLYPH", "Line contains a non-ASCII letter (potential homoglyph)."
-)
+E_TRAILING_WHITESPACE = IssueType("E_TRAILING_WHITESPACE", "Line contains trailing whitespace.")
+E_MIXED_SPACES_TABS = IssueType("E_MIXED_SPACES_TABS", "Line contains mixed spaces and tabs in indentation.")
+E_UNICODE_HOMOGLYPH = IssueType("E_UNICODE_HOMOGLYPH", "Line contains a non-ASCII letter (potential homoglyph).")
 E_UNICODE_INVISIBLE = IssueType(
     "E_UNICODE_INVISIBLE",
     "Line contains a potentially invisible or problematic Unicode character.",
@@ -311,9 +298,7 @@ class TextQualityCheck(FileCheck):
             ctx.add_issue(E_BOM_AT_START)
             ctx.add_issue(E_NOT_UTF8)
             is_invalid_encoding = True
-        elif content_bytes.startswith(b"\xff\xfe") or content_bytes.startswith(
-            b"\xfe\xff"
-        ):  # UTF-16 BOM
+        elif content_bytes.startswith(b"\xff\xfe") or content_bytes.startswith(b"\xfe\xff"):  # UTF-16 BOM
             ctx.add_issue(E_BOM_AT_START)
             ctx.add_issue(E_NOT_UTF8)
             is_invalid_encoding = True
@@ -325,16 +310,11 @@ class TextQualityCheck(FileCheck):
 
         # Check Line Endings based on bytes (more robust than decoded text)
         if not ctx.expected_properties.is_crlf_native and b"\r\n" in content_bytes:
-            ctx.add_issue(
-                E_LINE_ENDINGS, fix=(lambda: fix_line_endings(ctx.path, LineEnding.LF))
-            )
+            ctx.add_issue(E_LINE_ENDINGS, fix=(lambda: fix_line_endings(ctx.path, LineEnding.LF)))
 
         if ctx.expected_properties.is_crlf_native:
             line_ending_counts = get_line_ending_counts(ctx.path)
-            if (
-                line_ending_counts[LineEnding.LF] > 0
-                or line_ending_counts[LineEnding.CR] > 0
-            ):
+            if line_ending_counts[LineEnding.LF] > 0 or line_ending_counts[LineEnding.CR] > 0:
                 ctx.add_issue(
                     E_LINE_ENDINGS,
                     fix=(lambda: fix_line_endings(ctx.path, LineEnding.CRLF)),
@@ -378,9 +358,7 @@ class TextQualityCheck(FileCheck):
             ctx.add_issue(E_NO_NEWLINE, fix=(lambda: fix_no_newline(ctx.path)))
 
         if text is not None:
-            lines = (
-                text.splitlines()
-            )  # Don't keep ends, use original line endings from bytes if needed
+            lines = text.splitlines()  # Don't keep ends, use original line endings from bytes if needed
 
             for i, line in enumerate(lines):
                 line_nr = i + 1
@@ -391,9 +369,7 @@ class TextQualityCheck(FileCheck):
                     # Often conflict markers break other checks, maybe continue to next line?
 
                 # Check for Long Lines (only for code files)
-                if ctx.expected_properties.is_code and not (
-                    ctx and ctx.project_type == CoarseProjectType.DATA
-                ):
+                if ctx.expected_properties.is_code and not (ctx and ctx.project_type == CoarseProjectType.DATA):
                     # Note: len() works on Unicode characters, not bytes. This is usually what's desired.
                     if len(line) > MAX_CODE_LINE_LENGTH:
                         ctx.add_issue(
@@ -422,11 +398,7 @@ class TextQualityCheck(FileCheck):
                     ctx.add_issue(
                         E_MIXED_SPACES_TABS,
                         line=line_nr,
-                        fix=(
-                            lambda: fix_mixed_spaces_tabs(
-                                ctx.path, tab_width=4, prefer_tabs=False
-                            )
-                        ),
+                        fix=(lambda: fix_mixed_spaces_tabs(ctx.path, tab_width=4, prefer_tabs=False)),
                     )
 
                 # Character-level checks within the line
@@ -436,9 +408,7 @@ class TextQualityCheck(FileCheck):
                 for j, char in enumerate(line):
                     col_nr = j + 1
                     char_ord = ord(char)
-                    category = unicodedata.category(
-                        char
-                    )  # Get Unicode category (e.g., 'Lu', 'Ll', 'Cc', 'Cf', 'Zs')
+                    category = unicodedata.category(char)  # Get Unicode category (e.g., 'Lu', 'Ll', 'Cc', 'Cf', 'Zs')
 
                     # Check for Unexpected Control Characters
                     # C0 controls (U+0000-U+001F) & C1 controls (U+007F-U+009F)

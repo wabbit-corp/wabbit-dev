@@ -50,9 +50,7 @@ def cloc(
     config_path = Path("./root.clj").absolute()
     config = load_config() if config_path.exists() else None
     if config is None:
-        warning(
-            "No config file found. Some checks may not have sufficient context to run."
-        )
+        warning("No config file found. Some checks may not have sufficient context to run.")
 
     # print(f"Running cloc for: {project_or_dir_or_file or 'all projects'}")
     # print(f"All projects: {list(config.defined_projects.keys()) if config else 'N/A'}")
@@ -119,9 +117,7 @@ def cloc(
         print("No statistics collected.")
 
     # Totals
-    total_stats: defaultdict[str, ClocStats] = defaultdict(
-        lambda: ClocStats(0, 0, 0, 0)
-    )
+    total_stats: defaultdict[str, ClocStats] = defaultdict(lambda: ClocStats(0, 0, 0, 0))
     for stats in combined_stats.values():
         for lang, lang_stats in stats.items():
             total = total_stats[lang]

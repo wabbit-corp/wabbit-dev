@@ -105,9 +105,7 @@ class FileDiff:
     # new_kind: FileKind = FileKind.FILE
     old_type: FileType = FileType.UNKNOWN
     new_type: FileType = FileType.UNKNOWN
-    binary_different: bool = (
-        False  # True if binary files differ or type changed text<->binary
-    )
+    binary_different: bool = False  # True if binary files differ or type changed text<->binary
     unified_diff: Optional[str] = None  # Text diff if applicable
 
     # Additional Git info
@@ -179,9 +177,7 @@ def _get_index_entry(index: IndexFile, path: str) -> Optional[IndexEntry]:
 
 
 # Get content and type from working tree file
-def _read_working_tree_file(
-    repo: Repo, path: str
-) -> Tuple[Optional[bytes], FileType, Optional[int]]:
+def _read_working_tree_file(repo: Repo, path: str) -> Tuple[Optional[bytes], FileType, Optional[int]]:
     """Reads content, classifies type, and gets mode from a working tree file."""
     full_path = os.path.join(repo.working_dir, path)
     content: Optional[bytes] = None
@@ -228,9 +224,7 @@ def _calculate_blob_sha(repo: Repo, content_bytes: Optional[bytes]) -> Optional[
         # Blob.type is 'blob'
         # len(content_bytes) is the size
         # io.BytesIO(content_bytes) provides the stream interface
-        istream = gitdb.IStream(
-            Blob.type, len(content_bytes), io.BytesIO(content_bytes)
-        )
+        istream = gitdb.IStream(Blob.type, len(content_bytes), io.BytesIO(content_bytes))
         # Store the stream in the object database and get the SHA
         sha = repo.odb.store(istream).hexsha
         # logging.debug(f"Calculated SHA {sha} for content: {content_bytes[:50]}...") # Debug SHA calc
@@ -293,10 +287,7 @@ def _generate_diff_text(
     if old_type == FileType.UNKNOWN or new_type == FileType.UNKNOWN:
         # Avoid diff if we couldn't read content or classify type reliably
         # unless one side is clearly text/empty
-        if not (
-            old_type in (FileType.TEXT, FileType.EMPTY)
-            or new_type in (FileType.TEXT, FileType.EMPTY)
-        ):
+        if not (old_type in (FileType.TEXT, FileType.EMPTY) or new_type in (FileType.TEXT, FileType.EMPTY)):
             return None
 
     def decode_lines(content: Optional[bytes]) -> List[str]:
@@ -307,9 +298,7 @@ def _generate_diff_text(
             return content.decode("utf-8").splitlines(keepends=True)
         except UnicodeDecodeError:
             # Fallback to latin-1 for binary-ish files, replacing errors
-            logging.debug(
-                f"UTF-8 decode failed for diff content, falling back to latin-1."
-            )
+            logging.debug(f"UTF-8 decode failed for diff content, falling back to latin-1.")
             return content.decode("latin-1", errors="replace").splitlines(keepends=True)
 
     old_lines = decode_lines(old_content)
@@ -384,9 +373,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
         except Exception as final_e:
             # If even getting the empty tree fails, something is very wrong
             logging.critical(f"Could not get empty tree! {final_e}")
-            raise InvalidGitRepositoryError(
-                "Cannot determine baseline tree for comparison."
-            ) from final_e
+            raise InvalidGitRepositoryError("Cannot determine baseline tree for comparison.") from final_e
 
     if head_tree is None:
         # This should theoretically not be reached due to error handling above
@@ -436,12 +423,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
         elif is_type_change:
             change_type = ChangeType.TYPE_CHANGED
         # Check for mode-only change (content SHA is the same, mode differs)
-        elif (
-            a_blob
-            and b_blob
-            and a_blob.hexsha == b_blob.hexsha
-            and a_blob.mode != b_blob.mode
-        ):
+        elif a_blob and b_blob and a_blob.hexsha == b_blob.hexsha and a_blob.mode != b_blob.mode:
             change_type = ChangeType.MODE_CHANGED
         # Otherwise, it's a modification
         else:
@@ -452,9 +434,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
         a_content = a_blob.data_stream.read() if a_blob else None
         b_content = b_blob.data_stream.read() if b_blob else None
         old_type = _classify_data(a_content) if a_blob else FileType.EMPTY
-        new_type = (
-            _classify_data(b_content) if b_blob else FileType.EMPTY
-        )  # Treat deleted as empty for type
+        new_type = _classify_data(b_content) if b_blob else FileType.EMPTY  # Treat deleted as empty for type
 
         # Determine if the change involves binary files or transitions
         # FIX: Final refined logic for binary_different
@@ -470,16 +450,12 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
             if not ({old_type, new_type} <= {FileType.TEXT, FileType.EMPTY}):
                 binary_different = True
         # If content is same, check for type transition involving binary
-        elif old_type != new_type and (
-            old_type == FileType.BINARY or new_type == FileType.BINARY
-        ):
+        elif old_type != new_type and (old_type == FileType.BINARY or new_type == FileType.BINARY):
             binary_different = True
 
         # Also handle add/delete of a binary file explicitly
         if not binary_different:  # Avoid redundant check if already true
-            if (
-                a_blob is None and b_blob is not None and new_type == FileType.BINARY
-            ) or (
+            if (a_blob is None and b_blob is not None and new_type == FileType.BINARY) or (
                 a_blob is not None and b_blob is None and old_type == FileType.BINARY
             ):
                 binary_different = True
@@ -536,9 +512,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
                 idx_content = repo.odb.stream(hex_to_bin(idx_sha)).read()
                 idx_type = _classify_data(idx_content)
             except Exception as e:
-                logging.warning(
-                    f"Could not read index blob {idx_sha} for {path_key}: {e}"
-                )
+                logging.warning(f"Could not read index blob {idx_sha} for {path_key}: {e}")
 
         # Get working tree state
         wt_content, wt_type, wt_mode = _read_working_tree_file(repo, path_key)
@@ -605,18 +579,14 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
             if not head_exists and wt_exists:
                 final_change_type = ChangeType.ADDED  # Added in WT compared to HEAD
             elif head_exists and not wt_exists:
-                final_change_type = (
-                    ChangeType.DELETED
-                )  # Deleted from WT compared to HEAD
+                final_change_type = ChangeType.DELETED  # Deleted from WT compared to HEAD
             elif head_exists and wt_exists:
                 # Compare HEAD vs WT
                 # FIX: Check mode first if modes differ, then check SHA
                 if head_mode != wt_mode:
                     # If modes differ, check if content *also* differs
                     if head_sha != wt_sha:
-                        final_change_type = (
-                            ChangeType.MODIFIED
-                        )  # Mode and content changed
+                        final_change_type = ChangeType.MODIFIED  # Mode and content changed
                     else:
                         final_change_type = ChangeType.MODE_CHANGED  # Only mode changed
                 elif head_sha != wt_sha:  # Modes are same here, check content
@@ -641,23 +611,15 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
                     and (head_type == FileType.BINARY or wt_type == FileType.BINARY)
                 ):
                     binary_different = True
-                elif (
-                    head_sha is None and wt_exists and wt_type == FileType.BINARY
-                ) or (
-                    head_sha is not None
-                    and not wt_exists
-                    and head_type == FileType.BINARY
+                elif (head_sha is None and wt_exists and wt_type == FileType.BINARY) or (
+                    head_sha is not None and not wt_exists and head_type == FileType.BINARY
                 ):
                     binary_different = True
 
                 file_diff = FileDiff(
                     # Set old/new paths based on the change type
-                    old_path=(
-                        path_key if final_change_type != ChangeType.ADDED else None
-                    ),
-                    new_path=(
-                        path_key if final_change_type != ChangeType.DELETED else None
-                    ),
+                    old_path=(path_key if final_change_type != ChangeType.ADDED else None),
+                    new_path=(path_key if final_change_type != ChangeType.DELETED else None),
                     change_type=final_change_type,
                     staged=False,
                     unstaged=True,  # Mark as unstaged only
@@ -700,9 +662,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
                     (
                         fd
                         for fd in diffs_dict.values()
-                        if fd._path_key == path
-                        or fd.new_path == path
-                        or fd.old_path == path
+                        if fd._path_key == path or fd.new_path == path or fd.old_path == path
                     ),
                     None,
                 )
@@ -711,9 +671,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
                     # It might be ADDED or MODIFIED depending on previous steps
                     existing_diff.untracked = False
                     existing_diff.unstaged = True  # Ensure unstaged is true
-                    logging.warning(
-                        f"Path '{path}' listed as untracked but found in existing diffs. Correcting flags."
-                    )
+                    logging.warning(f"Path '{path}' listed as untracked but found in existing diffs. Correcting flags.")
                 else:
                     # Should not happen based on path_key_exists check, but log if it does
                     logging.warning(
@@ -751,9 +709,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
 
     # --- 4. Final Refinement (Partial Staging, Unified Diff, Final Type) ---
     final_diffs: List[FileDiff] = []
-    processed_keys = (
-        set()
-    )  # Handle potential duplicates from rename cases if logic slips
+    processed_keys = set()  # Handle potential duplicates from rename cases if logic slips
 
     for path_key in list(diffs_dict.keys()):  # Iterate over copy of keys
         if path_key in processed_keys:
@@ -762,9 +718,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
         try:
             file_diff = diffs_dict[path_key]
         except KeyError:
-            logging.warning(
-                f"Path key '{path_key}' disappeared during refinement. Skipping."
-            )
+            logging.warning(f"Path key '{path_key}' disappeared during refinement. Skipping.")
             continue
 
         # Detect partial staging: changes exist both HEAD<->Index and Index<->WT
@@ -773,9 +727,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
 
         # Use the 'path' attribute which should be set correctly by __post_init__
         # Or recalculate from old/new path if needed
-        current_path = (
-            file_diff.new_path if file_diff.new_path is not None else file_diff.old_path
-        )
+        current_path = file_diff.new_path if file_diff.new_path is not None else file_diff.old_path
         if not current_path:
             logging.warning(f"FileDiff object has no path set: {file_diff}. Skipping.")
             continue
@@ -792,9 +744,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
             # Final state is the working tree
             # Read WT content again for diff generation
             # Use current_path which reflects the WT path
-            final_content, final_type, final_mode = _read_working_tree_file(
-                repo, current_path
-            )
+            final_content, final_type, final_mode = _read_working_tree_file(repo, current_path)
             # The correct WT SHA should already be in new_content_sha from step 2 or 3
             final_sha = file_diff.new_content_sha
             # Ensure type is also updated from WT read
@@ -810,9 +760,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
                     # Re-classify based on actual index content just to be safe
                     final_type = _classify_data(final_content)
                 except Exception as e:
-                    logging.error(
-                        f"Could not read index blob {final_sha} for {current_path}: {e}"
-                    )
+                    logging.error(f"Could not read index blob {final_sha} for {current_path}: {e}")
                     final_content = None
                     final_type = FileType.UNKNOWN  # Mark as unknown if read fails
             else:  # e.g., staged delete
@@ -849,9 +797,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
             if file_diff.change_type != ChangeType.RENAMED:
                 head_exists = head_blob is not None
                 # Final state for partial is always WT
-                final_exists = final_content is not None or (
-                    final_mode is not None and stat.S_ISLNK(final_mode)
-                )
+                final_exists = final_content is not None or (final_mode is not None and stat.S_ISLNK(final_mode))
                 head_sha_comp = file_diff.old_content_sha  # SHA from HEAD
                 final_sha_comp = final_sha  # Correctly calculated WT SHA
 
@@ -861,16 +807,10 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
                     if file_diff.old_mode != final_mode:
                         # If modes differ, check if content *also* differs
                         if head_sha_comp != final_sha_comp:
-                            file_diff.change_type = (
-                                ChangeType.MODIFIED
-                            )  # Mode and content changed
+                            file_diff.change_type = ChangeType.MODIFIED  # Mode and content changed
                         else:
-                            file_diff.change_type = (
-                                ChangeType.MODE_CHANGED
-                            )  # Only mode changed
-                    elif (
-                        head_sha_comp != final_sha_comp
-                    ):  # Modes are same here, check content
+                            file_diff.change_type = ChangeType.MODE_CHANGED  # Only mode changed
+                    elif head_sha_comp != final_sha_comp:  # Modes are same here, check content
                         file_diff.change_type = ChangeType.MODIFIED
                     else:
                         # Content and mode same H vs W, but index differs. Treat as modified.
@@ -909,9 +849,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
             file_diff.new_path = final_path
 
         # Update the public 'path' attribute based on final state one last time
-        file_diff.path = (
-            file_diff.new_path if file_diff.new_path is not None else file_diff.old_path
-        )
+        file_diff.path = file_diff.new_path if file_diff.new_path is not None else file_diff.old_path
 
         # Add the finalized diff to the list
         if file_diff.path:  # Ensure there's a path to add
@@ -921,9 +859,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
             if file_diff.change_type == ChangeType.RENAMED and file_diff.old_path:
                 processed_keys.add(file_diff.old_path)
         else:
-            logging.warning(
-                f"Skipping diff with no final path after refinement: {file_diff}"
-            )
+            logging.warning(f"Skipping diff with no final path after refinement: {file_diff}")
 
     return final_diffs
 
@@ -1035,9 +971,7 @@ class GitTestBase(unittest.TestCase):
             # If 'git rm -f' fails because the file doesn't exist, that's okay for our purpose.
             # We just log it and proceed. Other errors are reraised.
             if "did not match any files" in str(e.stderr):
-                logging.debug(
-                    f"'git rm -f {rel_path}' failed: {e.stderr.strip()}. Assuming file already removed."
-                )
+                logging.debug(f"'git rm -f {rel_path}' failed: {e.stderr.strip()}. Assuming file already removed.")
                 # Ensure file is gone from WT just in case rm failed silently before index check
                 if filepath.exists():
                     logging.warning(
@@ -1046,14 +980,10 @@ class GitTestBase(unittest.TestCase):
                     try:
                         filepath.unlink()
                     except OSError as unlink_err:
-                        logging.error(
-                            f"Error unlinking file {filepath} after rm failed: {unlink_err}"
-                        )
+                        logging.error(f"Error unlinking file {filepath} after rm failed: {unlink_err}")
 
             else:
-                logging.error(
-                    f"Error staging removal of {rel_path} with 'git rm -f': {e}"
-                )
+                logging.error(f"Error staging removal of {rel_path} with 'git rm -f': {e}")
                 raise  # Reraise unexpected Git command errors
         except Exception as e:
             # Catch other potential exceptions
@@ -1074,17 +1004,11 @@ class GitTestBase(unittest.TestCase):
         """Asserts the properties of a specific FileDiff in a list."""
         # Normalize expected paths to posix format for comparison
         expected_path_key = Path(expected_path).as_posix()
-        expected_old_path_key = (
-            Path(expected_old_path).as_posix() if expected_old_path else None
-        )
+        expected_old_path_key = Path(expected_old_path).as_posix() if expected_old_path else None
 
         # Find the diff based on the 'path' attribute (which reflects new or old path)
         target_diff = next(
-            (
-                d
-                for d in diffs
-                if d.path and Path(d.path).as_posix() == expected_path_key
-            ),
+            (d for d in diffs if d.path and Path(d.path).as_posix() == expected_path_key),
             None,
         )
 
@@ -1100,17 +1024,11 @@ class GitTestBase(unittest.TestCase):
                 )
                 for d in diffs
             ]
-            self.fail(
-                f"Diff for path '{expected_path_key}' not found. Diffs found: {diff_summary}"
-            )
+            self.fail(f"Diff for path '{expected_path_key}' not found. Diffs found: {diff_summary}")
 
         # Normalize target paths for comparison
-        target_old_path_key = (
-            Path(target_diff.old_path).as_posix() if target_diff.old_path else None
-        )
-        target_new_path_key = (
-            Path(target_diff.new_path).as_posix() if target_diff.new_path else None
-        )
+        target_old_path_key = Path(target_diff.old_path).as_posix() if target_diff.old_path else None
+        target_new_path_key = Path(target_diff.new_path).as_posix() if target_diff.new_path else None
 
         # Assertions
         self.assertEqual(
@@ -1220,9 +1138,7 @@ class TestGatherChanges(GitTestBase):
             d.binary_different,
             "Expected binary_different to be True for text->binary change",
         )
-        self.assertIsNone(
-            d.unified_diff, "Expected no unified diff for text->binary change"
-        )
+        self.assertIsNone(d.unified_diff, "Expected no unified diff for text->binary change")
 
     def test_basic_scenario(self):
         """Test basic unstaged modification and an untracked file."""
@@ -1249,9 +1165,7 @@ class TestGatherChanges(GitTestBase):
 
     def test_mode_change(self):
         """Test staging a mode change (non-exec -> exec)."""
-        commit = self._commit_file(
-            "script.sh", "#!/bin/bash\necho Hello\n", "Init Script"
-        )
+        commit = self._commit_file("script.sh", "#!/bin/bash\necho Hello\n", "Init Script")
         # Get path from commit object if needed, or just use relative path
         script_path_str = str(self._path("script.sh"))
         current_mode = os.stat(script_path_str).st_mode
@@ -1276,9 +1190,7 @@ class TestGatherChanges(GitTestBase):
         diffs = compute_repo_diffs(self.repo)
         self.assertEqual(len(diffs), 1)
         # Overall change HEAD vs WT is MODIFIED, staged=T, unstaged=T, partial=T
-        d = self._assert_diff(
-            diffs, "example.txt", ChangeType.MODIFIED, True, True, expected_partial=True
-        )
+        d = self._assert_diff(diffs, "example.txt", ChangeType.MODIFIED, True, True, expected_partial=True)
         # Check that the unified diff reflects the *final* state (including Line5)
         self.assertIsNotNone(d.unified_diff)
         self.assertIn("+Line4", d.unified_diff)
@@ -1288,9 +1200,7 @@ class TestGatherChanges(GitTestBase):
         """Test adding content to a previously empty file."""
         self._commit_file("empty.txt", "", "Init empty")
         diffs = compute_repo_diffs(self.repo)
-        self.assertEqual(
-            len(diffs), 0, "No changes expected after committing empty file"
-        )
+        self.assertEqual(len(diffs), 0, "No changes expected after committing empty file")
 
         # Make unstaged change (add content)
         self._write_file("empty.txt", "Hello\n")
@@ -1319,9 +1229,7 @@ class TestGatherChanges(GitTestBase):
         # Check content changes
         self.assertTrue(any(line.startswith("-Banana") for line in lines))
         self.assertTrue(any(line.startswith("+Berry") for line in lines))
-        self.assertTrue(
-            any(line.startswith(" Cherry") for line in lines)
-        )  # Context line
+        self.assertTrue(any(line.startswith(" Cherry") for line in lines))  # Context line
         self.assertTrue(any(line.startswith("+Dates") for line in lines))  # Added line
 
     def test_multiline_diff_correctness(self):
@@ -1357,9 +1265,7 @@ class TestGatherChanges(GitTestBase):
         # Unstaged=True (because WT differs from index - which is deleted)
         # Partial=True
         self.assertEqual(len(diffs), 1)
-        d = self._assert_diff(
-            diffs, "dupe.txt", ChangeType.MODIFIED, True, True, expected_partial=True
-        )
+        d = self._assert_diff(diffs, "dupe.txt", ChangeType.MODIFIED, True, True, expected_partial=True)
         self.assertFalse(d.untracked, "File should not be marked untracked")
         self.assertIsNotNone(d.unified_diff)
         self.assertIn("-Old", d.unified_diff)
@@ -1379,9 +1285,7 @@ class TestGatherChanges(GitTestBase):
 
     def test_real_life_scenario_with_new_and_modified(self):
         """Test a mix of new staged files and modified staged files."""
-        needkt_rel = os.path.join(
-            "src", "main", "kotlin", "one", "wabbit", "data", "Need.kt"
-        )
+        needkt_rel = os.path.join("src", "main", "kotlin", "one", "wabbit", "data", "Need.kt")
         gradle_rel = "build.gradle.kts"
         # Commit initial files
         self._commit_file(needkt_rel, "// Original\n", "Init Need.kt")
@@ -1425,13 +1329,9 @@ class TestGatherChanges(GitTestBase):
         diffs = compute_repo_diffs(self.repo)
         # Expect RENAMED if content similar enough (R=True used in staged diff)
         self.assertEqual(len(diffs), 1)
-        d = self._assert_diff(
-            diffs, newp, ChangeType.RENAMED, True, False, expected_old_path=oldp
-        )
+        d = self._assert_diff(diffs, newp, ChangeType.RENAMED, True, False, expected_old_path=oldp)
         # Check similarity score if needed (optional)
-        self.assertIsNotNone(
-            d.similarity_index, "Rename should have a similarity score"
-        )
+        self.assertIsNotNone(d.similarity_index, "Rename should have a similarity score")
         self.assertGreater(
             d.similarity_index, 50, "Similarity score should be > 50 for simple rename"
         )  # Git default threshold
@@ -1461,9 +1361,7 @@ class TestGatherChanges(GitTestBase):
         diffs = compute_repo_diffs(self.repo)
         # Use posix path for assertion key
         new_file_posix = Path(new_file_rel).as_posix()
-        newfile_diff = self._assert_diff(
-            diffs, new_file_posix, ChangeType.ADDED, True, False
-        )
+        newfile_diff = self._assert_diff(diffs, new_file_posix, ChangeType.ADDED, True, False)
 
         self.assertIsNotNone(
             newfile_diff.unified_diff,
@@ -1537,9 +1435,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         # HEAD is empty tree. Index is empty. WT has file.
         # Should be detected as an untracked file.
         self.assertEqual(len(diffs), 1)
-        self._assert_diff(
-            diffs, "temp.txt", ChangeType.ADDED, False, True, expected_untracked=True
-        )
+        self._assert_diff(diffs, "temp.txt", ChangeType.ADDED, False, True, expected_untracked=True)
 
         # Now delete from WT as well
         f_path.unlink()
@@ -1578,9 +1474,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         self._stage_remove("delete_me_staged.txt")  # Removes from index and WT
         diffs = compute_repo_diffs(self.repo)
         self.assertEqual(len(diffs), 1)
-        self._assert_diff(
-            diffs, "delete_me_staged.txt", ChangeType.DELETED, True, False
-        )
+        self._assert_diff(diffs, "delete_me_staged.txt", ChangeType.DELETED, True, False)
 
     def test_14_basic_untracked_file(self):
         """Test a simple untracked file after a commit."""
@@ -1656,9 +1550,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         diffs = compute_repo_diffs(self.repo)
         self.assertEqual(len(diffs), 1)
         # Overall HEAD vs WT is MODIFIED, staged=T, unstaged=T, partial=T
-        d = self._assert_diff(
-            diffs, "partial.txt", ChangeType.MODIFIED, True, True, expected_partial=True
-        )
+        d = self._assert_diff(diffs, "partial.txt", ChangeType.MODIFIED, True, True, expected_partial=True)
         self.assertIsNotNone(d.unified_diff)
         self.assertIn("+Line4", d.unified_diff)
         self.assertIn("+Line5", d.unified_diff)
@@ -1719,9 +1611,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         self._stage_file(newp)
         diffs = compute_repo_diffs(self.repo)
         self.assertEqual(len(diffs), 1)
-        self._assert_diff(
-            diffs, newp, ChangeType.RENAMED, True, False, expected_old_path=oldp
-        )
+        self._assert_diff(diffs, newp, ChangeType.RENAMED, True, False, expected_old_path=oldp)
 
     def test_41_rename_with_modification_staged(self):
         """Test staging a rename along with content modifications."""
@@ -1742,9 +1632,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         # or as DELETED + ADDED (two diff entries) depending on similarity.
         # We check for the RENAMED case first, as R=True was used.
         if len(diffs) == 1 and diffs[0].change_type == ChangeType.RENAMED:
-            d = self._assert_diff(
-                diffs, newp, ChangeType.RENAMED, True, False, expected_old_path=oldp
-            )
+            d = self._assert_diff(diffs, newp, ChangeType.RENAMED, True, False, expected_old_path=oldp)
             self.assertIsNotNone(d.unified_diff, "Unified diff expected for rename+mod")
             # Check diff content reflects the modification
             self.assertIn("-Line 1", d.unified_diff)
@@ -1780,9 +1668,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         self.assertEqual(len(diffs), 2)
         self._assert_diff(diffs, oldp, ChangeType.DELETED, False, True)
         # The new file is untracked because it wasn't added to index
-        self._assert_diff(
-            diffs, newp, ChangeType.ADDED, False, True, expected_untracked=True
-        )
+        self._assert_diff(diffs, newp, ChangeType.ADDED, False, True, expected_untracked=True)
 
     def test_50_filetype_change_text_to_binary_staged(self):
         """Test staging a change from text content to binary content."""
@@ -1791,15 +1677,9 @@ class TestGatherChangesEnhanced(GitTestBase):
         self._stage_file("type_change.dat", b"\x01\x02\x00\x03")
         diffs = compute_repo_diffs(self.repo)
         self.assertEqual(len(diffs), 1)
-        d = self._assert_diff(
-            diffs, "type_change.dat", ChangeType.MODIFIED, True, False
-        )
-        self.assertTrue(
-            d.binary_different, "Expected binary_different=True for text->binary"
-        )
-        self.assertIsNone(
-            d.unified_diff, "Expected no unified diff for text->binary change"
-        )
+        d = self._assert_diff(diffs, "type_change.dat", ChangeType.MODIFIED, True, False)
+        self.assertTrue(d.binary_different, "Expected binary_different=True for text->binary")
+        self.assertIsNone(d.unified_diff, "Expected no unified diff for text->binary change")
         self.assertEqual(d.old_type, FileType.TEXT)
         self.assertEqual(d.new_type, FileType.BINARY)
 
@@ -1810,16 +1690,10 @@ class TestGatherChangesEnhanced(GitTestBase):
         self._write_file("type_change_b.dat", "New text content\n")
         diffs = compute_repo_diffs(self.repo)
         self.assertEqual(len(diffs), 1)
-        d = self._assert_diff(
-            diffs, "type_change_b.dat", ChangeType.MODIFIED, False, True
-        )
-        self.assertTrue(
-            d.binary_different, "Expected binary_different=True for binary->text"
-        )
+        d = self._assert_diff(diffs, "type_change_b.dat", ChangeType.MODIFIED, False, True)
+        self.assertTrue(d.binary_different, "Expected binary_different=True for binary->text")
         # Diff *should* be generated for binary -> text
-        self.assertIsNotNone(
-            d.unified_diff, "Expected unified diff for binary->text change"
-        )
+        self.assertIsNotNone(d.unified_diff, "Expected unified diff for binary->text change")
         # Git diff output for binary->text might vary, check for key elements
         # It might include "Binary files ... differ" or just the text diff
         # self.assertIn("Binary files", d.unified_diff) # This might not always appear
@@ -1840,9 +1714,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         # FIX: Assert unified_diff is None instead of binary_different=True
         # because the simple heuristic might misclassify these bytes as TEXT.
         # The key indicator is that a text diff shouldn't be generated.
-        self.assertIsNone(
-            d.unified_diff, "Expected no unified diff for binary modification"
-        )
+        self.assertIsNone(d.unified_diff, "Expected no unified diff for binary modification")
         # We can still check the types if needed, acknowledging they might be TEXT
         # self.assertEqual(d.old_type, FileType.BINARY) # This might fail
         # self.assertEqual(d.new_type, FileType.BINARY) # This might fail
@@ -1908,9 +1780,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         # Expect 1 diff (the untracked file)
         self.assertEqual(len(diffs), 1)
         relp_posix = Path(relp).as_posix()
-        self._assert_diff(
-            diffs, relp_posix, ChangeType.ADDED, False, True, expected_untracked=True
-        )
+        self._assert_diff(diffs, relp_posix, ChangeType.ADDED, False, True, expected_untracked=True)
 
     def test_72_subdirectory_rename_out_staged(self):
         """Test staging a rename from a subdirectory to the root."""
@@ -1969,9 +1839,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         # SHA fix should make this MODIFIED
         # ChangeType should be MODIFIED reflecting the HEAD vs WT difference caused by index manipulation
         # Staged=T (delete staged), Unstaged=T (WT differs from index), Partial=T
-        d = self._assert_diff(
-            diffs, fname, ChangeType.MODIFIED, True, True, expected_partial=True
-        )
+        d = self._assert_diff(diffs, fname, ChangeType.MODIFIED, True, True, expected_partial=True)
         self.assertFalse(d.untracked, "File should not be untracked")
         # Diff HEAD vs WT should be empty as content matches
         self.assertIsNone(

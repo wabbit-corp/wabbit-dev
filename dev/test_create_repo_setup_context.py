@@ -19,9 +19,7 @@ def _load_setup_module():
 def _patch_template_io(monkeypatch, setup_module) -> None:
     monkeypatch.setattr(setup_module, "get_coc_file", lambda: "CODE_OF_CONDUCT\n")
     monkeypatch.setattr(setup_module.dev.io, "read_text_file", lambda _path: "TEXT\n")
-    monkeypatch.setattr(
-        setup_module.dev.io, "read_template", lambda _path: jinja2.Template("")
-    )
+    monkeypatch.setattr(setup_module.dev.io, "read_template", lambda _path: jinja2.Template(""))
 
 
 def test_create_repo_setup_context_without_token_is_offline(monkeypatch) -> None:
@@ -37,9 +35,7 @@ def test_create_repo_setup_context_without_token_is_offline(monkeypatch) -> None
     monkeypatch.setattr("github.Github", DummyGithub)
 
     config = SimpleNamespace(github_token=None)
-    ctx = setup_module.create_repo_setup_context(
-        config, setup_module.RepoSetupMode.LOCAL
-    )
+    ctx = setup_module.create_repo_setup_context(config, setup_module.RepoSetupMode.LOCAL)
 
     assert ctx.is_github_api_available is False
     assert ctx.known_repo_names == []
@@ -63,9 +59,7 @@ def test_create_repo_setup_context_handles_github_api_errors(monkeypatch) -> Non
     monkeypatch.setattr("github.Github", DummyGithub)
 
     config = SimpleNamespace(github_token="bad-token")
-    ctx = setup_module.create_repo_setup_context(
-        config, setup_module.RepoSetupMode.LOCAL
-    )
+    ctx = setup_module.create_repo_setup_context(config, setup_module.RepoSetupMode.LOCAL)
 
     assert ctx.is_github_api_available is False
     assert ctx.known_repo_names == []

@@ -93,9 +93,7 @@ class RepoSetupContext:
     mode: RepoSetupMode
 
 
-def _make_dependency_strings(
-    ctx: RepoSetupContext, project: Project
-) -> tuple[list[str], list[str]]:
+def _make_dependency_strings(ctx: RepoSetupContext, project: Project) -> tuple[list[str], list[str]]:
     other_dependencies: list[str] = []
     project_dependencies: list[str] = []
     for dep in project.resolved_dependencies:
@@ -116,24 +114,18 @@ def _make_dependency_strings(
                 artifact_name = subproject.artifact_name
                 artifact_dep = Dependency(
                     scope=dep.scope,
-                    target=DependencyTarget.Maven(
-                        artifact=artifact_name, maven_repo=None
-                    ),
+                    target=DependencyTarget.Maven(artifact=artifact_name, maven_repo=None),
                 )
 
                 if has_github_repo and ctx.mode != RepoSetupMode.LOCAL:
                     project_dependencies.append(artifact_dep.as_string())
                 else:
-                    project_dependencies.append(
-                        f"{dep.as_string()} // {subproject.version}"
-                    )
+                    project_dependencies.append(f"{dep.as_string()} // {subproject.version}")
 
     return project_dependencies, other_dependencies
 
 
-def setup_project(
-    ctx: RepoSetupContext, project: Project, interactive: bool = True
-) -> None:
+def setup_project(ctx: RepoSetupContext, project: Project, interactive: bool = True) -> None:
     name = project.name
 
     # Each project should have a directory before project-type setup writes files.
@@ -185,16 +177,12 @@ def setup_project(
         if is_github_repo_set:
             if not (project.path / ".git").exists():
                 error(f"{project.name} does not have .git")
-                if not interactive or ask(
-                    f"Initialize git repository for {project.name}?"
-                ):
+                if not interactive or ask(f"Initialize git repository for {project.name}?"):
                     repo = Repo.init(project.path)
                     scope.defer(lambda: repo.close())
 
                     # Set default user and email
-                    repo.config_writer().set_value(
-                        "user", "email", ctx.config.default_git_user_email
-                    ).set_value(
+                    repo.config_writer().set_value("user", "email", ctx.config.default_git_user_email).set_value(
                         "user", "name", ctx.config.default_git_user_name
                     ).release()
                 else:
@@ -221,17 +209,11 @@ def setup_project(
             config.release()
 
             if current_email != ctx.config.default_git_user_email:
-                warning(
-                    f"{project.name} has a different git user email: {current_email}"
-                )
-                repo.config_writer().set_value(
-                    "user", "email", ctx.config.default_git_user_email
-                ).release()
+                warning(f"{project.name} has a different git user email: {current_email}")
+                repo.config_writer().set_value("user", "email", ctx.config.default_git_user_email).release()
             if current_name != ctx.config.default_git_user_name:
                 warning(f"{project.name} has a different git user name: {current_name}")
-                repo.config_writer().set_value(
-                    "user", "name", ctx.config.default_git_user_name
-                ).release()
+                repo.config_writer().set_value("user", "name", ctx.config.default_git_user_name).release()
 
             config = repo.config_reader()
             if config.has_section("user"):
@@ -242,13 +224,9 @@ def setup_project(
                 current_name = None
             config.release()
             if current_email != ctx.config.default_git_user_email:
-                raise Exception(
-                    f"Git user email is not set to {ctx.config.default_git_user_email}"
-                )
+                raise Exception(f"Git user email is not set to {ctx.config.default_git_user_email}")
             if current_name != ctx.config.default_git_user_name:
-                raise Exception(
-                    f"Git user name is not set to {ctx.config.default_git_user_name}"
-                )
+                raise Exception(f"Git user name is not set to {ctx.config.default_git_user_name}")
 
         # IF there are no commits, create an initial commit.
         if repo is not None:
@@ -267,18 +245,14 @@ def setup_project(
                     origin_url = repo.remote("origin").url
 
                     if not origin_url.startswith("git@github.com:"):
-                        error(
-                            f"{project.name} has an invalid origin remote: {origin_url}"
-                        )
+                        error(f"{project.name} has an invalid origin remote: {origin_url}")
                 except ValueError:
                     origin_url = None
                     error(f"{project.name} does not have an origin remote")
 
             if origin_url is None:
                 # Add remote
-                repo.create_remote(
-                    "origin", f"git@github.com:{project.github_repo}.git"
-                )
+                repo.create_remote("origin", f"git@github.com:{project.github_repo}.git")
 
                 if repo.active_branch.name == "master":
                     # Set upstream for master branch
@@ -324,14 +298,8 @@ def setup_project(
 
             # R3.2: The origin remote should be set
 
-        if (
-            repo is not None
-            and ctx.mode == RepoSetupMode.PROD
-            and repo.active_branch.name == "master"
-        ):
-            commit_repo_changes(
-                project, repo, openai_key=ctx.config.openai_key, interactive=interactive
-            )
+        if repo is not None and ctx.mode == RepoSetupMode.PROD and repo.active_branch.name == "master":
+            commit_repo_changes(project, repo, openai_key=ctx.config.openai_key, interactive=interactive)
 
 
 def _discover_python_packages(project_path: Path) -> list[str]:
@@ -441,9 +409,7 @@ def _normalize_import_name(name: str) -> str:
     return normalized.strip("_")
 
 
-def _derive_deptry_package_map(
-    project_path: Path, dependencies: list[str]
-) -> dict[str, str]:
+def _derive_deptry_package_map(project_path: Path, dependencies: list[str]) -> dict[str, str]:
     imports = _discover_import_modules(project_path)
     if not imports:
         return {}
@@ -455,9 +421,7 @@ def _derive_deptry_package_map(
         try:
             dep_name = Requirement(dep).name
         except InvalidRequirement:
-            warning(
-                f"Invalid dependency requirement {dep!r}; skipping deptry auto-map"
-            )
+            warning(f"Invalid dependency requirement {dep!r}; skipping deptry auto-map")
             continue
         if dep_name in imports:
             continue
@@ -486,28 +450,28 @@ def _derive_deptry_package_map(
 
 
 def _toml_list(items: list[str]) -> str:
-    quoted = [f"\"{item}\"" for item in items]
+    quoted = [f'"{item}"' for item in items]
     return f"[{', '.join(quoted)}]"
 
 
 def _toml_map_lines(map_data: dict[str, list[str]]) -> str:
     lines: list[str] = []
     for key in sorted(map_data.keys()):
-        lines.append(f"\"{key}\" = {_toml_list(map_data[key])}")
+        lines.append(f'"{key}" = {_toml_list(map_data[key])}')
     return "\n".join(lines)
 
 
 def _toml_kv_lines(map_data: dict[str, str]) -> str:
     lines: list[str] = []
     for key in sorted(map_data.keys()):
-        lines.append(f"\"{key}\" = \"{map_data[key]}\"")
+        lines.append(f'"{key}" = "{map_data[key]}"')
     return "\n".join(lines)
 
 
 def _toml_inline_table_list_map(map_data: dict[str, list[str]]) -> str:
     if not map_data:
         return "{}"
-    parts = [f"\"{key}\" = {_toml_list(map_data[key])}" for key in map_data.keys()]
+    parts = [f'"{key}" = {_toml_list(map_data[key])}' for key in map_data.keys()]
     return "{ " + ", ".join(parts) + " }"
 
 
@@ -521,10 +485,10 @@ def _toml_value(value: Any) -> str:
             return value
         if re.fullmatch(r"-?\d+\.\d+", value):
             return value
-        return f"\"{value}\""
+        return f'"{value}"'
     if isinstance(value, list):
         return _toml_list([str(item) for item in value])
-    return f"\"{value}\""
+    return f'"{value}"'
 
 
 def _toml_contracts_blocks(contracts: list[dict[str, Any]]) -> str:
@@ -540,12 +504,12 @@ def _toml_contracts_blocks(contracts: list[dict[str, Any]]) -> str:
 def _format_toml_key(key: str) -> str:
     if re.match(r"^[A-Za-z0-9_-]+$", key):
         return key
-    return f"\"{key}\""
+    return f'"{key}"'
 
 
 def _toml_string(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f"\"{escaped}\""
+    return f'"{escaped}"'
 
 
 def _format_poetry_dependency(requirement: str) -> tuple[str, str]:
@@ -562,7 +526,7 @@ def _format_poetry_dependency(requirement: str) -> tuple[str, str]:
     core = requirement.split(";", 1)[0].strip()
     remainder = core
     if core.lower().startswith(parsed.name.lower()):
-        remainder = core[len(parsed.name):].lstrip()
+        remainder = core[len(parsed.name) :].lstrip()
     if remainder.startswith("["):
         extras_end = remainder.find("]")
         if extras_end != -1:
@@ -589,14 +553,10 @@ def _format_poetry_dependency(requirement: str) -> tuple[str, str]:
     return key, value
 
 
-def _write_requirements_file(
-    path: Path, deps: list[str], *, interactive: bool, project_name: str
-) -> None:
+def _write_requirements_file(path: Path, deps: list[str], *, interactive: bool, project_name: str) -> None:
     if not deps:
         if path.exists():
-            warning(
-                f"No dependencies configured for {project_name}; leaving {path} untouched"
-            )
+            warning(f"No dependencies configured for {project_name}; leaving {path} untouched")
         return
 
     content = clean_text("\n".join(deps) + "\n")
@@ -611,9 +571,7 @@ def _python_target_version(requires_python: str | None) -> str:
         try:
             spec = SpecifierSet(requires_python)
         except InvalidSpecifier:
-            warning(
-                f"Invalid requires-python specifier {requires_python!r}; defaulting to py310"
-            )
+            warning(f"Invalid requires-python specifier {requires_python!r}; defaulting to py310")
             target = default
         else:
             lower_bounds: list[PythonVersion] = []
@@ -638,13 +596,9 @@ def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> st
 
     requires_python = project.requires_python or ">=3.10"
     if project.requires_python is None:
-        warning(
-            f"No requires-python set for {project.name}; defaulting to {requires_python}"
-        )
+        warning(f"No requires-python set for {project.name}; defaulting to {requires_python}")
 
-    target_version = project.target_version or _python_target_version(
-        project.requires_python
-    )
+    target_version = project.target_version or _python_target_version(project.requires_python)
     line_length = project.line_length or 120
 
     version = str(project.version) if project.version else "0.0.0"
@@ -653,7 +607,7 @@ def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> st
     packages = _discover_python_packages(project.path)
     packages_toml = ""
     if packages:
-        package_entries = ", ".join([f"{{ include = \"{name}\" }}" for name in packages])
+        package_entries = ", ".join([f'{{ include = "{name}" }}' for name in packages])
         packages_toml = f"[{package_entries}]"
 
     dependencies_lines: list[str] = []
@@ -672,7 +626,7 @@ def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> st
             warning(f"Invalid python script entry for {project.name}: {script}")
             continue
         script_name, target = script.split("=", 1)
-        script_lines.append(f"{script_name.strip()} = \"{target.strip()}\"")
+        script_lines.append(f'{script_name.strip()} = "{target.strip()}"')
 
     source_sets = project.source_sets
     if source_sets:
@@ -682,17 +636,11 @@ def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> st
             main_source_sets = packages
     else:
         main_source_sets = packages
-        test_paths = (
-            project.test_paths
-            if project.test_paths
-            else _discover_test_paths(project.path)
-        )
+        test_paths = project.test_paths if project.test_paths else _discover_test_paths(project.path)
     ruff_per_file_ignores = (
         project.ruff_per_file_ignores
         if project.ruff_per_file_ignores
-        else {
-            f"{path}/**/*.py": ["B"] for path in test_paths
-        }
+        else {f"{path}/**/*.py": ["B"] for path in test_paths}
     )
 
     include_deptry = (
@@ -708,11 +656,7 @@ def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> st
         or project.importlinter_contracts
     )
 
-    coverage_source = (
-        project.coverage_source
-        if project.coverage_source
-        else main_source_sets
-    )
+    coverage_source = project.coverage_source if project.coverage_source else main_source_sets
     coverage_omit = (
         project.coverage_omit
         if project.coverage_omit
@@ -731,11 +675,7 @@ def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> st
         auto_map = _derive_deptry_package_map(project.path, dependencies)
         deptry_package_map = {**auto_map, **deptry_package_map}
 
-    importlinter_root_packages = (
-        project.importlinter_root_packages
-        or main_source_sets
-        or packages
-    )
+    importlinter_root_packages = project.importlinter_root_packages or main_source_sets or packages
     importlinter_contracts: list[dict[str, Any]] = []
     if project.importlinter_layers:
         importlinter_contracts.append(
@@ -772,49 +712,21 @@ def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> st
         "has_testpaths": bool(test_paths),
         "include_deptry": include_deptry,
         "deptry_package_map_block": _toml_kv_lines(deptry_package_map),
-        "deptry_per_rule_ignores_inline": _toml_inline_table_list_map(
-            project.deptry_per_rule_ignores
-        ),
+        "deptry_per_rule_ignores_inline": _toml_inline_table_list_map(project.deptry_per_rule_ignores),
         "has_deptry_package_map": bool(deptry_package_map),
         "has_deptry_rule_ignores": bool(project.deptry_per_rule_ignores),
         "include_importlinter": include_importlinter,
-        "importlinter_root_packages_toml": _toml_list(
-            importlinter_root_packages
-        ),
-        "importlinter_contracts_block": _toml_contracts_blocks(
-            importlinter_contracts
-        ),
+        "importlinter_root_packages_toml": _toml_list(importlinter_root_packages),
+        "importlinter_contracts_block": _toml_contracts_blocks(importlinter_contracts),
         "has_importlinter_contracts": bool(importlinter_contracts),
         "coverage_source_toml": _toml_list(coverage_source),
         "coverage_omit_toml": _toml_list(coverage_omit),
-        "coverage_branch": (
-            project.coverage_branch
-            if project.coverage_branch is not None
-            else True
-        ),
-        "coverage_show_missing": (
-            project.coverage_show_missing
-            if project.coverage_show_missing is not None
-            else True
-        ),
-        "coverage_skip_empty": (
-            project.coverage_skip_empty
-            if project.coverage_skip_empty is not None
-            else True
-        ),
-        "coverage_fail_under": (
-            project.coverage_fail_under
-            if project.coverage_fail_under is not None
-            else 80
-        ),
-        "coverage_precision": (
-            project.coverage_precision
-            if project.coverage_precision is not None
-            else 0
-        ),
-        "coverage_xml_output": (
-            project.coverage_xml_output or "coverage.xml"
-        ),
+        "coverage_branch": (project.coverage_branch if project.coverage_branch is not None else True),
+        "coverage_show_missing": (project.coverage_show_missing if project.coverage_show_missing is not None else True),
+        "coverage_skip_empty": (project.coverage_skip_empty if project.coverage_skip_empty is not None else True),
+        "coverage_fail_under": (project.coverage_fail_under if project.coverage_fail_under is not None else 80),
+        "coverage_precision": (project.coverage_precision if project.coverage_precision is not None else 0),
+        "coverage_xml_output": (project.coverage_xml_output or "coverage.xml"),
     }
 
     rendered = render_template(ctx.python_pyproject_template, **context)
@@ -832,9 +744,7 @@ def _write_wabbit_legal_files(ctx: RepoSetupContext, project: Project) -> None:
         else:
             dev.io.write_text_file(project.path / "LICENSE.md", license_text)
     dev.io.write_text_file(project.path / "CLA.md", render_template(ctx.cla))
-    dev.io.write_text_file(
-        project.path / "CLA_EXPLANATIONS.md", render_template(ctx.cla_explanations)
-    )
+    dev.io.write_text_file(project.path / "CLA_EXPLANATIONS.md", render_template(ctx.cla_explanations))
     dev.io.write_text_file(
         project.path / "CONTRIBUTOR_PRIVACY.md",
         render_template(ctx.contributor_privacy_policy),
@@ -856,14 +766,10 @@ def _write_banner(ctx: RepoSetupContext, project: Project) -> None:
     )
 
 
-def setup_python_project(
-    ctx: RepoSetupContext, project: PythonProject, interactive: bool = True
-) -> None:
+def setup_python_project(ctx: RepoSetupContext, project: PythonProject, interactive: bool = True) -> None:
     dev.io.write_text_file(
         project.path / ".gitignore",
-        render_template(ctx.gitignore_template)
-        + "\n"
-        + render_template(ctx.python_gitignore_template),
+        render_template(ctx.gitignore_template) + "\n" + render_template(ctx.python_gitignore_template),
     )
 
     _write_wabbit_legal_files(ctx, project)
@@ -896,14 +802,10 @@ def setup_python_project(
         dev.io.write_text_file(pyproject_path, clean_text(pyproject_text))
 
 
-def setup_purescript_project(
-    ctx: RepoSetupContext, project: PurescriptProject, interactive: bool = True
-) -> None:
+def setup_purescript_project(ctx: RepoSetupContext, project: PurescriptProject, interactive: bool = True) -> None:
     dev.io.write_text_file(
         project.path / ".gitignore",
-        render_template(ctx.gitignore_template)
-        + "\n"
-        + render_template(ctx.purescript_gitignore_template),
+        render_template(ctx.gitignore_template) + "\n" + render_template(ctx.purescript_gitignore_template),
     )
 
 
@@ -936,9 +838,7 @@ def clean_gradle_build_text(text: str) -> str:
     return text
 
 
-def setup_gradle_project(
-    ctx: RepoSetupContext, project: GradleProject, interactive: bool = True
-) -> None:
+def setup_gradle_project(ctx: RepoSetupContext, project: GradleProject, interactive: bool = True) -> None:
     project_dependencies, other_dependencies = _make_dependency_strings(ctx, project)
 
     # subproject_dev_dependencies = [
@@ -962,9 +862,7 @@ def setup_gradle_project(
         project_dependencies=project_dependencies,
         other_dependencies=other_dependencies,
         mode=ctx.mode.value,
-        serialization_library=ctx.config.libraries[
-            "kotlinx-serialization-core"
-        ].maven_urn.__str__(),
+        serialization_library=ctx.config.libraries["kotlinx-serialization-core"].maven_urn.__str__(),
     )
     result = clean_gradle_build_text(result)
     dev.io.write_text_file(project.path / "build.gradle.kts", result)
@@ -988,9 +886,7 @@ def setup_gradle_project(
         case RepoSetupMode.PROD:
             dev.io.write_text_file(
                 project.path / "settings.gradle.kts",
-                clean_gradle_build_text(render_template(
-                    ctx.subproject_settings_template, project_name=project.name
-                )),
+                clean_gradle_build_text(render_template(ctx.subproject_settings_template, project_name=project.name)),
             )
             dev.io.delete_if_exists(project.path / ".is-local-mode")
             dev.io.delete_if_exists(project.path / ".is-ij-mode")
@@ -1001,11 +897,7 @@ def setup_gradle_project(
     # ))
     dev.io.write_text_file(
         project.path / ".gitignore",
-        clean_text(
-            render_template(ctx.gitignore_template)
-            + "\n"
-            + render_template(ctx.gradle_gitignore_template)
-        ),
+        clean_text(render_template(ctx.gitignore_template) + "\n" + render_template(ctx.gradle_gitignore_template)),
     )
     dev.io.write_text_file(
         project.path / "gradle.properties",
@@ -1014,26 +906,14 @@ def setup_gradle_project(
 
     _write_wabbit_legal_files(ctx, project)
 
+    dev.io.copy(ctx.repo_template / "gradle-files" / "gradlew", project.path / "gradlew")
+    dev.io.copy(ctx.repo_template / "gradle-files" / "gradlew.bat", project.path / "gradlew.bat")
     dev.io.copy(
-        ctx.repo_template / "gradle-files" / "gradlew", project.path / "gradlew"
-    )
-    dev.io.copy(
-        ctx.repo_template / "gradle-files" / "gradlew.bat", project.path / "gradlew.bat"
-    )
-    dev.io.copy(
-        ctx.repo_template
-        / "gradle-files"
-        / "gradle"
-        / "wrapper"
-        / "gradle-wrapper.jar",
+        ctx.repo_template / "gradle-files" / "gradle" / "wrapper" / "gradle-wrapper.jar",
         project.path / "gradle" / "wrapper" / "gradle-wrapper.jar",
     )
     dev.io.copy(
-        ctx.repo_template
-        / "gradle-files"
-        / "gradle"
-        / "wrapper"
-        / "gradle-wrapper.properties",
+        ctx.repo_template / "gradle-files" / "gradle" / "wrapper" / "gradle-wrapper.properties",
         project.path / "gradle" / "wrapper" / "gradle-wrapper.properties",
     )
 
@@ -1098,9 +978,7 @@ def commit_repo_changes(
 
     # Re-gather changes after optional staging and use this as the single source of truth.
     final_diffs: list[FileDiff] = compute_repo_diffs(repo, include_untracked=True)
-    has_changes = any(
-        diff_item.change_type != ChangeType.UNCHANGED for diff_item in final_diffs
-    )
+    has_changes = any(diff_item.change_type != ChangeType.UNCHANGED for diff_item in final_diffs)
 
     if has_changes:
         warning(f"{project.name}: Changes on master")
@@ -1118,17 +996,12 @@ def commit_repo_changes(
 
             # --- File Path ---
             path_str = ""
-            if (
-                diff_item.change_type == ChangeType.ADDED
-                or diff_item.change_type == ChangeType.UNTRACKED
-            ):
+            if diff_item.change_type == ChangeType.ADDED or diff_item.change_type == ChangeType.UNTRACKED:
                 path_str = f"File: {diff_item.new_path} (Added)"
             elif diff_item.change_type == ChangeType.DELETED:
                 path_str = f"File: {diff_item.old_path} (Deleted)"
             elif diff_item.change_type == ChangeType.RENAMED:
-                path_str = (
-                    f"File: {diff_item.old_path} => {diff_item.new_path} (Renamed)"
-                )
+                path_str = f"File: {diff_item.old_path} => {diff_item.new_path} (Renamed)"
             else:  # MODIFIED, MODE_CHANGED, TYPE_CHANGED
                 path_str = f"File: {diff_item.path}"  # Use the primary path attribute
 
@@ -1187,8 +1060,7 @@ def commit_repo_changes(
             elif (
                 not diff_item.binary_different
                 and not diff_item.unified_diff
-                and diff_item.change_type
-                not in (ChangeType.ADDED, ChangeType.DELETED, ChangeType.MODE_CHANGED)
+                and diff_item.change_type not in (ChangeType.ADDED, ChangeType.DELETED, ChangeType.MODE_CHANGED)
             ):
                 # If no binary diff and no text diff, but status is MODIFIED/RENAMED etc.
                 # it might be a subtle change (e.g. whitespace only, if diff generation skipped it)
@@ -1245,56 +1117,38 @@ def commit_repo_changes(
                 editor = os.environ.get("EDITOR", "vim")  # Use vim as fallback
                 # Use a more robust temp file location if possible, or ensure .git dir exists
                 commit_file_path = Path(repo.working_dir) / ".git" / "COMMIT_EDITMSG"
-                commit_file_path.parent.mkdir(
-                    parents=True, exist_ok=True
-                )  # Ensure .git dir exists
+                commit_file_path.parent.mkdir(parents=True, exist_ok=True)  # Ensure .git dir exists
 
                 # Create a temporary commit message file
-                commit_file_text = (
-                    f"\n\n# Commit changes for {project.name}\n# Changes detected:\n"
-                )
+                commit_file_text = f"\n\n# Commit changes for {project.name}\n# Changes detected:\n"
                 # Add a summary of changed files to the commit message template
                 for diff_item in final_diffs:
                     if diff_item.change_type != ChangeType.UNCHANGED:
-                        commit_file_text += (
-                            f"#  {diff_item.change_type.name}: {diff_item.path}\n"
-                        )
+                        commit_file_text += f"#  {diff_item.change_type.name}: {diff_item.path}\n"
 
                 try:
                     with open(commit_file_path, "w", encoding="utf-8") as f:
                         f.write(commit_file_text)
 
                     # Use full path for editor command
-                    status = os.system(
-                        f'{editor} "{str(commit_file_path)}"'
-                    )  # Quote path
+                    status = os.system(f'{editor} "{str(commit_file_path)}"')  # Quote path
                     if status != 0:
-                        warning(
-                            f"Editor '{editor}' exited with status {status}. Commit message might not be saved."
-                        )
+                        warning(f"Editor '{editor}' exited with status {status}. Commit message might not be saved.")
 
                     with open(commit_file_path, "r", encoding="utf-8") as f:
                         # Read the commit message from the file and strip it
                         # of leading/trailing whitespace and comments
                         commit_name = f.read().strip()
                         # Remove comment lines more carefully
-                        commit_lines = [
-                            line
-                            for line in commit_name.splitlines()
-                            if not line.strip().startswith("#")
-                        ]
+                        commit_lines = [line for line in commit_name.splitlines() if not line.strip().startswith("#")]
                         commit_name = "\n".join(commit_lines).strip()
 
                     if not commit_name:
-                        warning(
-                            "Commit message is empty after editing. Aborting commit."
-                        )
+                        warning("Commit message is empty after editing. Aborting commit.")
                         # Handle empty commit message case (e.g., raise error, return None)
                         commit_name = None  # Or raise an exception
                     else:
-                        print(
-                            f"Using commit message from editor:\n---\n{commit_name}\n---"
-                        )
+                        print(f"Using commit message from editor:\n---\n{commit_name}\n---")
 
                 except Exception as e:
                     warning(f"Error handling commit message editing: {e}")
@@ -1306,9 +1160,7 @@ def commit_repo_changes(
                         try:
                             commit_file_path.unlink()
                         except OSError as e:
-                            warning(
-                                f"Could not remove temporary commit file {commit_file_path}: {e}"
-                            )
+                            warning(f"Could not remove temporary commit file {commit_file_path}: {e}")
 
             else:
                 print("--- Generated Diff Summary ---")
@@ -1327,9 +1179,7 @@ def commit_repo_changes(
         if interactive:
             while True:
                 info(f"Commit message: {commit_name}")
-                r = ask(
-                    f"Commit changes on master for {project.name}?", result_type="yne"
-                )
+                r = ask(f"Commit changes on master for {project.name}?", result_type="yne")
                 if r == "y":
                     USED_COMMIT_MESSAGES[h] = commit_name
                     repo.git.add(all=True)
@@ -1399,9 +1249,7 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
             }
 
             for repo in all_repos:
-                print(
-                    f"Repo: {repo.name} ({repo.full_name}) - {repo.private} - {repo.clone_url}"
-                )
+                print(f"Repo: {repo.name} ({repo.full_name}) - {repo.private} - {repo.clone_url}")
 
             is_github_api_available = True
         except (GithubException, RequestException, OSError) as ex:
@@ -1427,53 +1275,29 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
         repo_template=repo_template,
         is_github_api_available=is_github_api_available,
         licenses={
-            "AGPL": dev.io.read_text_file(
-                repo_template / "legal" / "licenses" / "AGPL.md"
-            ),
-            "CC0": dev.io.read_text_file(
-                repo_template / "legal" / "licenses" / "CC0.md"
-            ),
+            "AGPL": dev.io.read_text_file(repo_template / "legal" / "licenses" / "AGPL.md"),
+            "CC0": dev.io.read_text_file(repo_template / "legal" / "licenses" / "CC0.md"),
         },
         gitignore_template=dev.io.read_template(repo_template / "gitignore.jinja2"),
         cla=dev.io.read_template(repo_template / "legal" / "cla" / "v1.0.0" / "CLA.md"),
-        cla_explanations=dev.io.read_template(
-            repo_template / "legal" / "cla" / "v1.0.0" / "CLA_EXPLANATIONS.md"
-        ),
+        cla_explanations=dev.io.read_template(repo_template / "legal" / "cla" / "v1.0.0" / "CLA_EXPLANATIONS.md"),
         coc=coc,
         contributor_privacy_policy=dev.io.read_template(
-            repo_template
-            / "legal"
-            / "contributor-privacy"
-            / "v1.0.0"
-            / "CONTRIBUTOR_PRIVACY.md"
+            repo_template / "legal" / "contributor-privacy" / "v1.0.0" / "CONTRIBUTOR_PRIVACY.md"
         ),
-        gradle_gitignore_template=dev.io.read_template(
-            repo_template / "gradle-files" / "gitignore.jinja2"
-        ),
-        settings_template=dev.io.read_template(
-            repo_template / "gradle-files" / "settings.gradle.kts.jinja2"
-        ),
+        gradle_gitignore_template=dev.io.read_template(repo_template / "gradle-files" / "gitignore.jinja2"),
+        settings_template=dev.io.read_template(repo_template / "gradle-files" / "settings.gradle.kts.jinja2"),
         subproject_settings_template=dev.io.read_template(
             repo_template / "gradle-files" / "subproject-settings.gradle.kts.jinja2"
         ),
-        build_template=dev.io.read_template(
-            repo_template / "gradle-files" / "build.gradle.kts.jinja2"
-        ),
+        build_template=dev.io.read_template(repo_template / "gradle-files" / "build.gradle.kts.jinja2"),
         subproject_build_template=dev.io.read_template(
             repo_template / "gradle-files" / "subproject-build.gradle.kts.jinja2"
         ),
-        gradle_properties_template=dev.io.read_template(
-            repo_template / "gradle-files" / "gradle.properties.jinja2"
-        ),
-        python_gitignore_template=dev.io.read_template(
-            repo_template / "python-files" / "gitignore.jinja2"
-        ),
-        purescript_gitignore_template=dev.io.read_template(
-            repo_template / "purescript-files" / "gitignore.jinja2"
-        ),
-        python_pyproject_template=dev.io.read_template(
-            repo_template / "python-files" / "pyproject.toml.jinja2"
-        ),
+        gradle_properties_template=dev.io.read_template(repo_template / "gradle-files" / "gradle.properties.jinja2"),
+        python_gitignore_template=dev.io.read_template(repo_template / "python-files" / "gitignore.jinja2"),
+        purescript_gitignore_template=dev.io.read_template(repo_template / "purescript-files" / "gitignore.jinja2"),
+        python_pyproject_template=dev.io.read_template(repo_template / "python-files" / "pyproject.toml.jinja2"),
         mode=mode,
     )
 
@@ -1492,20 +1316,12 @@ def setup(mode: RepoSetupMode, *, interactive: bool = True) -> None:
 
     # For convenience, we generate top-level settings.gradle.kts, build.gradle.kts
     # if any Gradle projects exist. Then we handle each project individually.
-    any_gradle = any(
-        isinstance(p, GradleProject) for p in config.defined_projects.values()
-    )
+    any_gradle = any(isinstance(p, GradleProject) for p in config.defined_projects.values())
     if any_gradle:
-        gradle_build = render_template(
-            ctx.build_template, kotlin_version=ctx.config.plugins["kotlin-jvm"].version
-        )
+        gradle_build = render_template(ctx.build_template, kotlin_version=ctx.config.plugins["kotlin-jvm"].version)
         dev.io.write_text_file(Path("build.gradle.kts"), gradle_build)
 
-        gradle_subprojects = [
-            p.name
-            for p in config.defined_projects.values()
-            if isinstance(p, GradleProject)
-        ]
+        gradle_subprojects = [p.name for p in config.defined_projects.values() if isinstance(p, GradleProject)]
         result = render_template(ctx.settings_template, subprojects=gradle_subprojects)
         dev.io.write_text_file(Path("settings.gradle.kts"), result)
 

@@ -63,23 +63,17 @@ test_version_sequence("1.0.0_RELEASE ~ 1.0.0.RELEASE")
 test_version_sequence("1.0.0 !~ 1.0.1")
 test_version_sequence("1.2.M01 < 1.2.M02 < 1.2.M06 < 1.2")
 test_version_sequence("1.2.M01 ~ 1.2.M1")
-test_version_sequence(
-    "1.8.M01 < 1.8.M02 < 1.8.M07 < 1.8.RC1 < 1.8 < 1.8.1 < 1.8.2 < 1.8.3"
-)
+test_version_sequence("1.8.M01 < 1.8.M02 < 1.8.M07 < 1.8.RC1 < 1.8 < 1.8.1 < 1.8.2 < 1.8.3")
 test_version_sequence("1.9.M05 < 1.9.RC1 < 1.9.RC2 < 1.9")
 test_version_sequence("1.9 < 1.9.1 < 1.9.2 < 1.9.9")
 test_version_sequence(
     "3.0.12 < 3.1.0-BETA1 < 3.1.0-M01 < 3.1.0-M10 < 3.1.0-M12-beta2 < 3.1.0-M13-beta3 < 3.1.0-RC1 < 3.1.0 < 3.1.1"
 )
-test_version_sequence(
-    "3.3.0-alpha01 < 3.3.0-alpha07 < 3.3.0-beta01 < 3.3.0-beta02 < 3.3.0-rc1 < 3.3.0"
-)
+test_version_sequence("3.3.0-alpha01 < 3.3.0-alpha07 < 3.3.0-beta01 < 3.3.0-beta02 < 3.3.0-rc1 < 3.3.0")
 test_version_sequence("2.5.1 < 2.5.2 < 2.5.3-rc1 < 2.5.3 < 2.5.4-rc1")
 # test_version_sequence("1.0-alpha < 1.0-beta < 1.0-SNAPSHOT < 1.0 < 1.0-sp < 1.0.1")
 test_version_sequence("1.0.0-alpha < 1.0.0-beta < 1.0.0 < 1.0.1 < 1.1.0 < 2.0.0")
-test_version_sequence(
-    "1.0.0-alpha < 1.0.0-beta < 1.0.0-RC1 < 1.0.0-RC2 < 1.0.0-SNAPSHOT < 1.0.0 < 1.0.1"
-)
+test_version_sequence("1.0.0-alpha < 1.0.0-beta < 1.0.0-RC1 < 1.0.0-RC2 < 1.0.0-SNAPSHOT < 1.0.0 < 1.0.1")
 test_version_sequence("1.0.0.alpha < 1.0.0.beta")
 test_version_sequence("5.2.0.M1 < 5.2.0.RC1 < 5.2.0.RELEASE < 5.2.1.RELEASE")
 test_version_sequence("2.5.6 < 2.5.6.SEC01 < 2.5.6.SEC02 < 2.5.6.SEC03")
@@ -122,9 +116,7 @@ test_version_sequence("2.0.0 < 2.0.0-patch < 2.0.0-patch.1")  # Patch levels
 
 # Mixed milestone and RC qualifiers
 test_version_sequence("2.0.0-M5-SNAPSHOT < 2.0.0-RC1-SNAPSHOT")
-test_version_sequence(
-    "2.0.0-M5-beta < 2.0.0-RC1-alpha"
-)  # RC wins over M regardless of secondary qualifier
+test_version_sequence("2.0.0-M5-beta < 2.0.0-RC1-alpha")  # RC wins over M regardless of secondary qualifier
 
 # Beta vs Alpha with additional qualifiers
 test_version_sequence("1.0.0-alpha-snapshot < 1.0.0-beta-dev")
@@ -157,16 +149,10 @@ test_version_sequence("1.0.0-20230101 < 1.0.0-20230102")  # Date stamps
 test_version_sequence("1.0.0-20230101.1200 < 1.0.0-20230101.1201")  # Date and time
 
 test_version_sequence("1.0.0.0.0.0.1 < 1.0.0.0.0.0.2")  # Many version parts
-test_version_sequence(
-    "1.0.0-alpha-beta-gamma-delta-1 < 1.0.0-alpha-beta-gamma-delta-2"
-)  # Many qualifiers
+test_version_sequence("1.0.0-alpha-beta-gamma-delta-1 < 1.0.0-alpha-beta-gamma-delta-2")  # Many qualifiers
 
-test_version_sequence(
-    "1.0.0-alpha.1.1 < 1.0.0-alpha.1.2"
-)  # Multi-part qualifier numbers
-test_version_sequence(
-    "1.0.0-beta.2.1 < 1.0.0-beta.10.1"
-)  # Natural number ordering in middle
+test_version_sequence("1.0.0-alpha.1.1 < 1.0.0-alpha.1.2")  # Multi-part qualifier numbers
+test_version_sequence("1.0.0-beta.2.1 < 1.0.0-beta.10.1")  # Natural number ordering in middle
 
 test_version_sequence("1.999999999 < 1.1000000000")
 test_version_sequence("1.0.9999999999 < 1.1.0")
@@ -219,16 +205,10 @@ test_cases = [
 
 print("Validation tests:")
 for coordinate in test_cases:
-    print(
-        f"{'Valid' if is_valid_maven_coordinate(coordinate) else 'Invalid'}: {coordinate}"
-    )
+    print(f"{'Valid' if is_valid_maven_coordinate(coordinate) else 'Invalid'}: {coordinate}")
 
 print("\nParsing and functionality tests:")
-coordinates = [
-    MavenCoordinate.parse(coord)
-    for coord in test_cases
-    if is_valid_maven_coordinate(coord)
-]
+coordinates = [MavenCoordinate.parse(coord) for coord in test_cases if is_valid_maven_coordinate(coord)]
 
 for coord in coordinates:
     print(f"Parsed: {coord}")
@@ -257,45 +237,25 @@ def test_fetch_metadata(repo_base_url: str, group_id: str, artifact_id: str):
 
 test_fetch_metadata("https://repo1.maven.org/maven2/", "org.jline", "jline")
 test_fetch_metadata("https://repo1.maven.org/maven2/", "com.charleskorn.kaml", "kaml")
-test_fetch_metadata(
-    "https://repo1.maven.org/maven2/", "ch.qos.logback", "logback-classic"
-)
+test_fetch_metadata("https://repo1.maven.org/maven2/", "ch.qos.logback", "logback-classic")
 test_fetch_metadata("https://repo1.maven.org/maven2/", "org.apache.tika", "tika")
-test_fetch_metadata(
-    "https://repo1.maven.org/maven2/", "edu.stanford.nlp", "stanford-corenlp"
-)
-test_fetch_metadata(
-    "https://repo1.maven.org/maven2/", "org.apache.opennlp", "opennlp-tools"
-)
+test_fetch_metadata("https://repo1.maven.org/maven2/", "edu.stanford.nlp", "stanford-corenlp")
+test_fetch_metadata("https://repo1.maven.org/maven2/", "org.apache.opennlp", "opennlp-tools")
 test_fetch_metadata("https://repo1.maven.org/maven2/", "it.unimi.dsi", "fastutil")
 test_fetch_metadata("https://repo1.maven.org/maven2/", "com.tdunning", "t-digest")
 test_fetch_metadata("https://repo1.maven.org/maven2/", "org.foundationdb", "fdb-java")
 test_fetch_metadata("https://repo1.maven.org/maven2/", "org.neo4j", "neo4j")
-test_fetch_metadata(
-    "https://repo1.maven.org/maven2/", "org.neo4j.driver", "neo4j-java-driver"
-)
+test_fetch_metadata("https://repo1.maven.org/maven2/", "org.neo4j.driver", "neo4j-java-driver")
 test_fetch_metadata("https://repo1.maven.org/maven2/", "org.xerial", "sqlite-jdbc")
-test_fetch_metadata(
-    "https://repo1.maven.org/maven2/", "org.python", "jython-standalone"
-)
+test_fetch_metadata("https://repo1.maven.org/maven2/", "org.python", "jython-standalone")
 test_fetch_metadata("https://repo1.maven.org/maven2/", "org.pygments", "pygments")
 test_fetch_metadata("https://repo1.maven.org/maven2/", "guru.nidi", "graphviz-java")
-test_fetch_metadata(
-    "https://repo1.maven.org/maven2/", "net.sourceforge.plantuml", "plantuml"
-)
+test_fetch_metadata("https://repo1.maven.org/maven2/", "net.sourceforge.plantuml", "plantuml")
 test_fetch_metadata("https://repo1.maven.org/maven2/", "com.rollbar", "rollbar-java")
-test_fetch_metadata(
-    "https://papermc.io/repo/repository/maven-public/", "io.papermc.paper", "paper-api"
-)
+test_fetch_metadata("https://papermc.io/repo/repository/maven-public/", "io.papermc.paper", "paper-api")
 
-test_fetch_metadata(
-    "https://repo1.maven.org/maven2/", "org.springframework", "spring-core"
-)
-test_fetch_metadata(
-    "https://repo1.maven.org/maven2/", "org.jogamp.gluegen", "gluegen-rt"
-)
+test_fetch_metadata("https://repo1.maven.org/maven2/", "org.springframework", "spring-core")
+test_fetch_metadata("https://repo1.maven.org/maven2/", "org.jogamp.gluegen", "gluegen-rt")
 test_fetch_metadata("https://repo1.maven.org/maven2/", "org.jogamp.jogl", "jogl-all")
-test_fetch_metadata(
-    "https://repo1.maven.org/maven2/", "com.squareup.retrofit2", "retrofit"
-)
+test_fetch_metadata("https://repo1.maven.org/maven2/", "com.squareup.retrofit2", "retrofit")
 test_fetch_metadata("https://repo1.maven.org/maven2/", "io.ktor", "ktor-server-core")

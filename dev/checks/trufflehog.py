@@ -104,9 +104,7 @@ class HighEntropyStringCheck(FileCheck):
 
         # Compile regex for Base64 and Hex strings based on min_length and char sets
         # Use re.escape to handle special characters like '+' and '/' in BASE64_CHARS
-        self.b64_regex = re.compile(
-            f"[{re.escape(self.base64_chars)}]{{{self.min_length},}}"
-        )
+        self.b64_regex = re.compile(f"[{re.escape(self.base64_chars)}]{{{self.min_length},}}")
         self.hex_regex = re.compile(f"[{self.hex_chars}]{{{self.min_length},}}")
 
     def _shannon_entropy(self, data: str, iterator: str) -> float:
@@ -130,9 +128,7 @@ class HighEntropyStringCheck(FileCheck):
                 entropy -= p_x * math.log(p_x, 2)  # log base 2 for Shannon entropy
         return entropy
 
-    def _check_overlap(
-        self, secret_start: int, secret_end: int, url_spans: List[Tuple[int, int]]
-    ) -> bool:
+    def _check_overlap(self, secret_start: int, secret_end: int, url_spans: List[Tuple[int, int]]) -> bool:
         """Checks if the secret span overlaps with any of the URL spans."""
         for url_start, url_end in url_spans:
             # Check for any overlap:

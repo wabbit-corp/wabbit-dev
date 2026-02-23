@@ -45,11 +45,7 @@ class CensoredKeywords(FileCheck):
         if not self.error_on:
             pattern = r"a^"  # Matches nothing
         else:
-            pattern = (
-                r"\b("
-                + "|".join(re.escape(keyword) for keyword in self.error_on)
-                + r")\b"
-            )
+            pattern = r"\b(" + "|".join(re.escape(keyword) for keyword in self.error_on) + r")\b"
         self.error_on_regex = re.compile(pattern, re.IGNORECASE)
 
     def register_script_commands(self, ctx: ExecutionContext) -> None:
@@ -58,9 +54,7 @@ class CensoredKeywords(FileCheck):
             self._update_error_on_regex()
             return self.error_on
 
-        ctx.register(
-            name="checks/censored-words/error-on", func=censored_words_error_on
-        )
+        ctx.register(name="checks/censored-words/error-on", func=censored_words_error_on)
 
     def register_typed_config_commands(self) -> list[TypedConfigCommandRegistration]:
         def apply(command: CensoredWordsErrorOnCommand) -> None:
@@ -80,11 +74,7 @@ class CensoredKeywords(FileCheck):
         if not ctx.expected_properties.is_text:
             return None
 
-        for line_number, line in enumerate(
-            ctx.read_text(E_CENSORED_KEYWORD).splitlines()
-        ):
+        for line_number, line in enumerate(ctx.read_text(E_CENSORED_KEYWORD).splitlines()):
             for match in self.error_on_regex.finditer(line):
                 keyword_found = match.group(0)
-                ctx.add_issue(
-                    E_CENSORED_KEYWORD, line=line_number, keyword=keyword_found
-                )
+                ctx.add_issue(E_CENSORED_KEYWORD, line=line_number, keyword=keyword_found)

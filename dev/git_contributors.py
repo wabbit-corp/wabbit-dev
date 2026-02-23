@@ -36,9 +36,7 @@ def list_git_contributors(path: Path) -> Dict[GitContributor, int]:
 
         # Get the output of the git command
         try:
-            output = subprocess.check_output(
-                ["git", "shortlog", "-sne", "--all"], text=True
-            )
+            output = subprocess.check_output(["git", "shortlog", "-sne", "--all"], text=True)
         except subprocess.CalledProcessError as e:
             print(f"Error: {e}")
             return []
@@ -86,9 +84,7 @@ def get_git_user_name(path: Path) -> Optional[str]:
     change_dir = os.getcwd()
     try:
         os.chdir(path)
-        name = subprocess.check_output(
-            ["git", "config", "--get", "user.name"], text=True
-        ).strip()
+        name = subprocess.check_output(["git", "config", "--get", "user.name"], text=True).strip()
         return name
     except subprocess.CalledProcessError:
         return None
@@ -115,9 +111,7 @@ def get_git_user_email(path: Path) -> Optional[str]:
     change_dir = os.getcwd()
     try:
         os.chdir(path)
-        email = subprocess.check_output(
-            ["git", "config", "--get", "user.email"], text=True
-        ).strip()
+        email = subprocess.check_output(["git", "config", "--get", "user.email"], text=True).strip()
         return email
     except subprocess.CalledProcessError:
         return None
@@ -172,9 +166,7 @@ if __name__ == "__main__":
         contributors = list_git_contributors(path)
         if contributors:
             print(f"Contributors in {path}:")
-            for contributor, commit_count in sorted(
-                contributors.items(), key=lambda x: x[1], reverse=True
-            ):
+            for contributor, commit_count in sorted(contributors.items(), key=lambda x: x[1], reverse=True):
                 print(f"{contributor}: {commit_count} commits")
         else:
             print(f"No contributors found in {path}.")

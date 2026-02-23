@@ -73,9 +73,7 @@ def ask(*msg, result_type: Dict[str, Any] | str | None = None) -> Any:
         result_type = {r: r for r in result_type}
 
     assert isinstance(result_type, dict), f"Invalid result type: {result_type}"
-    assert all(
-        isinstance(k, str) for k in result_type
-    ), f"Invalid result type: {result_type}"
+    assert all(isinstance(k, str) for k in result_type), f"Invalid result type: {result_type}"
     assert all(len(k) == 1 for k in result_type), f"Invalid result type: {result_type}"
     assert all(k.islower() for k in result_type), f"Invalid result type: {result_type}"
 

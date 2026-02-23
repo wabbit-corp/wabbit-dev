@@ -233,9 +233,7 @@ _def_mime(
 _def_mime("application/rtf", is_plain_text=True)
 _def_mime("application/vnd.oasis.opendocument.text", is_binary=True)
 _def_mime("application/vnd.ms-excel", is_binary=True)
-_def_mime(
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", is_binary=True
-)
+_def_mime("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", is_binary=True)
 _def_mime("application/vnd.oasis.opendocument.spreadsheet", is_binary=True)
 _def_mime("application/vnd.ms-powerpoint", is_binary=True)
 _def_mime(
@@ -318,22 +316,14 @@ _def_mime("application/x-pem-cert", is_plain_text=True, is_security_sensitive=Fa
 _def_mime("application/x-x509-cert", is_plain_text=True, is_security_sensitive=False)
 _def_mime("application/x-der", is_binary=True, is_security_sensitive=False)
 _def_mime("application/x-pkcs12", is_binary=True, is_security_sensitive=True)
-_def_mime(
-    "application/x-pkcs7-certificates", is_plain_text=True, is_security_sensitive=False
-)  # .p7b
-_def_mime(
-    "application/x-pkcs7-mime", is_binary=True, is_security_sensitive=False
-)  # .p7c
+_def_mime("application/x-pkcs7-certificates", is_plain_text=True, is_security_sensitive=False)  # .p7b
+_def_mime("application/x-pkcs7-mime", is_binary=True, is_security_sensitive=False)  # .p7c
 _def_mime("application/x-java-keystore", is_binary=True, is_security_sensitive=True)
 _def_mime("application/pgp-keys", is_plain_text=True, is_security_sensitive=False)
 _def_mime("application/pgp-signature", is_plain_text=True, is_security_sensitive=False)
 _def_mime("application/pgp-encrypted", is_plain_text=True, is_security_sensitive=True)
-_def_mime(
-    "application/x-ssh-public-key", is_plain_text=True, is_security_sensitive=False
-)
-_def_mime(
-    "application/x-ssh-private-key", is_plain_text=True, is_security_sensitive=True
-)
+_def_mime("application/x-ssh-public-key", is_plain_text=True, is_security_sensitive=False)
+_def_mime("application/x-ssh-private-key", is_plain_text=True, is_security_sensitive=True)
 _def_mime("application/x-keepass2", is_binary=True, is_security_sensitive=True)
 _def_mime("text/x-shell-history", is_plain_text=True, is_security_sensitive=True)
 _def_mime("text/x-python-history", is_plain_text=True, is_security_sensitive=True)
@@ -341,12 +331,8 @@ _def_mime("text/x-htpasswd", is_plain_text=True, is_security_sensitive=True)
 
 # --- Derived/specialized JSON/YAML configs for names ---
 _def_mime("application/x-json-config", is_configuration=True)
-_def_mime(
-    "application/x-yaml-secrets", is_configuration=True, is_security_sensitive=True
-)
-_def_mime(
-    "application/x-json-credentials", is_configuration=True, is_security_sensitive=True
-)
+_def_mime("application/x-yaml-secrets", is_configuration=True, is_security_sensitive=True)
+_def_mime("application/x-json-credentials", is_configuration=True, is_security_sensitive=True)
 _def_mime("text/x-yarn-lock", is_plain_text=True)
 _def_mime("text/x-go-mod", is_configuration=True)
 _def_mime("text/x-toml-lock", is_configuration=True)
@@ -621,9 +607,7 @@ _reg_ext([".twig"], "text/x-twig")
 
 # --- Build system specific ---
 _reg_ext([".pom"], "application/xml")
-_reg_ext(
-    [".csproj", ".vbproj", ".fsproj", ".vcxproj", ".xproj", ".build"], "application/xml"
-)
+_reg_ext([".csproj", ".vbproj", ".fsproj", ".vcxproj", ".xproj", ".build"], "application/xml")
 _reg_ext([".sln"], "text/plain")
 _reg_ext([".sbt"], "text/x-gradle")  # treat like build script
 _reg_ext([".cmake"], "text/x-cmake")
@@ -684,9 +668,7 @@ _reg_ext([".mo"], "application/x-gettext-translation-mo")
 # --- Document formats ---
 _reg_ext([".pdf"], "application/pdf")
 _reg_ext([".doc"], "application/msword")
-_reg_ext(
-    [".docx"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-)
+_reg_ext([".docx"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 _reg_ext([".rtf"], "application/rtf")
 _reg_ext([".odt"], "application/vnd.oasis.opendocument.text")
 _reg_ext([".wpd"], "application/octet-stream")
@@ -876,9 +858,7 @@ class CommentStyle:
 COMMENT_STYLES_BY_MIME: Dict[str, CommentStyle] = {}
 
 
-def _def_comment(
-    mime: str, line: Tuple[str, ...] = (), block: Tuple[Tuple[str, str], ...] = ()
-) -> None:
+def _def_comment(mime: str, line: Tuple[str, ...] = (), block: Tuple[Tuple[str, str], ...] = ()) -> None:
     COMMENT_STYLES_BY_MIME[mime] = CommentStyle(line_markers=line, block_markers=block)
 
 
@@ -954,9 +934,7 @@ def _merge_comment_styles(styles: Iterable[CommentStyle]) -> CommentStyle:
     )
 
 
-def get_comment_style_for_file(
-    filepath: Path, *, prefer_extension: bool = True
-) -> Optional[CommentStyle]:
+def get_comment_style_for_file(filepath: Path, *, prefer_extension: bool = True) -> Optional[CommentStyle]:
     """
     Return a CommentStyle for the given file.
     If multiple MIME candidates exist (e.g., ambiguous extension), we merge markers across them.
@@ -967,11 +945,7 @@ def get_comment_style_for_file(
     else:
         candidate_mimes = infer_candidate_mime_types(filepath)
 
-    styles = [
-        COMMENT_STYLES_BY_MIME[m]
-        for m in candidate_mimes
-        if m in COMMENT_STYLES_BY_MIME
-    ]
+    styles = [COMMENT_STYLES_BY_MIME[m] for m in candidate_mimes if m in COMMENT_STYLES_BY_MIME]
     if not styles:
         return None
     return _merge_comment_styles(styles)

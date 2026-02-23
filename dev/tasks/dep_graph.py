@@ -59,21 +59,15 @@ def get_project_dependencies(
             return
         project = config.defined_projects[project_name]
         if project_name not in nodes:
-            nodes[project_name] = Node(
-                id=sanitize_id(project_name), label=project_name, type="project"
-            )
+            nodes[project_name] = Node(id=sanitize_id(project_name), label=project_name, type="project")
 
         for dep in project.resolved_dependencies:
             if dep.is_subproject:
-                nodes[dep.name] = Node(
-                    id=sanitize_id(dep.name), label=dep.name, type="project"
-                )
+                nodes[dep.name] = Node(id=sanitize_id(dep.name), label=dep.name, type="project")
                 edges.add(Edge(source=project_name, target=dep.name))
                 add_dependencies(dep.name)
             elif include_artifacts:
-                nodes[dep.name] = Node(
-                    id=sanitize_id(dep.name), label=dep.name, type="artifact"
-                )
+                nodes[dep.name] = Node(id=sanitize_id(dep.name), label=dep.name, type="artifact")
 
     if focus_project_name is None:
         for project_name, project in config.defined_projects.items():

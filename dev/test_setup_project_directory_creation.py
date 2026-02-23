@@ -46,9 +46,7 @@ def _make_python_project(path: Path):
     )
 
 
-def test_setup_project_creates_directory_before_project_setup(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_setup_project_creates_directory_before_project_setup(tmp_path: Path, monkeypatch) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     workspace_root = repo_root.parent
     sys.path.insert(0, str(repo_root))
@@ -60,9 +58,7 @@ def test_setup_project_creates_directory_before_project_setup(
     project = _make_python_project(tmp_path / "missing" / "pkg")
     called = False
 
-    def fake_setup_python_project(
-        ctx: object, python_project: PythonProject, interactive: bool = True
-    ) -> None:
+    def fake_setup_python_project(ctx: object, python_project: PythonProject, interactive: bool = True) -> None:
         nonlocal called
         called = True
         assert python_project.path.exists()

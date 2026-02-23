@@ -15,7 +15,6 @@ from pathlib import Path
 from dev.checks.base import Issue, IssueType, Severity
 from dev.config import Project, PythonProject
 
-
 # Keep fallback defaults for now as requested.
 LEGACY_DEFAULT_ROOT = Path("/Users/wabbit/ws/datatron/python-jeeves")
 LEGACY_FALLBACK_PYPROJECT = LEGACY_DEFAULT_ROOT / "pyproject.toml"
@@ -317,18 +316,12 @@ E_PYQA_TOOL_FAILED = IssueType(
 )
 
 E_PYQA_RUFF = IssueType("E_PYQA_RUFF", "ruff {code}: {message}")
-E_PYQA_RUFF_WARNING = IssueType(
-    "E_PYQA_RUFF_WARNING", "ruff {code}: {message}", severity=Severity.WARNING
-)
+E_PYQA_RUFF_WARNING = IssueType("E_PYQA_RUFF_WARNING", "ruff {code}: {message}", severity=Severity.WARNING)
 
 E_PYQA_BLACK = IssueType("E_PYQA_BLACK", "black {code}: {message}")
-E_PYQA_BLACK_WARNING = IssueType(
-    "E_PYQA_BLACK_WARNING", "black {code}: {message}", severity=Severity.WARNING
-)
+E_PYQA_BLACK_WARNING = IssueType("E_PYQA_BLACK_WARNING", "black {code}: {message}", severity=Severity.WARNING)
 
-E_PYQA_IMPORT_LINTER = IssueType(
-    "E_PYQA_IMPORT_LINTER", "import-linter {code}: {message}"
-)
+E_PYQA_IMPORT_LINTER = IssueType("E_PYQA_IMPORT_LINTER", "import-linter {code}: {message}")
 E_PYQA_IMPORT_LINTER_WARNING = IssueType(
     "E_PYQA_IMPORT_LINTER_WARNING",
     "import-linter {code}: {message}",
@@ -336,32 +329,22 @@ E_PYQA_IMPORT_LINTER_WARNING = IssueType(
 )
 
 E_PYQA_MYPY = IssueType("E_PYQA_MYPY", "mypy {code}: {message}")
-E_PYQA_MYPY_WARNING = IssueType(
-    "E_PYQA_MYPY_WARNING", "mypy {code}: {message}", severity=Severity.WARNING
-)
+E_PYQA_MYPY_WARNING = IssueType("E_PYQA_MYPY_WARNING", "mypy {code}: {message}", severity=Severity.WARNING)
 
 E_PYQA_PYRIGHT = IssueType("E_PYQA_PYRIGHT", "pyright {code}: {message}")
-E_PYQA_PYRIGHT_WARNING = IssueType(
-    "E_PYQA_PYRIGHT_WARNING", "pyright {code}: {message}", severity=Severity.WARNING
-)
+E_PYQA_PYRIGHT_WARNING = IssueType("E_PYQA_PYRIGHT_WARNING", "pyright {code}: {message}", severity=Severity.WARNING)
 
 E_PYQA_PYTEST = IssueType("E_PYQA_PYTEST", "pytest {code}: {message}")
-E_PYQA_PYTEST_WARNING = IssueType(
-    "E_PYQA_PYTEST_WARNING", "pytest {code}: {message}", severity=Severity.WARNING
-)
+E_PYQA_PYTEST_WARNING = IssueType("E_PYQA_PYTEST_WARNING", "pytest {code}: {message}", severity=Severity.WARNING)
 
-E_PYQA_COVERAGE_REPORT = IssueType(
-    "E_PYQA_COVERAGE_REPORT", "coverage report {code}: {message}"
-)
+E_PYQA_COVERAGE_REPORT = IssueType("E_PYQA_COVERAGE_REPORT", "coverage report {code}: {message}")
 E_PYQA_COVERAGE_REPORT_WARNING = IssueType(
     "E_PYQA_COVERAGE_REPORT_WARNING",
     "coverage report {code}: {message}",
     severity=Severity.WARNING,
 )
 
-E_PYQA_COVERAGE_XML = IssueType(
-    "E_PYQA_COVERAGE_XML", "coverage xml {code}: {message}"
-)
+E_PYQA_COVERAGE_XML = IssueType("E_PYQA_COVERAGE_XML", "coverage xml {code}: {message}")
 E_PYQA_COVERAGE_XML_WARNING = IssueType(
     "E_PYQA_COVERAGE_XML_WARNING",
     "coverage xml {code}: {message}",
@@ -376,29 +359,19 @@ E_PYQA_DIFF_COVER_WARNING = IssueType(
 )
 
 E_PYQA_UNITTEST = IssueType("E_PYQA_UNITTEST", "unittest {code}: {message}")
-E_PYQA_UNITTEST_WARNING = IssueType(
-    "E_PYQA_UNITTEST_WARNING", "unittest {code}: {message}", severity=Severity.WARNING
-)
+E_PYQA_UNITTEST_WARNING = IssueType("E_PYQA_UNITTEST_WARNING", "unittest {code}: {message}", severity=Severity.WARNING)
 
 E_PYQA_DEPTRY = IssueType("E_PYQA_DEPTRY", "deptry {code}: {message}")
-E_PYQA_DEPTRY_WARNING = IssueType(
-    "E_PYQA_DEPTRY_WARNING", "deptry {code}: {message}", severity=Severity.WARNING
-)
+E_PYQA_DEPTRY_WARNING = IssueType("E_PYQA_DEPTRY_WARNING", "deptry {code}: {message}", severity=Severity.WARNING)
 
 E_PYQA_VULTURE = IssueType("E_PYQA_VULTURE", "vulture {code}: {message}")
-E_PYQA_VULTURE_WARNING = IssueType(
-    "E_PYQA_VULTURE_WARNING", "vulture {code}: {message}", severity=Severity.WARNING
-)
+E_PYQA_VULTURE_WARNING = IssueType("E_PYQA_VULTURE_WARNING", "vulture {code}: {message}", severity=Severity.WARNING)
 
 E_PYQA_SEMGREP = IssueType("E_PYQA_SEMGREP", "semgrep {code}: {message}")
-E_PYQA_SEMGREP_WARNING = IssueType(
-    "E_PYQA_SEMGREP_WARNING", "semgrep {code}: {message}", severity=Severity.WARNING
-)
+E_PYQA_SEMGREP_WARNING = IssueType("E_PYQA_SEMGREP_WARNING", "semgrep {code}: {message}", severity=Severity.WARNING)
 
 E_PYQA_BANDIT = IssueType("E_PYQA_BANDIT", "bandit {code}: {message}")
-E_PYQA_BANDIT_WARNING = IssueType(
-    "E_PYQA_BANDIT_WARNING", "bandit {code}: {message}", severity=Severity.WARNING
-)
+E_PYQA_BANDIT_WARNING = IssueType("E_PYQA_BANDIT_WARNING", "bandit {code}: {message}", severity=Severity.WARNING)
 
 E_PYQA_PIP_AUDIT = IssueType("E_PYQA_PIP_AUDIT", "pip-audit {code}: {message}")
 E_PYQA_PIP_AUDIT_WARNING = IssueType(
@@ -607,6 +580,7 @@ def issue_location(
 
 
 # Parsers ported from python-jeeves/check.py
+
 
 def parse_ruff_issues(log_text: str) -> Sequence[RuffIssue | RuffFailure]:
     payload = extract_json_payload(log_text)
@@ -1560,7 +1534,9 @@ def parse_diff_cover_issues(
     return issues
 
 
-def parse_coverage_report_issues(log_text: str, coverage_fail_under: int) -> Sequence[CoverageReportIssue | CoverageReportFailure]:
+def parse_coverage_report_issues(
+    log_text: str, coverage_fail_under: int
+) -> Sequence[CoverageReportIssue | CoverageReportFailure]:
     issues: list[CoverageReportIssue | CoverageReportFailure] = []
     failure_match = re.search(
         r"Coverage failure: total of (\d+(?:\.\d+)?) is less than fail-under=(\d+)",
@@ -2354,9 +2330,7 @@ def _run_subprocess(
         failure_output = output
         if not failure_output.strip():
             command_preview = " ".join(str(part) for part in cmd)
-            failure_output = (
-                f"command produced no output (rc={result.returncode}): {command_preview}"
-            )
+            failure_output = f"command produced no output (rc={result.returncode}): {command_preview}"
         parsed_issues = [failure_issue(label, failure_output, result.returncode)]
     parsed_issues = _dedupe_parsed_issues(parsed_issues)
 
@@ -2389,7 +2363,9 @@ def _require_python(state: PythonQaRepoState, tool_name: str) -> ToolRunResult |
     return ToolRunResult(rc=127, issues=[_missing_issue(tool_name, message, state.root)])
 
 
-def _require_tool(state: PythonQaRepoState, tool_name: str, install_hint: str | None = None) -> tuple[Path | None, ToolRunResult | None]:
+def _require_tool(
+    state: PythonQaRepoState, tool_name: str, install_hint: str | None = None
+) -> tuple[Path | None, ToolRunResult | None]:
     tool_path = _tool_executable(state, tool_name)
     if tool_path is not None:
         return tool_path, None

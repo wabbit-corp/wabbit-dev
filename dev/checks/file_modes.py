@@ -113,9 +113,7 @@ def remove_execute_permission(filepath):
             # No execute permission was set initially
             return True  # Considered success as the state is correct
     except OSError as e:
-        print(
-            f"Error: Could not change permissions for {filepath}: {e}", file=sys.stderr
-        )
+        print(f"Error: Could not change permissions for {filepath}: {e}", file=sys.stderr)
         return False
     except Exception as e:
         print(f"Error: Unexpected error fixing {filepath}: {e}", file=sys.stderr)
@@ -133,20 +131,14 @@ def find_and_process_files(root_dir, fix_files=False):
 
     print(f"Scanning directory: {os.path.abspath(root_dir)}")
     if fix_files:
-        print(
-            "Fix mode enabled: Attempting to remove execute permissions from suspicious files."
-        )
+        print("Fix mode enabled: Attempting to remove execute permissions from suspicious files.")
     print("-" * 30)
 
     # trufflehog git file://./kotlin-base58
 
     for dirpath, dirnames, filenames in os.walk(root_dir, topdown=True):
         # Optional: Skip directories like .git, venv, etc.
-        dirnames[:] = [
-            d
-            for d in dirnames
-            if d not in [".git", ".svn", "venv", "__pycache__", "node_modules"]
-        ]
+        dirnames[:] = [d for d in dirnames if d not in [".git", ".svn", "venv", "__pycache__", "node_modules"]]
 
         for filename in filenames:
             filepath = os.path.join(dirpath, filename)
@@ -171,9 +163,7 @@ def find_and_process_files(root_dir, fix_files=False):
                             or ext_lower in EXECUTABLE_EXTENSIONS
                         ):
                             suspicious_files_found.append(filepath)
-                            print(
-                                f"Suspicious: {filepath} (Extension: {ext}, Executable, No Shebang)"
-                            )
+                            print(f"Suspicious: {filepath} (Extension: {ext}, Executable, No Shebang)")
 
                             # If fix mode is enabled, attempt to remove execute permission
                             if fix_files:
@@ -206,9 +196,7 @@ def find_and_process_files(root_dir, fix_files=False):
 # --- Main Execution ---
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Find and optionally fix files with suspicious execute permissions."
-    )
+    parser = argparse.ArgumentParser(description="Find and optionally fix files with suspicious execute permissions.")
     parser.add_argument(
         "directory",
         nargs="?",
@@ -228,9 +216,7 @@ if __name__ == "__main__":
         print(f"Error: Directory not found: {target_directory}", file=sys.stderr)
         sys.exit(1)
 
-    suspicious_files, fixed_count, error_count = find_and_process_files(
-        target_directory, fix_files=args.fix
-    )
+    suspicious_files, fixed_count, error_count = find_and_process_files(target_directory, fix_files=args.fix)
 
     print("\n--- Summary ---")
     if suspicious_files:

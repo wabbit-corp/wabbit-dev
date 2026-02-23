@@ -5,6 +5,7 @@ import sys
 from types import SimpleNamespace
 import tomllib
 
+
 def _copy_tree(src: Path, dest: Path) -> None:
     ignore = shutil.ignore_patterns(
         ".git",
@@ -135,9 +136,9 @@ def test_setup_generates_pyproject_from_config(tmp_path: Path, monkeypatch) -> N
     assert _read_requirements(temp_root / "app-wabbit-dev" / "requirements.txt") == _read_requirements(
         repo_root / "requirements.txt"
     )
-    assert _read_requirements(
-        temp_root / "app-wabbit-dev" / "requirements-dev.txt"
-    ) == _read_requirements(repo_root / "requirements-dev.txt")
+    assert _read_requirements(temp_root / "app-wabbit-dev" / "requirements-dev.txt") == _read_requirements(
+        repo_root / "requirements-dev.txt"
+    )
 
     generated_jeeves = _load_toml(temp_root / "python-jeeves" / "pyproject.toml")
 
@@ -152,24 +153,14 @@ def test_setup_generates_pyproject_from_config(tmp_path: Path, monkeypatch) -> N
     assert generated_jeeves["tool"]["ruff"]["lint"]["select"] == ["F", "E", "W", "I", "B", "UP"]
     assert generated_jeeves["tool"]["ruff"]["lint"]["ignore"] == ["E501"]
 
-    expected_ruff_ignores = {
-        f"{path}/**/*.py": ["B"] for path in expected_test_paths
-    }
-    assert _normalize_map(
-        generated_jeeves["tool"]["ruff"]["lint"]["per-file-ignores"]
-    ) == _normalize_map(expected_ruff_ignores)
-    assert generated_jeeves["tool"]["pytest"]["ini_options"] == {
-        "testpaths": expected_test_paths
-    }
-
-    dep_names = [
-        dep
-        for dep in generated_jeeves["tool"]["poetry"]["dependencies"].keys()
-        if dep != "python"
-    ]
-    auto_deptry_map = _derive_deptry_package_map(
-        temp_root / "python-jeeves", dep_names
+    expected_ruff_ignores = {f"{path}/**/*.py": ["B"] for path in expected_test_paths}
+    assert _normalize_map(generated_jeeves["tool"]["ruff"]["lint"]["per-file-ignores"]) == _normalize_map(
+        expected_ruff_ignores
     )
+    assert generated_jeeves["tool"]["pytest"]["ini_options"] == {"testpaths": expected_test_paths}
+
+    dep_names = [dep for dep in generated_jeeves["tool"]["poetry"]["dependencies"].keys() if dep != "python"]
+    auto_deptry_map = _derive_deptry_package_map(temp_root / "python-jeeves", dep_names)
     explicit_deptry_map = {
         "djangorestframework": "rest_framework",
         "imbalanced-learn": "imblearn",
@@ -177,14 +168,10 @@ def test_setup_generates_pyproject_from_config(tmp_path: Path, monkeypatch) -> N
     }
     expected_deptry_map = {**auto_deptry_map, **explicit_deptry_map}
     assert generated_jeeves["tool"]["deptry"]["package_module_name_map"] == expected_deptry_map
-    assert generated_jeeves["tool"]["deptry"]["per_rule_ignores"] == {
-        "DEP002": ["hypothesis"]
-    }
+    assert generated_jeeves["tool"]["deptry"]["per_rule_ignores"] == {"DEP002": ["hypothesis"]}
 
     assert generated_jeeves["tool"]["importlinter"]["root_packages"] == expected_main_sources
-    assert _normalize_contracts(
-        generated_jeeves["tool"]["importlinter"]["contracts"]
-    ) == _normalize_contracts(
+    assert _normalize_contracts(generated_jeeves["tool"]["importlinter"]["contracts"]) == _normalize_contracts(
         [
             {
                 "id": "layering",
@@ -202,9 +189,7 @@ def test_setup_generates_pyproject_from_config(tmp_path: Path, monkeypatch) -> N
     assert gen_coverage["report"]["skip_empty"] is True
     assert gen_coverage["run"]["branch"] is True
     assert gen_coverage["xml"]["output"] == "coverage.xml"
-    assert _normalize_list(gen_coverage["run"]["source"]) == _normalize_list(
-        expected_main_sources
-    )
+    assert _normalize_list(gen_coverage["run"]["source"]) == _normalize_list(expected_main_sources)
     expected_omit = sorted(
         {
             "tests/*",
@@ -215,13 +200,7 @@ def test_setup_generates_pyproject_from_config(tmp_path: Path, monkeypatch) -> N
     )
     assert _normalize_list(gen_coverage["run"]["omit"]) == _normalize_list(expected_omit)
 
-    gen_jeeves_deps = [
-        dep for dep in generated_jeeves["tool"]["poetry"]["dependencies"].keys() if dep != "python"
-    ]
+    gen_jeeves_deps = [dep for dep in generated_jeeves["tool"]["poetry"]["dependencies"].keys() if dep != "python"]
     existing_jeeves = _load_toml(workspace_root / "python-jeeves" / "pyproject.toml")
-    existing_jeeves_dep_names = [
-        _requirement_name(dep) for dep in existing_jeeves["project"]["dependencies"]
-    ]
-    assert _normalize_list(gen_jeeves_deps) == _normalize_list(
-        existing_jeeves_dep_names
-    )
+    existing_jeeves_dep_names = [_requirement_name(dep) for dep in existing_jeeves["project"]["dependencies"]]
+    assert _normalize_list(gen_jeeves_deps) == _normalize_list(existing_jeeves_dep_names)

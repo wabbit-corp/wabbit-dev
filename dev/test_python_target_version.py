@@ -23,4 +23,3 @@ def test_python_target_version_defaults_when_unbounded_or_invalid() -> None:
     python_target_version = _target_version_fn()
     assert python_target_version(None) == "py310"
     assert python_target_version("not-a-specifier") == "py310"
-

@@ -7,7 +7,6 @@ import hashlib
 import errno, os, stat
 from collections import defaultdict
 
-
 DRY_RUN = False
 
 
@@ -28,10 +27,7 @@ def delete_dir(path):
         def handleRemoveReadonly(func, path, exc):
             excvalue = exc[1]
             # print(func, path, exc, excvalue.errno, errno.EACCES)
-            if (
-                func in (os.rmdir, os.unlink, os.remove)
-                and excvalue.errno == errno.EACCES
-            ):
+            if func in (os.rmdir, os.unlink, os.remove) and excvalue.errno == errno.EACCES:
                 os.chmod(path, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)  # 0777
                 func(path)
             else:
@@ -117,9 +113,9 @@ def clean_maven_project(path):
     def go(dirpath):
         assert os.path.exists(dirpath) and os.path.isdir(dirpath)
 
-        likely_project = os.path.exists(
-            os.path.join(dirpath, "pom.xml")
-        ) or os.path.exists(os.path.join(dirpath, "src/main/java"))
+        likely_project = os.path.exists(os.path.join(dirpath, "pom.xml")) or os.path.exists(
+            os.path.join(dirpath, "src/main/java")
+        )
 
         if not likely_project:
             return
@@ -142,9 +138,9 @@ def clean_node_project(path):
     def go(dirpath):
         assert os.path.exists(dirpath) and os.path.isdir(dirpath)
 
-        likely_project = os.path.exists(
-            os.path.join(dirpath, "package.json")
-        ) or os.path.exists(os.path.join(dirpath, "node_modules"))
+        likely_project = os.path.exists(os.path.join(dirpath, "package.json")) or os.path.exists(
+            os.path.join(dirpath, "node_modules")
+        )
 
         if not likely_project:
             return

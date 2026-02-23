@@ -32,11 +32,7 @@ def save_uri(uri, path):
         try:
             response = requests.head(
                 uri,
-                headers={
-                    "If-Modified-Since": time.strftime(
-                        "%a, %d %b %Y %H:%M:%S GMT", time.gmtime(old_mtime)
-                    )
-                },
+                headers={"If-Modified-Since": time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(old_mtime))},
             )
 
             head_status = response.status_code
@@ -64,9 +60,7 @@ def save_uri(uri, path):
             print("Same ETag.")
             needs_download = False
 
-        if head_mtime == old_mtime or (
-            head_mtime is not None and head_mtime <= old_mtime
-        ):
+        if head_mtime == old_mtime or (head_mtime is not None and head_mtime <= old_mtime):
             print("Modified at an earlier date.")
             needs_download = False
 

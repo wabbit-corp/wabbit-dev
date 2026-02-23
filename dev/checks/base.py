@@ -63,9 +63,7 @@ class IssueType:
         # Error ids must be [A-Z0-9_]
         for c in self.id:
             if not (c.isupper() or c.isdigit() or c == "_"):
-                raise ValueError(
-                    f"IssueType ID must contain only uppercase letters, digits, or underscores: {self.id}"
-                )
+                raise ValueError(f"IssueType ID must contain only uppercase letters, digits, or underscores: {self.id}")
         # Register the issue type
         if self.id in _KNOWN_TYPES:
             raise ValueError(f"Duplicate IssueType ID: {self.id}")
@@ -113,9 +111,7 @@ class Issue:
             if self.location.path != path:
                 raise ValueError("Cannot change the path of an existing issue.")
             if line is not None:
-                self.location.lines = (
-                    self.location.lines or IntRangeSet([])
-                ) + IntRangeSet([line])
+                self.location.lines = (self.location.lines or IntRangeSet([])) + IntRangeSet([line])
         return self
 
 
@@ -134,10 +130,7 @@ class IssueList:
         if self.issues:
             if self.issues[-1] == issue:
                 return
-            if (
-                self.issues[-1].issue_type == issue.issue_type
-                and self.issues[-1].data == issue.data
-            ):
+            if self.issues[-1].issue_type == issue.issue_type and self.issues[-1].data == issue.data:
                 if self.issues[-1].location and issue.location:
                     if self.issues[-1].location.path != issue.location.path:
                         return
@@ -197,15 +190,11 @@ class Check(Module, abc.ABC):
     pass
 
 
-E_GENERIC_READ_ERROR = IssueType(
-    "E_GENERIC_READ_ERROR", "Could not read the file: {error} in {check_name}."
-)
+E_GENERIC_READ_ERROR = IssueType("E_GENERIC_READ_ERROR", "Could not read the file: {error} in {check_name}.")
 
 
 INLINE_CHECK_IGNORE_RE = re.compile(
-    r"(?:#|//|;|--|/\*|\*)\s*check:ignore\s+"
-    r"(?P<issue_id>\*|E_[A-Z0-9_]+)"
-    r"(?:\s+value=(?P<value>.*\S))?\s*$"
+    r"(?:#|//|;|--|/\*|\*)\s*check:ignore\s+" r"(?P<issue_id>\*|E_[A-Z0-9_]+)" r"(?:\s+value=(?P<value>.*\S))?\s*$"
 )
 
 
@@ -352,23 +341,17 @@ class FileContext:
             )
         except (IOError, OSError) as e:
             self.issues.append(
-                E_GENERIC_READ_ERROR.make(
-                    error=f"I/O error: {e}", check_name=self.check_name
-                ).at(self.path)
+                E_GENERIC_READ_ERROR.make(error=f"I/O error: {e}", check_name=self.check_name).at(self.path)
             )
             raise CheckFailedWithReportedIssues()
         except UnicodeDecodeError as e:
             self.issues.append(
-                E_GENERIC_READ_ERROR.make(
-                    error=f"UTF-8 decode error: {e}", check_name=self.check_name
-                ).at(self.path)
+                E_GENERIC_READ_ERROR.make(error=f"UTF-8 decode error: {e}", check_name=self.check_name).at(self.path)
             )
             raise CheckFailedWithReportedIssues()
         except Exception as e:
             self.issues.append(
-                E_GENERIC_READ_ERROR.make(
-                    error=f"Unexpected error: {e}", check_name=self.check_name
-                ).at(self.path)
+                E_GENERIC_READ_ERROR.make(error=f"Unexpected error: {e}", check_name=self.check_name).at(self.path)
             )
             raise CheckFailedWithReportedIssues()
 

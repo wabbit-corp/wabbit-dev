@@ -52,9 +52,7 @@ class Cashier:
     );
     """
     # Add index for faster FQN lookups (cleanup, capacity checks)
-    _CREATE_IDX_SQL = (
-        "CREATE INDEX IF NOT EXISTS idx_fqn_insert_time ON bucket(fqn, insert_time);"
-    )
+    _CREATE_IDX_SQL = "CREATE INDEX IF NOT EXISTS idx_fqn_insert_time ON bucket(fqn, insert_time);"
 
     _GET_SQL = "SELECT val, insert_time, specific_ttl FROM bucket WHERE key = ?"
     _DEL_SQL = "DELETE FROM bucket WHERE key = ?"
@@ -111,9 +109,7 @@ class Cashier:
         """Checks if connection exists, raises error if not."""
         if self._conn is None:
             # This might happen if init failed or after close() was called
-            raise sqlite3.Error(
-                f"Cashier database connection is not available for path: {self.path}"
-            )
+            raise sqlite3.Error(f"Cashier database connection is not available for path: {self.path}")
 
     def close(self):
         """Closes the underlying SQLite connection and unregisters."""
@@ -168,9 +164,7 @@ class Cashier:
             effective_ttl = default_ttl
             if stored_ttl is not None:
                 effective_ttl = stored_ttl
-                logger.debug(
-                    "Using specific stored TTL=%.1f for key %s", stored_ttl, key
-                )
+                logger.debug("Using specific stored TTL=%.1f for key %s", stored_ttl, key)
             elif default_ttl is not None:
                 logger.debug("Using default TTL=%.1f for key %s", default_ttl, key)
 
@@ -255,9 +249,7 @@ class Cashier:
                             to_remove,
                             fqn,
                         )
-                        self._conn.execute(
-                            self._REMOVE_OLDEST_FQN_SQL, (fqn, to_remove)
-                        )
+                        self._conn.execute(self._REMOVE_OLDEST_FQN_SQL, (fqn, to_remove))
 
 
 # --- Cashier Factory and Cleanup Registration ---
@@ -283,15 +275,11 @@ def get_cashier_instance(path: str) -> Cashier:
                 if not _cleanup_registered:
                     atexit.register(_cleanup_all_cashiers)
                     _cleanup_registered = True
-                    logger.debug(
-                        "atexit cleanup function registered for Cashier instances."
-                    )
+                    logger.debug("atexit cleanup function registered for Cashier instances.")
 
             except Exception as e:
                 # Log error during creation, but let exception propagate
-                logger.error(
-                    "Failed to create Cashier instance for path %s: %s", abs_path, e
-                )
+                logger.error("Failed to create Cashier instance for path %s: %s", abs_path, e)
                 raise  # Propagate creation error
 
         # Return the instance associated with the path
@@ -301,9 +289,7 @@ def get_cashier_instance(path: str) -> Cashier:
             return _global_cashier_registry[abs_path]
         else:
             # Should not happen if exception handling is correct, but as a safeguard:
-            raise RuntimeError(
-                f"Failed to get or create Cashier instance for {abs_path}"
-            )
+            raise RuntimeError(f"Failed to get or create Cashier instance for {abs_path}")
 
 
 def unregister_cashier_globally(abs_path: str):
@@ -356,9 +342,7 @@ def _build_cache_key(fqn, func_sig, args, kwargs, exclude_params):
         bound.apply_defaults()
     except TypeError as e:
         # Mismatched arguments passed to the function, let the original call fail later
-        logger.warning(
-            "Argument binding failed for %s: %s. Caching might be skipped.", fqn, e
-        )
+        logger.warning("Argument binding failed for %s: %s. Caching might be skipped.", fqn, e)
         # Create a pseudo-key to ensure cache miss, or re-raise?
         # Let's create a non-colliding key indicating failure.
         return f"invalid_args:{fqn}:{time.time()}"  # Ensures miss
@@ -488,16 +472,12 @@ def cache(
                 # Fall through to calling the function
 
             # 3. Cache miss or cache read error: Call the function
-            logger.debug(
-                "Cache miss or error for key=%s (fqn=%s). Calling function...", key, fqn
-            )
+            logger.debug("Cache miss or error for key=%s (fqn=%s). Calling function...", key, fqn)
 
             # --- Define inner function to handle execution and caching ---
             # This avoids duplicating the policy logic for sync/async paths
             def _execute_and_cache(result):
-                cache_directive = (
-                    None  # Default: use decorator ttl (via None passed to set)
-                )
+                cache_directive = None  # Default: use decorator ttl (via None passed to set)
                 specific_ttl_to_set = None
 
                 if ttl_policy_func:
@@ -521,9 +501,7 @@ def cache(
                     # Do not cache
                 else:
                     # Directive is None or a TTL number
-                    specific_ttl_to_set = (
-                        cache_directive  # Pass None or the number to set
-                    )
+                    specific_ttl_to_set = cache_directive  # Pass None or the number to set
                     try:
                         pickled_result = pickle.dumps(result, protocol=4)
                         # Call set, passing the specific TTL derived from the policy
@@ -629,9 +607,7 @@ def cache(
                 instance = get_cashier_instance(path=path)
                 instance.close()  # This handles unregistering etc.
             except Exception as e:
-                logger.error(
-                    "Failed to close cache for path=%s: %s", path, e, exc_info=True
-                )
+                logger.error("Failed to close cache for path=%s: %s", path, e, exc_info=True)
                 # Optionally re-raise
 
         # Attach helper methods to the wrapped function

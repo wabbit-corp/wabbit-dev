@@ -15,9 +15,7 @@ def _load_from_temp_root(tmp_path: Path, root_clj: str):
 
     tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "root.clj").write_text(root_clj, encoding="utf-8")
-    (tmp_path / "root.private.clj").write_text(
-        '(github-token "dummy")\n', encoding="utf-8"
-    )
+    (tmp_path / "root.private.clj").write_text('(github-token "dummy")\n', encoding="utf-8")
 
     cwd = os.getcwd()
     os.chdir(tmp_path)
@@ -33,9 +31,7 @@ def test_maven_version_variable_is_resolved_from_define(tmp_path: Path) -> None:
         "\n".join(
             [
                 '(define ktor-version "3.3.0")',
-                '('
-                'define-maven-library "ktor-client-core" '
-                '"io.ktor:ktor-client-core:${ktor-version}")',
+                "(" 'define-maven-library "ktor-client-core" ' '"io.ktor:ktor-client-core:${ktor-version}")',
                 "",
             ]
         ),
@@ -53,9 +49,7 @@ def test_undefined_maven_version_variable_fails_with_path_and_span(tmp_path: Pat
     with pytest.raises(MuDecodeError) as exc:
         _load_from_temp_root(
             tmp_path,
-            '('
-            'define-maven-library "ktor-client-core" '
-            '"io.ktor:ktor-client-core:${ktor-version}")\n',
+            "(" 'define-maven-library "ktor-client-core" ' '"io.ktor:ktor-client-core:${ktor-version}")\n',
         )
 
     assert exc.value.path == "root[0]"
@@ -71,9 +65,7 @@ def test_forward_maven_version_variable_reference_is_rejected(tmp_path: Path) ->
             tmp_path,
             "\n".join(
                 [
-                    '('
-                    'define-maven-library "ktor-client-core" '
-                    '"io.ktor:ktor-client-core:${ktor-version}")',
+                    "(" 'define-maven-library "ktor-client-core" ' '"io.ktor:ktor-client-core:${ktor-version}")',
                     '(define ktor-version "3.3.0")',
                     "",
                 ]
@@ -88,12 +80,10 @@ def test_module_typed_commands_are_loaded_and_applied(tmp_path: Path) -> None:
 
     config = _load_from_temp_root(
         tmp_path,
-        '(checks/stale-todo/age-days 30)\n',
+        "(checks/stale-todo/age-days 30)\n",
     )
 
-    stale_check = next(
-        module for module in config.modules.values() if isinstance(module, StaleCodeCheck)
-    )
+    stale_check = next(module for module in config.modules.values() if isinstance(module, StaleCodeCheck))
     assert stale_check.todo_age_days == 30
 
 
@@ -106,10 +96,10 @@ def test_dep_call_in_gradle_dependencies_is_resolved(tmp_path: Path) -> None:
             [
                 '(default-maven-project-group "one.wabbit")',
                 '(define-maven-library "kotlin-stdlib" "org.jetbrains.kotlin:kotlin-stdlib:2.0.0")',
-                '('
+                "("
                 'gradle "demo" '
                 ':version "0.1.0" '
-                ':features [(jvm-kotlin-library)] '
+                ":features [(jvm-kotlin-library)] "
                 ':dependencies [(dep "kotlin-stdlib" "api")])',
                 "",
             ]
@@ -138,11 +128,7 @@ def test_strict_kebab_case_rejects_legacy_python_keyword_names(tmp_path: Path) -
             tmp_path,
             "\n".join(
                 [
-                    '('
-                    'python "pkg" '
-                    ':version "0.1.0" '
-                    ':python_version ">=3.10" '
-                    ':dev_dependencies ["pytest"])',
+                    "(" 'python "pkg" ' ':version "0.1.0" ' ':python_version ">=3.10" ' ':dev_dependencies ["pytest"])',
                     "",
                 ]
             ),

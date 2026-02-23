@@ -220,9 +220,7 @@ class TestCashier:
 
         # Check count (using direct SQL for verification)
         with cashier._lock, cashier._conn:
-            count = cashier._conn.execute(
-                "SELECT COUNT(*) FROM bucket WHERE fqn = ?", (fqn,)
-            ).fetchone()[0]
+            count = cashier._conn.execute("SELECT COUNT(*) FROM bucket WHERE fqn = ?", (fqn,)).fetchone()[0]
             assert count == capacity
 
         # Verify only the *last* 'capacity' items remain
@@ -373,13 +371,9 @@ class TestCacheDecorator:
         assert execution_flags.get("sync_func_5_100", 0) == 1
 
         # Call 2 (hit, y changed but excluded)
-        assert (
-            cached_sync_func(5, y=200) == 105
-        )  # y=200 passed, but cache key ignores it, returns 105
+        assert cached_sync_func(5, y=200) == 105  # y=200 passed, but cache key ignores it, returns 105
         assert execution_flags.get("sync_func_5_100", 0) == 1  # No new execution flag
-        assert (
-            execution_flags.get("sync_func_5_200", 0) == 0
-        )  # Function with y=200 was NOT executed
+        assert execution_flags.get("sync_func_5_200", 0) == 0  # Function with y=200 was NOT executed
 
         # Call 3 (miss, x changed)
         assert cached_sync_func(6, y=100) == 106
@@ -431,9 +425,7 @@ class TestCacheDecorator:
 
     @pytest.mark.asyncio
     async def test_async_unpickleable_return(self, cache_path):
-        cached_async_unpickleable = cache(path=str(cache_path))(
-            async_unpickleable_return_func
-        )
+        cached_async_unpickleable = cache(path=str(cache_path))(async_unpickleable_return_func)
 
         # First call executes, fails during pickling/caching within run_in_executor
         # The error from run_in_executor should be propagated

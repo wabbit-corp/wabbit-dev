@@ -55,9 +55,7 @@ def test_format_poetry_dependency_with_extras_and_marker() -> None:
 def test_format_poetry_dependency_with_url_and_marker() -> None:
     format_dependency = _format_dependency_fn()
 
-    key, value = format_dependency(
-        'mypkg[feature] @ https://example.com/pkg.whl ; python_version >= "3.10"'
-    )
+    key, value = format_dependency('mypkg[feature] @ https://example.com/pkg.whl ; python_version >= "3.10"')
 
     assert key == "mypkg"
     parsed = _parse_dependency_entry(key, value)

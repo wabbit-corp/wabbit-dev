@@ -125,9 +125,7 @@ def test_pytest_and_unittest_both_run(tmp_path: Path, monkeypatch: pytest.Monkey
     assert labels == ["pytest", "unittest"]
 
 
-def test_subprocess_launch_failure_reports_tool_failed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_subprocess_launch_failure_reports_tool_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
     python_bin = tmp_path / ".venv" / "bin" / "python"
     _make_executable(python_bin)
@@ -142,9 +140,7 @@ def test_subprocess_launch_failure_reports_tool_failed(
     assert issues[0].issue_type.id == "E_PYQA_TOOL_FAILED"
 
 
-def test_run_subprocess_dedupes_identical_parsed_issues(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_subprocess_dedupes_identical_parsed_issues(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
     state = qa._get_state(tmp_path)
 

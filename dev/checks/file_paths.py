@@ -44,7 +44,6 @@ from dev.checks.base import (
     IssueList,
 )
 
-
 # Reasonable max filename length, adjust as needed
 DEFAULT_MAX_FILENAME_LENGTH = 100
 
@@ -65,9 +64,7 @@ class FilenameLengthCheck(FileCheck):
         actual_length = len(filename)
         if actual_length <= self.max_length:
             return []
-        ctx.add_issue(
-            E_FILENAME_TOO_LONG, max_length=self.max_length, actual_length=actual_length
-        )
+        ctx.add_issue(E_FILENAME_TOO_LONG, max_length=self.max_length, actual_length=actual_length)
 
 
 # Common sensitive filename patterns (lowercase for case-insensitive matching)
@@ -107,9 +104,7 @@ E_SENSITIVE_FILENAME = IssueType(
 class SensitiveFilenameCheck(FileCheck):
     """Checks filenames against a list of patterns suggesting sensitive content."""
 
-    def __init__(
-        self, sensitive_patterns: Set[str] = DEFAULT_SENSITIVE_FILENAME_PATTERNS
-    ):
+    def __init__(self, sensitive_patterns: Set[str] = DEFAULT_SENSITIVE_FILENAME_PATTERNS):
         self.sensitive_patterns_lower = {p.lower() for p in sensitive_patterns}
 
     def check(self, ctx: FileContext):
@@ -125,9 +120,7 @@ class SensitiveFilenameCheck(FileCheck):
             # Avoid overly broad matches like '.bak' matching 'playback.txt'
             # Check if filename contains pattern delimited by common separators or start/end
             # This is a heuristic, might need refinement based on common patterns
-            if re.search(
-                rf"(?:^|[\._\-/]){re.escape(pattern)}(?:$|[\._\-/])", filename_lower
-            ):
+            if re.search(rf"(?:^|[\._\-/]){re.escape(pattern)}(?:$|[\._\-/])", filename_lower):
                 ctx.add_issue(E_SENSITIVE_FILENAME, pattern=pattern)
                 # Optionally break after first match per file:
                 # break
@@ -166,12 +159,8 @@ DEFAULT_PROBLEMATIC_FILENAME_CHARS: Set[str] = set("*?:[]$&;|<>!`\"'()")
 E_PROBLEMATIC_FILENAME_CHARS = IssueType(
     "E_PROBLEMATIC_FILENAME_CHARS", "Filename contains problematic characters: {chars}."
 )
-E_NON_ASCII_FILENAME = IssueType(
-    "E_NON_ASCII_FILENAME", "Filename contains non-ASCII characters."
-)
-E_RESERVED_FILENAME = IssueType(
-    "E_RESERVED_FILENAME", "Filename is a reserved name on Windows."
-)
+E_NON_ASCII_FILENAME = IssueType("E_NON_ASCII_FILENAME", "Filename contains non-ASCII characters.")
+E_RESERVED_FILENAME = IssueType("E_RESERVED_FILENAME", "Filename is a reserved name on Windows.")
 
 
 class FilenamePropertiesCheck(FileCheck):
@@ -197,9 +186,7 @@ class FilenamePropertiesCheck(FileCheck):
         # Compile reserved names check (case-insensitive)
         self.reserved_pattern = (
             re.compile(
-                r"^("
-                + "|".join(re.escape(name) for name in WINDOWS_RESERVED_NAMES)
-                + r")(\..*)?$",
+                r"^(" + "|".join(re.escape(name) for name in WINDOWS_RESERVED_NAMES) + r")(\..*)?$",
                 re.IGNORECASE,
             )
             if self.check_reserved
@@ -210,9 +197,7 @@ class FilenamePropertiesCheck(FileCheck):
         filename = ctx.path.name
 
         # 1. Check for problematic characters
-        found_problematic = {
-            char for char in filename if char in self.problematic_chars
-        }
+        found_problematic = {char for char in filename if char in self.problematic_chars}
         if found_problematic:
             ctx.add_issue(
                 E_PROBLEMATIC_FILENAME_CHARS,
@@ -325,15 +310,9 @@ class SymlinkTargetCheck(FileCheck):
         if self.check_broken:
             # Use os.path.exists which handles links correctly without full resolve
             # Construct the absolute path to the target based on the link's dir
-            absolute_target = os.path.abspath(
-                os.path.join(os.path.dirname(str(ctx.path)), target_path_str)
-            )
-            if not os.path.lexists(
-                absolute_target
-            ):  # lexists checks link target without following
-                ctx.add_issue(
-                    E_SYMLINK_BROKEN, link_name=ctx.path.name, target=target_path_str
-                )
+            absolute_target = os.path.abspath(os.path.join(os.path.dirname(str(ctx.path)), target_path_str))
+            if not os.path.lexists(absolute_target):  # lexists checks link target without following
+                ctx.add_issue(E_SYMLINK_BROKEN, link_name=ctx.path.name, target=target_path_str)
             # More robust check: Check if path.resolve() works without error AND exists
             # try:
             #     resolved_target = path.resolve(strict=True) # strict=True raises error if broken

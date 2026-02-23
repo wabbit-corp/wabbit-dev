@@ -23,7 +23,6 @@ from enum import Enum
 
 from sentence_transformers import SentenceTransformer, util
 
-
 JSON = Any
 # type JSON = Union[str, int, float, bool, None, Dict[str, JSON], List[JSON]]
 # type JSONDict = Dict[str, JSON]
@@ -157,11 +156,8 @@ def deduplicate_queries(queries: List[Query]) -> List[Query]:
     return list(Query(query=k, relevance=v) for k, v in m.items())
 
 
-async def get_search_queries(
-    client: openai.AsyncClient, model: str, query: str, n_times: int = 3
-) -> List[Query]:
-    prompt = dedent(
-        """
+async def get_search_queries(client: openai.AsyncClient, model: str, query: str, n_times: int = 3) -> List[Query]:
+    prompt = dedent("""
     I am researching '{query}' and I want to search for papers related to this topic.
     Please provide me queries that I can use to search for papers.
     Provide between 5-10 queries in the following JSON format:
@@ -175,8 +171,7 @@ async def get_search_queries(
         relevance: number; // 0-100
     }
     ```
-    """
-    ).replace("{query}", query)
+    """).replace("{query}", query)
 
     queries: List[Query] = []
 
@@ -202,11 +197,8 @@ async def get_search_queries(
     return sorted(queries, key=lambda x: x.relevance, reverse=True)
 
 
-async def get_arxiv_search_queries(
-    client: openai.AsyncClient, model: str, query: str, n_times: int = 3
-) -> List[Query]:
-    prompt = dedent(
-        """
+async def get_arxiv_search_queries(client: openai.AsyncClient, model: str, query: str, n_times: int = 3) -> List[Query]:
+    prompt = dedent("""
     I am researching '{query}' (Research Topic) and I want to search for papers related to this topic.
 
     Please provide me SIMPLE and VERY SHORT search queries (1-3 words max) that I can use to search for papers.
@@ -221,8 +213,7 @@ async def get_arxiv_search_queries(
         relevance: number; // 0-100
     }
     ```
-    """
-    ).replace("{query}", query)
+    """).replace("{query}", query)
 
     queries: List[Query] = []
 
@@ -245,10 +236,7 @@ async def get_arxiv_search_queries(
     await asyncio.gather(*[run() for _ in range(n_times)])
 
     queries = deduplicate_queries(queries)
-    queries = [
-        Query(query=q.query.strip().replace("-", " "), relevance=q.relevance)
-        for q in queries
-    ]
+    queries = [Query(query=q.query.strip().replace("-", " "), relevance=q.relevance) for q in queries]
     return sorted(queries, key=lambda x: x.relevance, reverse=True)
 
 
@@ -269,9 +257,7 @@ LAST_SCRAPERBEE_REQ = 0
 CONCURRENT_SCRAPERBEE_REQ = 0
 
 
-async def fetch_url(
-    http_client: httpx.AsyncClient, url: str, scraperbee_key: str
-) -> str | None:
+async def fetch_url(http_client: httpx.AsyncClient, url: str, scraperbee_key: str) -> str | None:
     global LAST_SCRAPERBEE_REQ, CONCURRENT_SCRAPERBEE_REQ
     import random
 
@@ -304,9 +290,7 @@ async def fetch_url(
     logger = logging.getLogger(__name__)
 
     if response.status_code != 200:
-        logger.error(
-            f"Failed to fetch URL: {url}, Status Code: {response.status_code}, Response: {response.text}"
-        )
+        logger.error(f"Failed to fetch URL: {url}, Status Code: {response.status_code}, Response: {response.text}")
         return None
 
     html = response.text
@@ -386,9 +370,7 @@ async def main():
     parser.add_argument("query", help="The query to search for")
     args = parser.parse_args()
 
-    config = ApiConfig(
-        brave_key=brave_key, openai_key=openai_key, scraperbee_key=scraperbee_key
-    )
+    config = ApiConfig(brave_key=brave_key, openai_key=openai_key, scraperbee_key=scraperbee_key)
 
     await research(config, mode, args.query)
 
@@ -418,22 +400,16 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
         # '''.strip()
         logger.info(f"Query: {user_query}")
 
-        openai_client = openai.AsyncClient(
-            api_key=config.openai_key, http_client=http_client
-        )
+        openai_client = openai.AsyncClient(api_key=config.openai_key, http_client=http_client)
         arxiv_client = arxiv.Client()
         # semantic_scholar_client = semanticscholar.AsyncSemanticScholar()
 
         logger.info("Getting search queries")
 
         # query = "automated winding process for fractional slot concentrated inner rotor motors, specifically for  traction motor applications"
-        long_queries = await get_search_queries(
-            openai_client, mode.model, user_query, n_times=3
-        )
+        long_queries = await get_search_queries(openai_client, mode.model, user_query, n_times=3)
         logger.info(f"Longer Queries: {long_queries}")
-        short_queries = await get_arxiv_search_queries(
-            openai_client, mode.model, user_query, n_times=3
-        )
+        short_queries = await get_arxiv_search_queries(openai_client, mode.model, user_query, n_times=3)
         logger.info(f"Short Queries: {short_queries}")
 
         long_queries = long_queries[: mode.long_queries]
@@ -472,9 +448,7 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
                 arxiv_source = Source.Arxiv(source_id=source_id, raw=r)
                 # If there is already an arXiv source with the same id, skip
                 if any(
-                    x.arxiv_id == arxiv_source.arxiv_id
-                    for x in ALL_SOURCES.values()
-                    if isinstance(x, Source.Arxiv)
+                    x.arxiv_id == arxiv_source.arxiv_id for x in ALL_SOURCES.values() if isinstance(x, Source.Arxiv)
                 ):
                     continue
                 ALL_SOURCES[source_id] = arxiv_source
@@ -573,13 +547,9 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
                         result += f"\n      - {snippet}"
                 return result
 
-            papers_list_formatted = "\n".join(
-                [format_source(i, source) for i, source in enumerate(batch)]
-            )
+            papers_list_formatted = "\n".join([format_source(i, source) for i, source in enumerate(batch)])
 
-            prompt = (
-                dedent(
-                    """
+            prompt = dedent("""
                 I am researching <research_topic>{query}</research_topic> and I want to search for papers related to this topic.
                 I found the following papers/articles:
                 {papers}
@@ -604,11 +574,7 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
                     relevance: number;
                 }
                 ```
-                """
-                )
-                .replace("{query}", user_query)
-                .replace("{papers}", papers_list_formatted)
-            )
+                """).replace("{query}", user_query).replace("{papers}", papers_list_formatted)
 
             response = await openai_client.chat.completions.create(
                 model=mode.model,
@@ -658,10 +624,7 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
         #     batch = ALL_SOURCES_LIST[batch_start:batch_start+20]
 
         await asyncio.gather(
-            *[
-                process_batch(ALL_SOURCES_LIST[i : i + 20])
-                for i in range(0, len(ALL_SOURCES_LIST), 20)
-            ]
+            *[process_batch(ALL_SOURCES_LIST[i : i + 20]) for i in range(0, len(ALL_SOURCES_LIST), 20)]
         )
 
         SOURCE_SUMMARIES = {}
@@ -682,9 +645,7 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
                         logger.info("No URL")
                         return
 
-                    abstract = await fetch_url(
-                        http_client, source.url, config.scraperbee_key
-                    )
+                    abstract = await fetch_url(http_client, source.url, config.scraperbee_key)
 
                     if abstract is not None:
                         logger.info(f"Full Text: {abstract[:300]}")
@@ -693,9 +654,7 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
                     if abstract is not None:
                         logger.info(f"Abstract: {abstract[:300]}")
                     else:
-                        abstract = await fetch_url(
-                            http_client, source.url, config.scraperbee_key
-                        )
+                        abstract = await fetch_url(http_client, source.url, config.scraperbee_key)
                         if abstract is not None:
                             logger.info(f"Full Text: {abstract[:300]}")
 
@@ -703,41 +662,34 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
                     logger.info("No Abstract")
                     return
 
-                prompt = (
-                    dedent(
-                        """
+                prompt = dedent("""
                     Information Need/Query: <research_topic>{query}</research_topic>
 
                     I am researching the above topic and I want to understand the content of the following paper/article with respect to my research topic.
 
                     Here is the title of the paper/article: {title}
-                    """
-                    )
-                    .replace("{query}", user_query)
-                    .replace("{title}", source.title)
-                )
+                    """).replace("{query}", user_query).replace("{title}", source.title)
 
                 if len(abstract) > 50000:
                     abstract = abstract[:50000]
 
                 if abstract is not None:
-                    prompt += (
-                        f"\n\nText of the paper/article:\n{indent(abstract, '    ')}"
-                    )
+                    prompt += f"\n\nText of the paper/article:\n{indent(abstract, '    ')}"
                 if len(source.snippets) > 0:
                     prompt += "\n\nOther Snippets:\n"
                     for snippet in source.snippets:
                         prompt += f"\n{indent(snippet, '    ')}"
 
                 prompt += "\n\n"
-                prompt += "Please extract *ALL* information DIRECTLY RELEVANT to the query from this paper/article.".replace(
-                    "{query}", user_query
+                prompt += (
+                    "Please extract *ALL* information DIRECTLY RELEVANT to the query from this paper/article.".replace(
+                        "{query}", user_query
+                    )
                 )
 
                 prompt += "\n\n"
                 prompt += "Please provide your response in the following JSON format:"
-                prompt += dedent(
-                    """
+                prompt += dedent("""
                     ```typescript
                     interface Result {
                         // Does the paper/article contain *any* relevant information?
@@ -779,8 +731,7 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
                         specificity_score: number;
                     }
                     ```
-                    """
-                )
+                    """)
 
                 retry_count = 0
                 response = None
@@ -831,21 +782,13 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
 
                 relevance_flag = summary_json.get("relevance", None)
 
-                primary_relevance_summary = summary_json.get(
-                    "primary_relevant_information", None
-                )
+                primary_relevance_summary = summary_json.get("primary_relevant_information", None)
                 if primary_relevance_summary is None:
                     logger.info("No relevant information")
                     return
-                secondary_relevance_summary = summary_json.get(
-                    "secondary_relevant_information", None
-                )
-                tertiary_relevance_summary = summary_json.get(
-                    "tertiary_relevance_summary", None
-                )
-                peripheral_relevance_summary = summary_json.get(
-                    "peripheral_relevance_summary", None
-                )
+                secondary_relevance_summary = summary_json.get("secondary_relevant_information", None)
+                tertiary_relevance_summary = summary_json.get("tertiary_relevance_summary", None)
+                peripheral_relevance_summary = summary_json.get("peripheral_relevance_summary", None)
 
                 SOURCE_SUMMARIES[source_id] = summary
 
@@ -874,10 +817,7 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
                 f_summaries.flush()
 
             await asyncio.gather(
-                *[
-                    process_source(source_id, relevance)
-                    for source_id, relevance in SOURCE_RELEVANCE.items()
-                ]
+                *[process_source(source_id, relevance) for source_id, relevance in SOURCE_RELEVANCE.items()]
             )
 
 

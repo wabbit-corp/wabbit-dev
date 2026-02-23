@@ -3,9 +3,7 @@ from dev.config import Version
 import termcolor
 
 
-async def get_jitpack_info(
-    group: str, artifact: str, target_version: str | None
-) -> None:
+async def get_jitpack_info(group: str, artifact: str, target_version: str | None) -> None:
     async with JitPackAPI() as api:
         versions = await api.get_versions(group, artifact, "reload")
         refs = await api.get_refs(group, artifact)

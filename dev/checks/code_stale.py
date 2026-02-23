@@ -20,7 +20,6 @@ from mu.typed import mu_tag
 from dev.base import TypedConfigCommandRegistration
 from dev.checks.base import FileCheck, IssueType, IssueList, FileContext
 
-
 E_DEBUG_CODE = IssueType("E_DEBUG_CODE", "Possible leftover debug statement.")
 E_STALE_TODO = IssueType("E_STALE_TODO", "Stale TODO/FIXME comment.")
 

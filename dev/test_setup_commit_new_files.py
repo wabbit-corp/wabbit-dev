@@ -57,9 +57,7 @@ def test_commit_repo_changes_handles_added_files_without_a_path(monkeypatch) -> 
         ]
 
     monkeypatch.setattr(setup_module, "compute_repo_diffs", fake_compute_repo_diffs)
-    monkeypatch.setattr(
-        setup_module, "suggest_commit_name", lambda *_args, **_kwargs: "Add new file"
-    )
+    monkeypatch.setattr(setup_module, "suggest_commit_name", lambda *_args, **_kwargs: "Add new file")
     monkeypatch.setattr(
         setup_module,
         "ensure_semver_impact_line",
@@ -69,9 +67,7 @@ def test_commit_repo_changes_handles_added_files_without_a_path(monkeypatch) -> 
     repo = DummyRepo()
     project = SimpleNamespace(name="demo-project", quarantine=False)
 
-    setup_module.commit_repo_changes(
-        project, repo, openai_key=None, interactive=False, add_files=False
-    )
+    setup_module.commit_repo_changes(project, repo, openai_key=None, interactive=False, add_files=False)
 
     assert diff_calls == [False, True]
     assert repo.index.commits == ["Add new file\n\nSemver Impact: NONE"]

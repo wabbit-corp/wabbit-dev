@@ -109,9 +109,7 @@ def find_installed_jvms_win32():
         key_name = winreg.EnumKey(root_key, i)
 
         try:
-            key = winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\JavaSoft\JDK\\{}".format(key_name)
-            )
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\JavaSoft\JDK\\{}".format(key_name))
             value, regtype = winreg.QueryValueEx(key, "JavaHome")
         except WindowsError:
             continue
@@ -158,24 +156,12 @@ def find_installed_jvms_win32():
 
             for test_dir in os.listdir(os.path.join(drive, program_files_dir)):
                 if test_dir == "JetBrains":
-                    for jetbrains_dir in os.listdir(
-                        os.path.join(drive, program_files_dir, test_dir)
-                    ):
-                        if os.path.exists(
-                            os.path.join(
-                                drive, program_files_dir, test_dir, jetbrains_dir, "jbr"
-                            )
-                        ):
+                    for jetbrains_dir in os.listdir(os.path.join(drive, program_files_dir, test_dir)):
+                        if os.path.exists(os.path.join(drive, program_files_dir, test_dir, jetbrains_dir, "jbr")):
 
-                            java_home = os.path.join(
-                                drive, program_files_dir, test_dir, jetbrains_dir, "jbr"
-                            )
-                            has_java = os.path.exists(
-                                os.path.join(java_home, "bin", "java.exe")
-                            )
-                            has_javaw = os.path.exists(
-                                os.path.join(java_home, "bin", "javaw.exe")
-                            )
+                            java_home = os.path.join(drive, program_files_dir, test_dir, jetbrains_dir, "jbr")
+                            has_java = os.path.exists(os.path.join(java_home, "bin", "java.exe"))
+                            has_javaw = os.path.exists(os.path.join(java_home, "bin", "javaw.exe"))
 
                             if has_java and has_javaw:
                                 # print("Found Java installation in common location: {}".format(java_home))
@@ -187,18 +173,10 @@ def find_installed_jvms_win32():
                     java_home = os.path.join(drive, program_files_dir, test_dir)
 
                     if os.path.isdir(os.path.join(java_home, "bin")):
-                        has_java = os.path.exists(
-                            os.path.join(java_home, "bin", "java.exe")
-                        )
-                        has_javaw = os.path.exists(
-                            os.path.join(java_home, "bin", "javaw.exe")
-                        )
+                        has_java = os.path.exists(os.path.join(java_home, "bin", "java.exe"))
+                        has_javaw = os.path.exists(os.path.join(java_home, "bin", "javaw.exe"))
                         if has_java and has_javaw:
-                            print(
-                                "Found Java installation in common location: {}".format(
-                                    java_home
-                                )
-                            )
+                            print("Found Java installation in common location: {}".format(java_home))
                             FOUND_JVMS.add(os.path.abspath(java_home))
                     else:
                         for version_dir in os.listdir(java_home):
@@ -207,12 +185,8 @@ def find_installed_jvms_win32():
 
                             java_home = os.path.join(java_home, version_dir)
 
-                            has_java = os.path.exists(
-                                os.path.join(java_home, "bin", "java.exe")
-                            )
-                            has_javaw = os.path.exists(
-                                os.path.join(java_home, "bin", "javaw.exe")
-                            )
+                            has_java = os.path.exists(os.path.join(java_home, "bin", "java.exe"))
+                            has_javaw = os.path.exists(os.path.join(java_home, "bin", "javaw.exe"))
                             if has_java and has_javaw:
                                 # print("Found Java installation in common location: {}".format(java_home))
                                 FOUND_JVMS.add(os.path.abspath(java_home))
@@ -271,9 +245,7 @@ def parse_query(query):
     query = query.split(" ")
     query_version = query.pop(0)
 
-    assert re.match(r"^\d+(\.\d+)*\+?$", query_version), "Invalid version: {}".format(
-        query_version
-    )
+    assert re.match(r"^\d+(\.\d+)*\+?$", query_version), "Invalid version: {}".format(query_version)
 
     if "+" in query_version:
         query_version = query_version[:-1]
@@ -392,13 +364,9 @@ if __name__ == "__main__":
             else:
                 if min_cmp > 0:
                     # The closest version to the minimum is the best
-                    version_distance = version_signed_distance(
-                        min_version, java_version
-                    )
+                    version_distance = version_signed_distance(min_version, java_version)
                 else:
-                    version_distance = version_signed_distance(
-                        java_version, max_version
-                    )
+                    version_distance = version_signed_distance(java_version, max_version)
 
             # print("Distance score: {}".format(distance_score))
 
@@ -423,11 +391,7 @@ if __name__ == "__main__":
 
             all_scores = Scores(version_distance, keyword_score, order_score)
 
-            scored_jvms.append(
-                QueryResult(
-                    jvm_home, java_version, java_implementor, all_scores, [0, 0, 0]
-                )
-            )
+            scored_jvms.append(QueryResult(jvm_home, java_version, java_implementor, all_scores, [0, 0, 0]))
 
         # print(f"JVM Versions: {[qr.java_version for qr in scored_jvms]}")
         distance_scores = [qr.scores.version for qr in scored_jvms]
@@ -444,15 +408,9 @@ if __name__ == "__main__":
         # print(f"Keyword scores: {keyword_scores}")
 
         for i, qr in enumerate(scored_jvms):
-            qr.score_ranks = Scores(
-                distance_scores[i], keyword_scores[i], order_scores[i]
-            )
+            qr.score_ranks = Scores(distance_scores[i], keyword_scores[i], order_scores[i])
 
-        perfect_matches = [
-            qr
-            for qr in scored_jvms
-            if qr.scores.version is None and qr.scores.keywords == 0
-        ]
+        perfect_matches = [qr for qr in scored_jvms if qr.scores.version is None and qr.scores.keywords == 0]
 
         if len(perfect_matches) != 0:
             perfect_matches.sort(key=lambda qr: qr.score_ranks.order)

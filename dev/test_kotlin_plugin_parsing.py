@@ -13,9 +13,7 @@ def _load_from_temp_root(tmp_path: Path, root_clj: str):
 
     tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "root.clj").write_text(root_clj, encoding="utf-8")
-    (tmp_path / "root.private.clj").write_text(
-        '(github-token "dummy")\n', encoding="utf-8"
-    )
+    (tmp_path / "root.private.clj").write_text('(github-token "dummy")\n', encoding="utf-8")
 
     cwd = os.getcwd()
     os.chdir(tmp_path)

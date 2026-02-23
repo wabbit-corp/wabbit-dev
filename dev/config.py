@@ -44,9 +44,7 @@ class Version:
     is_dev: bool
 
     def __str__(self) -> str:
-        return f"{self.major}.{self.minor}.{self.patch}" + (
-            "+dev-SNAPSHOT" if self.is_dev else ""
-        )
+        return f"{self.major}.{self.minor}.{self.patch}" + ("+dev-SNAPSHOT" if self.is_dev else "")
 
     def next_major(self) -> "Version":
         return Version(None, self.major + 1, 0, 0, False)
@@ -60,9 +58,7 @@ class Version:
     @classmethod
     def parse_or_null(cls, version: Quoted[SStr] | str) -> Union["Version", None]:
         value = version.value.value if isinstance(version, Quoted) else version
-        match = re.fullmatch(
-            r"(\d+)\.(\d+)\.(\d+)(\+dev-SNAPSHOT)?", value.strip()
-        )
+        match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(\+dev-SNAPSHOT)?", value.strip())
         if not match:
             return None
 
@@ -72,9 +68,7 @@ class Version:
     @classmethod
     def parse(cls, version: Quoted[SStr] | str) -> "Version":
         result = cls.parse_or_null(version)
-        assert (
-            result is not None
-        ), f"Invalid version: {version.value.value if isinstance(version, Quoted) else version}"
+        assert result is not None, f"Invalid version: {version.value.value if isinstance(version, Quoted) else version}"
         return result
 
     def __lt__(self, other: "Version") -> bool:
@@ -165,9 +159,7 @@ def _normalize_jar_names(
 ) -> tuple[str | None, str | None, str | None]:
     provided = sum(value is not None for value in (jar, shaded, unshaded))
     if provided > 1:
-        raise ValueError(
-            "Provide only one of jarName/shadedJarName/unshadedJarName"
-        )
+        raise ValueError("Provide only one of jarName/shadedJarName/unshadedJarName")
 
     def _validate_jar_name(value: str | None, field_name: str) -> str:
         if not isinstance(value, str):
@@ -254,6 +246,7 @@ class JvmKotlinAgent(Feature):
             ShadowJar(jarName=self.shadedJarName),
         ]
 
+
 @dataclass
 class IntellijPlugin(Feature):
     __feature_name__ = "intellij-plugin"
@@ -288,9 +281,7 @@ class PythonImportLinter(Feature):
 
 def _merge_feature(existing: Feature, incoming: Feature) -> Feature:
     if type(existing) is not type(incoming):
-        raise TypeError(
-            f"Cannot merge features with different types: {type(existing)} vs {type(incoming)}"
-        )
+        raise TypeError(f"Cannot merge features with different types: {type(existing)} vs {type(incoming)}")
 
     if dataclasses.is_dataclass(existing):
         merged_kwargs: Dict[str, Any] = {}
@@ -309,10 +300,7 @@ def _merge_feature(existing: Feature, incoming: Feature) -> Feature:
         return type(existing)(**merged_kwargs)
 
     if existing != incoming:
-        raise ValueError(
-            f"Implied feature {type(existing).__feature_name__} conflicts: "
-            f"{existing} != {incoming}"
-        )
+        raise ValueError(f"Implied feature {type(existing).__feature_name__} conflicts: " f"{existing} != {incoming}")
     return existing
 
 
@@ -412,9 +400,7 @@ class Dependency:
         assert (
             isinstance(self.scope, str) or self.scope is None
         ), f"Expected GradleDependencyScope or None, got {type(self.scope)}"
-        assert isinstance(
-            self.target, DependencyTarget
-        ), f"Expected DependencyTarget, got {type(self.target)}"
+        assert isinstance(self.target, DependencyTarget), f"Expected DependencyTarget, got {type(self.target)}"
 
     def __str__(self):
         return self.as_string()
@@ -498,9 +484,7 @@ class Project(ABC):
     @property
     @abstractmethod
     def coarse_project_type(self) -> Optional[CoarseProjectType]:
-        raise NotImplementedError(
-            f"coarse_project_type not implemented for {type(self)}"
-        )
+        raise NotImplementedError(f"coarse_project_type not implemented for {type(self)}")
 
 
 @dataclass
@@ -579,9 +563,7 @@ class PythonProject(Project):
     def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
-            raise ValueError(
-                f"Path {path} is not contained in project path {self.path}"
-            )
+            raise ValueError(f"Path {path} is not contained in project path {self.path}")
 
         rel_path = path.relative_to(self.path)
         return None
@@ -608,9 +590,7 @@ class PurescriptProject(Project):
     def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
-            raise ValueError(
-                f"Path {path} is not contained in project path {self.path}"
-            )
+            raise ValueError(f"Path {path} is not contained in project path {self.path}")
 
         rel_path = path.relative_to(self.path)
         return None
@@ -637,9 +617,7 @@ class PremakeProject(Project):
     def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
-            raise ValueError(
-                f"Path {path} is not contained in project path {self.path}"
-            )
+            raise ValueError(f"Path {path} is not contained in project path {self.path}")
 
         rel_path = path.relative_to(self.path)
         return None
@@ -666,9 +644,7 @@ class DataProject(Project):
     def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
-            raise ValueError(
-                f"Path {path} is not contained in project path {self.path}"
-            )
+            raise ValueError(f"Path {path} is not contained in project path {self.path}")
 
         rel_path = path.relative_to(self.path)
         return None
@@ -714,9 +690,7 @@ class GradleProject(Project):
     def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
-            raise ValueError(
-                f"Path {path} is not contained in project path {self.path}"
-            )
+            raise ValueError(f"Path {path} is not contained in project path {self.path}")
 
         rel_path = path.relative_to(self.path)
 
@@ -760,13 +734,9 @@ def _coerce_jvm_version(value: int | str, field_name: str = "jvm_version") -> in
         elif re.fullmatch(r"\d+", normalized):
             version = int(normalized)
         else:
-            raise ValueError(
-                f"{field_name} must be an int or numeric string (e.g. 17, '21', '1.8')"
-            )
+            raise ValueError(f"{field_name} must be an int or numeric string (e.g. 17, '21', '1.8')")
     else:
-        raise ValueError(
-            f"{field_name} must be an int or numeric string, got {type(value)}"
-        )
+        raise ValueError(f"{field_name} must be an int or numeric string, got {type(value)}")
 
     if version < 8:
         raise ValueError(f"{field_name} must be >= 8")
@@ -786,21 +756,13 @@ class Config:
     default_git_user_email: str | None = None
     default_git_user_name: str | None = None
 
-    repositories: OrderedDict[str, MavenRepositoryDefinition] = dataclasses.field(
-        default_factory=OrderedDict
-    )
-    plugins: OrderedDict[str, KotlinPluginDefinition] = dataclasses.field(
-        default_factory=OrderedDict
-    )
-    libraries: OrderedDict[str, MavenLibraryDefinition] = dataclasses.field(
-        default_factory=OrderedDict
-    )
+    repositories: OrderedDict[str, MavenRepositoryDefinition] = dataclasses.field(default_factory=OrderedDict)
+    plugins: OrderedDict[str, KotlinPluginDefinition] = dataclasses.field(default_factory=OrderedDict)
+    libraries: OrderedDict[str, MavenLibraryDefinition] = dataclasses.field(default_factory=OrderedDict)
     library_groups: OrderedDict[str, List[str | Dependency | List[Dependency]]] = dataclasses.field(
         default_factory=OrderedDict
     )
-    defined_projects: OrderedDict[str, Project] = dataclasses.field(
-        default_factory=OrderedDict
-    )
+    defined_projects: OrderedDict[str, Project] = dataclasses.field(default_factory=OrderedDict)
 
     disabled_checks: List[Tuple[str, str]] = dataclasses.field(default_factory=list)
     ignored_findings: List[Tuple[str, str, str]] = dataclasses.field(default_factory=list)
@@ -836,10 +798,7 @@ def load_config() -> Config:
     for module in modules.values():
         for registration in module.register_typed_config_commands():
             if registration.command_type in module_command_handlers:
-                raise ValueError(
-                    f"Duplicate typed config command registration for "
-                    f"{registration.command_type}"
-                )
+                raise ValueError(f"Duplicate typed config command registration for " f"{registration.command_type}")
             module_command_handlers[registration.command_type] = registration.apply
             module_command_types.append(registration.command_type)
 
@@ -911,9 +870,7 @@ def load_config() -> Config:
                 raise ValueError(f"Undefined variable referenced in maven version: {value.name}")
             resolved = defines[value.name]
             if not isinstance(resolved, str):
-                raise ValueError(
-                    f"Maven version variable {value.name} must resolve to string, got {type(resolved)}"
-                )
+                raise ValueError(f"Maven version variable {value.name} must resolve to string, got {type(resolved)}")
             return resolved
         raise TypeError(f"Unknown maven version value: {value}")
 
@@ -1041,11 +998,7 @@ def load_config() -> Config:
 
     def verify_project(project: Project) -> None:
         def is_publishable(input_project: Project) -> bool:
-            return (
-                input_project.publish
-                and input_project.github_repo is not None
-                and (not input_project.quarantine)
-            )
+            return input_project.publish and input_project.github_repo is not None and (not input_project.quarantine)
 
         for dep in project.resolved_dependencies:
             if not isinstance(dep.target, ProjectDependencyTarget):
@@ -1069,9 +1022,7 @@ def load_config() -> Config:
             return
 
         if isinstance(command, config_typed.ChecksIgnoreFindingCommand):
-            config.ignored_findings.append(
-                (command.error_name, command.pathspec, command.value)
-            )
+            config.ignored_findings.append((command.error_name, command.pathspec, command.value))
             return
 
         if isinstance(command, config_typed.DefineCommand):
@@ -1112,9 +1063,7 @@ def load_config() -> Config:
 
         if isinstance(command, config_typed.JvmDefaultsCommand):
             if command.version is not None:
-                config.jvm_version = _coerce_jvm_version(
-                    command.version, "jvm-defaults.version"
-                )
+                config.jvm_version = _coerce_jvm_version(command.version, "jvm-defaults.version")
             return
 
         if isinstance(command, config_typed.PythonDefaultsCommand):
@@ -1138,9 +1087,7 @@ def load_config() -> Config:
             return
 
         if isinstance(command, config_typed.DefineMavenRepoCommand):
-            config.repositories[command.name] = MavenRepositoryDefinition(
-                command.name, command.url
-            )
+            config.repositories[command.name] = MavenRepositoryDefinition(command.name, command.url)
             return
 
         if isinstance(command, config_typed.DefineKotlinPluginCommand):
@@ -1149,9 +1096,7 @@ def load_config() -> Config:
             if ":" not in command.value:
                 raise ValueError(f"Invalid plugin definition: {command.value}")
             artifact_name, version = command.value.rsplit(":", 1)
-            config.plugins[command.name] = KotlinPluginDefinition(
-                artifact_name, version, command.repo
-            )
+            config.plugins[command.name] = KotlinPluginDefinition(artifact_name, version, command.repo)
             return
 
         if isinstance(command, config_typed.DefineMavenLibraryCommand):
@@ -1183,17 +1128,13 @@ def load_config() -> Config:
                     ):
                         normalized_children.append(child)
                         continue
-                    raise ValueError(
-                        f"Unknown library/group in group {command.name}: {child}"
-                    )
+                    raise ValueError(f"Unknown library/group in group {command.name}: {child}")
 
                 if isinstance(child, config_typed.DepCall):
                     normalized_children.append(parse_gradle_dependency(child))
                     continue
 
-                raise TypeError(
-                    f"Invalid group child in {command.name}: {child} ({type(child)})"
-                )
+                raise TypeError(f"Invalid group child in {command.name}: {child} ({type(child)})")
 
             config.library_groups[command.name] = normalized_children
             return
@@ -1284,9 +1225,7 @@ def load_config() -> Config:
                 coverage_fail_under=coverage_fail_under,
                 coverage_precision=coverage_precision,
                 coverage_branch=(
-                    command.coverage_branch
-                    if command.coverage_branch is not None
-                    else defaults.coverage_branch
+                    command.coverage_branch if command.coverage_branch is not None else defaults.coverage_branch
                 ),
                 coverage_show_missing=(
                     command.coverage_show_missing
@@ -1298,9 +1237,7 @@ def load_config() -> Config:
                     if command.coverage_skip_empty is not None
                     else defaults.coverage_skip_empty
                 ),
-                coverage_xml_output=(
-                    command.coverage_xml_output or defaults.coverage_xml_output
-                ),
+                coverage_xml_output=(command.coverage_xml_output or defaults.coverage_xml_output),
                 version=Version.parse(command.version) if command.version else None,
                 resolved_dependencies=[],
             )

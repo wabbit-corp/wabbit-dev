@@ -181,9 +181,7 @@ async def async_main() -> int:
                 case "info":
                     from dev.tasks.jitpack import get_jitpack_info
 
-                    await get_jitpack_info(
-                        args.group[0], args.artifact[0], args.version
-                    )
+                    await get_jitpack_info(args.group[0], args.artifact[0], args.version)
                 case _:
                     raise ValueError(f"Unknown subcommand: {args.subcommand}")
 
@@ -230,9 +228,7 @@ async def async_main() -> int:
             from dev.tasks.commit import commit
 
             project_name = args.project[0]
-            assert isinstance(
-                project_name, str
-            ), f"Expected str, got {type(project_name)}"
+            assert isinstance(project_name, str), f"Expected str, got {type(project_name)}"
             commit(project_name)
 
         case "push":
@@ -294,9 +290,7 @@ async def async_main() -> int:
                 #     print()
 
                 contributors = {
-                    k: v
-                    for k, v in contributors.items()
-                    if k.email != expected_email or k.name != expected_name
+                    k: v for k, v in contributors.items() if k.email != expected_email or k.name != expected_name
                 }
 
                 if contributors:

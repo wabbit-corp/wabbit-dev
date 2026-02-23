@@ -67,9 +67,7 @@ def _merge_spans(spans: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
     return merged
 
 
-def _compute_comment_spans(
-    text: str, style: Optional[CommentStyle]
-) -> List[Tuple[int, int]]:
+def _compute_comment_spans(text: str, style: Optional[CommentStyle]) -> List[Tuple[int, int]]:
     """
     Quote-aware scan to compute comment spans for a given file based on CommentStyle.
     Produces [start, end) ranges in *absolute* indices over the file text.
@@ -81,9 +79,7 @@ def _compute_comment_spans(
     if not style:
         return []
 
-    line_markers: Tuple[str, ...] = tuple(
-        sorted(style.line_markers, key=len, reverse=True)
-    )
+    line_markers: Tuple[str, ...] = tuple(sorted(style.line_markers, key=len, reverse=True))
     block_markers: Tuple[Tuple[str, str], ...] = tuple(
         sorted(style.block_markers, key=lambda p: len(p[0]), reverse=True)
     )
@@ -180,9 +176,7 @@ def _compute_comment_spans(
                 if eol == -1:
                     eol = n
                 else:
-                    eol = (
-                        eol + 1
-                    )  # include newline so subsequent line offsets are natural
+                    eol = eol + 1  # include newline so subsequent line offsets are natural
                 spans.append((i, eol))
                 i = eol
                 opened = True
@@ -299,9 +293,7 @@ INTERNAL_HOSTNAME_REGEX: Pattern[str] = re.compile(
 )
 
 
-E_HARDCODED_ABSOLUTE_PATH = IssueType(
-    "E_HARDCODED_ABSOLUTE_PATH", "Found hardcoded absolute path: '{path_found}'."
-)
+E_HARDCODED_ABSOLUTE_PATH = IssueType("E_HARDCODED_ABSOLUTE_PATH", "Found hardcoded absolute path: '{path_found}'.")
 
 
 class HardcodedAbsolutePathCheck(FileCheck):
@@ -324,11 +316,7 @@ class HardcodedAbsolutePathCheck(FileCheck):
         ps, pe = path_match.start(), path_match.end()
         for um in self.url_regex.finditer(line):
             us, ue = um.start(), um.end()
-            if (us <= ps <= ue) or (
-                ps == ue
-                and pe <= ue + 2
-                and line[ue:pe] in {"'", '"', ")", "]", ">", ";", ","}
-            ):
+            if (us <= ps <= ue) or (ps == ue and pe <= ue + 2 and line[ue:pe] in {"'", '"', ")", "]", ">", ";", ","}):
                 # file:// is intentionally considered an absolute path issue
                 if um.group(0).lower().startswith("file://"):
                     return False
@@ -371,12 +359,8 @@ class HardcodedAbsolutePathCheck(FileCheck):
                     continue
 
                 # Further filter: avoid very short paths like "/" unless it's clearly problematic
-                if (
-                    len(found_path) < 3 and found_path == "/"
-                ):  # Example: avoid flagging single "/"
-                    if not re.search(
-                        r"\s/\s", line
-                    ):  # only flag "/" if it is standalone, not e.g. "foo / bar"
+                if len(found_path) < 3 and found_path == "/":  # Example: avoid flagging single "/"
+                    if not re.search(r"\s/\s", line):  # only flag "/" if it is standalone, not e.g. "foo / bar"
                         continue
 
                 # Avoid flagging paths within URLs (e.g. example.com/some/path)
@@ -385,18 +369,14 @@ class HardcodedAbsolutePathCheck(FileCheck):
 
                 # Avoid flagging if it is part of an XML namespace or similar constructs
                 if "xmlns:" in line or " xlink:" in line or " DTD " in line:
-                    if "/" in found_path and not found_path.startswith(
-                        "/"
-                    ):  # e.g. schema/foo
+                    if "/" in found_path and not found_path.startswith("/"):  # e.g. schema/foo
                         continue
 
                 # Avoid flagging markdown link definitions like `[text](/abs/path)` if path is clearly a link target
                 if re.search(rf"\[[^\]]+\]\({re.escape(found_path)}\)", line):
                     continue
 
-                ctx.add_issue(
-                    E_HARDCODED_ABSOLUTE_PATH, path_found=found_path, line=line_number
-                )
+                ctx.add_issue(E_HARDCODED_ABSOLUTE_PATH, path_found=found_path, line=line_number)
 
             offset += len(line)
 
@@ -499,9 +479,9 @@ class HardcodedUrlCheck(FileCheck):
                 # Avoid flagging URLs that are part of typical documentation or link markdowns
                 # if it's clearly a markdown link, it's often intentional.
                 # e.g. [text](http://example.com) or <http://example.com>
-                if re.search(
-                    rf"\[[^\]]+\]\({re.escape(url_found)}\)", line
-                ) or re.search(rf"<({re.escape(url_found)})>", line):
+                if re.search(rf"\[[^\]]+\]\({re.escape(url_found)}\)", line) or re.search(
+                    rf"<({re.escape(url_found)})>", line
+                ):
                     # Could add more context checks here, e.g., if line is purely a comment
                     # For now, if it's a markdown link, assume it's for documentation
                     pass  # Still report, but one might want to filter these based on severity or context
@@ -533,12 +513,8 @@ class HardcodedInternalHostnameIpCheck(FileCheck):
         self.ip_regex = ip_regex
         self.hostname_regex = hostname_regex
         self.url_regex = url_regex  # To avoid flagging hostnames/IPs that are part of a public URL's path
-        self.allowed_ips = (
-            allowed_ips if allowed_ips else {"127.0.0.1", "::1"}
-        )  # localhost is often fine
-        self.allowed_hostnames = (
-            allowed_hostnames if allowed_hostnames else {"localhost"}
-        )
+        self.allowed_ips = allowed_ips if allowed_ips else {"127.0.0.1", "::1"}  # localhost is often fine
+        self.allowed_hostnames = allowed_hostnames if allowed_hostnames else {"localhost"}
 
     def _is_part_of_url_path(self, found_item: str, line: str) -> bool:
         """Checks if the found item is part of a path in a non-internal URL"""
@@ -600,9 +576,7 @@ class HardcodedInternalHostnameIpCheck(FileCheck):
                     continue
 
                 # Avoid flagging IPs in common documentation/example patterns
-                if "example" in line.lower() and (
-                    "ip address" in line.lower() or "e.g." in line.lower()
-                ):
+                if "example" in line.lower() and ("ip address" in line.lower() or "e.g." in line.lower()):
                     continue
 
                 ctx.add_issue(
@@ -620,9 +594,7 @@ class HardcodedInternalHostnameIpCheck(FileCheck):
                     continue
 
                     # Avoid flagging hostnames in common documentation/example patterns
-                if "example" in line.lower() and (
-                    "hostname" in line.lower() or "e.g." in line.lower()
-                ):
+                if "example" in line.lower() and ("hostname" in line.lower() or "e.g." in line.lower()):
                     continue
                 # Avoid flagging if it's part of an email address
                 if "@" + hostname_found in line:
