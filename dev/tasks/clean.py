@@ -5,49 +5,59 @@ import os
 import shutil
 import stat
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import dev.io
 from dev.config import GradleProject, PythonProject, load_config
 
 DRY_RUN = False
+PathLikeStr = str | os.PathLike[str]
 
 
-def delete_dir(path):
-    import os
+def delete_dir(path: PathLikeStr) -> None:
+    target = os.fspath(path)
 
-    if not os.path.exists(path):
+    if not os.path.exists(target):
         return
 
-    if not os.path.isdir(path):
-        print(f"Not a directory: {path}")
+    if not os.path.isdir(target):
+        print(f"Not a directory: {target}")
         return
 
     if DRY_RUN:
-        print(f"Deleting {path}")
+        print(f"Deleting {target}")
     else:
 
-        def handleRemoveReadonly(func, path, exc):
+        def handle_remove_readonly(
+            func: Callable[[str], object],
+            failed_path: str,
+            exc: tuple[type[BaseException], BaseException, object],
+        ) -> None:
             excvalue = exc[1]
             # print(func, path, exc, excvalue.errno, errno.EACCES)
-            if func in (os.rmdir, os.unlink, os.remove) and excvalue.errno == errno.EACCES:
-                os.chmod(path, stat.S_IRWXU)
-                func(path)
+            if (
+                func in (os.rmdir, os.unlink, os.remove)
+                and isinstance(excvalue, OSError)
+                and excvalue.errno == errno.EACCES
+            ):
+                os.chmod(failed_path, stat.S_IRWXU)
+                func(failed_path)
             else:
-                raise
+                raise excvalue
 
         try:
-            shutil.rmtree(path, ignore_errors=False, onerror=handleRemoveReadonly)
+            shutil.rmtree(target, ignore_errors=False, onerror=handle_remove_readonly)
         except OSError:
-            print(f"Please delete {path} manually")
+            print(f"Please delete {target} manually")
             return
-        print(f"Deleted {path}")
+        print(f"Deleted {target}")
 
 
-def clean_sbt_project(path):
+def clean_sbt_project(path: PathLikeStr) -> None:
     # print("Cleaning %s" % path)
 
-    def go(dirpath):
+    def go(dirpath: str) -> None:
         assert os.path.exists(dirpath) and os.path.isdir(dirpath)
 
         likely_project = (
@@ -76,13 +86,13 @@ def clean_sbt_project(path):
 
             go(dirpath1)
 
-    go(path)
+    go(os.fspath(path))
 
 
-def clean_gradle_project(path):
+def clean_gradle_project(path: PathLikeStr) -> None:
     # print("Cleaning %s" % path)
 
-    def go(dirpath):
+    def go(dirpath: str) -> None:
         assert os.path.exists(dirpath) and os.path.isdir(dirpath)
 
         likely_project = (
@@ -107,13 +117,13 @@ def clean_gradle_project(path):
 
             go(dirpath1)
 
-    go(path)
+    go(os.fspath(path))
 
 
-def clean_maven_project(path):
+def clean_maven_project(path: PathLikeStr) -> None:
     # print("Cleaning %s" % path)
 
-    def go(dirpath):
+    def go(dirpath: str) -> None:
         assert os.path.exists(dirpath) and os.path.isdir(dirpath)
 
         likely_project = os.path.exists(os.path.join(dirpath, "pom.xml")) or os.path.exists(
@@ -132,13 +142,13 @@ def clean_maven_project(path):
 
             go(dirpath1)
 
-    go(path)
+    go(os.fspath(path))
 
 
-def clean_node_project(path):
+def clean_node_project(path: PathLikeStr) -> None:
     # print("Cleaning %s" % path)
 
-    def go(dirpath):
+    def go(dirpath: str) -> None:
         assert os.path.exists(dirpath) and os.path.isdir(dirpath)
 
         likely_project = os.path.exists(os.path.join(dirpath, "package.json")) or os.path.exists(
@@ -157,10 +167,10 @@ def clean_node_project(path):
 
             go(dirpath1)
 
-    go(path)
+    go(os.fspath(path))
 
 
-def clean(paths):
+def clean_paths(paths: list[str]) -> None:
     for path in paths:
         for dirpath, _dirnames, filenames in os.walk(path):
             if "build.sbt" in filenames:
@@ -206,7 +216,7 @@ def clean(paths):
 
 if __name__ == "__main__":
     if sys.argv[1:]:
-        clean(sys.argv[1:])
+        clean_paths(sys.argv[1:])
     else:
         print(f"Usage: {sys.argv[0]} <folder> [<folder>...]")
 

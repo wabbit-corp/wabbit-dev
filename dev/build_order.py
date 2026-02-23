@@ -6,8 +6,10 @@ Subproject Dependency Graph & Topological Sort
 
 from collections import defaultdict, deque
 
+from dev.config import Project
 
-def build_dependency_graph(projects) -> tuple[dict[str, list[str]], dict[str, int]]:
+
+def build_dependency_graph(projects: dict[str, Project]) -> tuple[dict[str, list[str]], dict[str, int]]:
     """
     Creates adjacency lists for subproject dependencies {project: [depends_on...]}.
     Returns (graph, in_degs).
@@ -29,7 +31,7 @@ def build_dependency_graph(projects) -> tuple[dict[str, list[str]], dict[str, in
     return dict(graph), in_degs
 
 
-def toposort_projects(projects, target_project=None):
+def toposort_projects(projects: dict[str, Project], target_project: str | None = None) -> list[str]:
     """
     Return a list of project names in topological order. If target_project is not None,
     we only include the subgraph needed for that project.
@@ -43,8 +45,8 @@ def toposort_projects(projects, target_project=None):
             for c in children:
                 rev[c].append(src)
 
-        needed = set()
-        queue = deque([target_project])
+        needed: set[str] = set()
+        queue: deque[str] = deque([target_project])
         while queue:
             cur = queue.popleft()
             if cur in needed:
@@ -55,8 +57,8 @@ def toposort_projects(projects, target_project=None):
                     queue.append(p)
 
         # Filter
-        sub_graph = {}
-        sub_in = {}
+        sub_graph: dict[str, list[str]] = {}
+        sub_in: dict[str, int] = {}
         for p in needed:
             sub_in[p] = 0
         for p in needed:
@@ -68,7 +70,7 @@ def toposort_projects(projects, target_project=None):
 
     # Standard Kahn's algorithm
     queue = deque([p for p, deg in in_degs.items() if deg == 0])
-    order = []
+    order: list[str] = []
     while queue:
         cur = queue.popleft()
         order.append(cur)

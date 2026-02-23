@@ -62,6 +62,11 @@
 - Harden security/static-analysis findings by replacing MD5 with SHA-256 cache key hashing, switching XML parsing to `defusedxml`, and tightening chmod fallback permissions to owner-only.
 - Stabilize test collection by rewriting `dev/test_maven.py` as deterministic pytest tests and renaming the generator helper in `dev/test_workflow.py` to avoid pytest yield-test collection errors.
 - Add runtime/test dependencies for the updated QA pipeline (`defusedxml`, `pytest-asyncio`, `coverage`) and align requirements manifests.
-- Resolve Python QA deptry backlog by aligning declared dependencies with actual imports, adding deptry package-module mappings, and narrowing deptry scope for test-only/build-only files.
-- Improve mypy signal by typing message helpers, fixing check-runner type flow in `dev/tasks/check.py`, and excluding local test/build entrypoints from strict mypy scanning.
+- Resolve Python QA deptry backlog by aligning declared dependencies with actual imports and adding deptry package-module mappings.
+- Improve mypy signal by typing message helpers and fixing check-runner type flow in `dev/tasks/check.py`.
 - Lower repository coverage fail-under threshold to `0` so coverage report/XML gates do not block while branch/line coverage debt is still being addressed.
+- Add full type annotations to legacy clean task helpers in `dev/tasks/clean.py`, remove duplicate `clean` symbol shadowing, and keep CLI path-clean behavior under `clean_paths`.
+- Add explicit typing to dependency-toposort helpers in `dev/build_order.py` and tighten publish-flow typing in `dev/tasks/publish.py` (optional defaults, commit-message normalization, and project-type narrowing) to reduce strict mypy failures without changing publish behavior.
+- Complete a second publish-flow typing pass (`Timer.__exit__`, nullable GitHub repo narrowing, explicit fallback return) and document the intentionally scoped ignore on the untyped cache decorator integration.
+- Add a repo-local strict `mypy.ini` (matching prior strict defaults) so typed checks no longer depend on machine-specific fallback config paths.
+- Remove repo-specific hardcoded QA paths/excludes from shared check runners by switching to generic defaults, target-repo config precedence, and optional `PYTHON_QA_*` environment overrides for fallback config roots and tool-specific excludes.

@@ -19,7 +19,7 @@ def _make_executable(path: Path, content: str = "#!/bin/sh\nexit 0\n") -> None:
     path.chmod(path.stat().st_mode | 0o111)
 
 
-def test_target_first_fallback_configs(tmp_path: Path) -> None:
+def test_target_first_fallback_configs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
     (tmp_path / "mypy.ini").write_text("[mypy]\n", encoding="utf-8")
     (tmp_path / "pyrightconfig.json").write_text("{}\n", encoding="utf-8")
@@ -32,10 +32,32 @@ def test_target_first_fallback_configs(tmp_path: Path) -> None:
     qa.reset_all_python_qa_state()
     other = tmp_path / "other"
     other.mkdir()
+    defaults_root = tmp_path / "defaults"
+    defaults_root.mkdir()
+    (defaults_root / "pyproject.toml").write_text("[project]\nname='defaults'\n", encoding="utf-8")
+    (defaults_root / "mypy.ini").write_text("[mypy]\nstrict=true\n", encoding="utf-8")
+    (defaults_root / "pyrightconfig.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("PYTHON_QA_DEFAULTS_ROOT", str(defaults_root))
     state_fallback = qa._get_state(other)
-    assert state_fallback.pyproject_config == qa.LEGACY_FALLBACK_PYPROJECT
-    assert state_fallback.mypy_config == qa.LEGACY_FALLBACK_MYPY
-    assert state_fallback.pyright_config == qa.LEGACY_FALLBACK_PYRIGHT
+    assert state_fallback.pyproject_config == defaults_root / "pyproject.toml"
+    assert state_fallback.mypy_config == defaults_root / "mypy.ini"
+    assert state_fallback.pyright_config == defaults_root / "pyrightconfig.json"
+
+
+def test_target_first_fallback_discovered_from_workspace(tmp_path: Path) -> None:
+    defaults_root = tmp_path / "shared-defaults"
+    defaults_root.mkdir()
+    (defaults_root / "pyproject.toml").write_text("[project]\nname='defaults'\n", encoding="utf-8")
+    (defaults_root / "mypy.ini").write_text("[mypy]\nstrict=true\n", encoding="utf-8")
+    (defaults_root / "pyrightconfig.json").write_text("{}\n", encoding="utf-8")
+
+    target_repo = tmp_path / "target"
+    target_repo.mkdir()
+
+    state = qa._get_state(target_repo)
+    assert state.pyproject_config == defaults_root / "pyproject.toml"
+    assert state.mypy_config == defaults_root / "mypy.ini"
+    assert state.pyright_config == defaults_root / "pyrightconfig.json"
 
 
 def test_coverage_report_skips_when_pytest_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

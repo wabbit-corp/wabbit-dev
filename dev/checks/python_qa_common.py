@@ -20,11 +20,7 @@ else:
 from dev.checks.base import Issue, IssueType, Severity
 from dev.config import Project, PythonProject
 
-# Keep fallback defaults for now as requested.
-LEGACY_DEFAULT_ROOT = Path("/Users/wabbit/ws/datatron/python-jeeves")
-LEGACY_FALLBACK_PYPROJECT = LEGACY_DEFAULT_ROOT / "pyproject.toml"
-LEGACY_FALLBACK_MYPY = LEGACY_DEFAULT_ROOT / "mypy.ini"
-LEGACY_FALLBACK_PYRIGHT = LEGACY_DEFAULT_ROOT / "pyrightconfig.json"
+DEFAULT_EXCLUDE_CSV = ".venv,.git,__pycache__,.mypy_cache,.pytest_cache"
 
 ANSI_ESCAPE_RE = re.compile(r"\x1B(?:\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1B\\))")
 
@@ -584,7 +580,7 @@ def issue_location(
     )
 
 
-# Parsers ported from python-jeeves/check.py
+# Parsers ported from the legacy checker implementation.
 
 
 def parse_ruff_issues(log_text: str) -> Sequence[RuffIssue | RuffFailure]:
@@ -2125,12 +2121,91 @@ def _resolve_existing(path: Path) -> Path | None:
     return None
 
 
-def _resolve_target_first(repo_root: Path, filename: str, fallback: Path) -> Path | None:
+def _resolve_existing_dir(path: Path) -> Path | None:
+    if path.is_dir():
+        return path
+    return None
+
+
+def _resolve_target_first(repo_root: Path, filename: str, fallback: Path | None) -> Path | None:
     target = repo_root / filename
     resolved_target = _resolve_existing(target)
     if resolved_target is not None:
         return resolved_target
+    if fallback is None:
+        return None
     return _resolve_existing(fallback)
+
+
+def _parse_csv_items(value: str | None) -> list[str]:
+    if value is None:
+        return []
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _dedupe_preserving_order(values: Sequence[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _read_simple_checkignore_paths(repo_root: Path) -> list[str]:
+    checkignore = repo_root / ".checkignore"
+    if not checkignore.is_file():
+        return []
+    try:
+        lines = checkignore.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+
+    paths: list[str] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("!"):
+            continue
+        if any(ch in line for ch in "*?[]"):
+            continue
+        normalized = line.strip("/")
+        if normalized:
+            paths.append(normalized)
+    return paths
+
+
+def _resolve_default_config_file(
+    env: dict[str, str],
+    explicit_env_key: str,
+    defaults_root: Path | None,
+    filename: str,
+) -> Path | None:
+    explicit = env.get(explicit_env_key)
+    if explicit:
+        return _resolve_existing(Path(explicit).expanduser())
+    if defaults_root is not None:
+        return _resolve_existing(defaults_root / filename)
+    return None
+
+
+def _discover_defaults_root(repo_root: Path) -> Path | None:
+    workspace_root = repo_root.parent
+    try:
+        candidates = sorted(workspace_root.iterdir())
+    except OSError:
+        return None
+
+    for candidate in candidates:
+        if not candidate.is_dir() or candidate == repo_root:
+            continue
+        has_pyproject = (candidate / "pyproject.toml").is_file()
+        has_mypy = (candidate / "mypy.ini").is_file()
+        has_pyright = (candidate / "pyrightconfig.json").is_file()
+        if has_pyproject and has_mypy and has_pyright:
+            return candidate
+    return None
 
 
 def _read_coverage_fail_under_from_pyproject(pyproject_path: Path | None) -> int | None:
@@ -2188,22 +2263,50 @@ def _new_state(repo_root: Path) -> PythonQaRepoState:
     venv = repo_root / ".venv"
     python = venv / "bin" / "python"
     bin_dir = venv / "bin"
+    defaults_root = (
+        _resolve_existing_dir(Path(env["PYTHON_QA_DEFAULTS_ROOT"]).expanduser())
+        if env.get("PYTHON_QA_DEFAULTS_ROOT")
+        else None
+    )
+    if defaults_root is None:
+        defaults_root = _discover_defaults_root(repo_root)
+    pyproject_fallback = _resolve_default_config_file(
+        env,
+        "PYTHON_QA_DEFAULT_PYPROJECT",
+        defaults_root,
+        "pyproject.toml",
+    )
+    mypy_fallback = _resolve_default_config_file(
+        env,
+        "PYTHON_QA_DEFAULT_MYPY",
+        defaults_root,
+        "mypy.ini",
+    )
+    pyright_fallback = _resolve_default_config_file(
+        env,
+        "PYTHON_QA_DEFAULT_PYRIGHT",
+        defaults_root,
+        "pyrightconfig.json",
+    )
 
     pyproject_config = _resolve_target_first(
         repo_root,
         "pyproject.toml",
-        LEGACY_FALLBACK_PYPROJECT,
+        pyproject_fallback,
     )
-    mypy_config = _resolve_target_first(repo_root, "mypy.ini", LEGACY_FALLBACK_MYPY)
+    mypy_config = _resolve_target_first(repo_root, "mypy.ini", mypy_fallback)
     pyright_config = _resolve_target_first(
         repo_root,
         "pyrightconfig.json",
-        LEGACY_FALLBACK_PYRIGHT,
+        pyright_fallback,
     )
 
     fail_under = env_int("COVERAGE_FAIL_UNDER", -1)
     if fail_under < 0:
         fail_under = _read_coverage_fail_under_from_pyproject(pyproject_config) or 15
+    configured_excludes = _parse_csv_items(env.get("PYTHON_QA_EXCLUDE_CSV", DEFAULT_EXCLUDE_CSV))
+    checkignore_excludes = _read_simple_checkignore_paths(repo_root)
+    combined_excludes = _dedupe_preserving_order(configured_excludes + checkignore_excludes)
 
     state = PythonQaRepoState(
         root=repo_root,
@@ -2226,7 +2329,7 @@ def _new_state(repo_root: Path) -> PythonQaRepoState:
         use_json=env_flag("USE_JSON_OUTPUT", "1"),
         semgrep_config=env.get("SEMGREP_CONFIG", "p/python"),
         diff_cover_compare_branch=env.get("DIFF_COVER_COMPARE_BRANCH") or None,
-        exclude_csv=".venv,.git,__pycache__,.mypy_cache,.pytest_cache,data,datasets,tmp-test",
+        exclude_csv=",".join(combined_excludes),
         log_dir=Path(tempfile.mkdtemp(prefix="qa")),
     )
     return state
@@ -2520,7 +2623,14 @@ def run_mypy(repo_root: Path, project: Project | None) -> list[Issue]:
         if missing is not None:
             return missing
 
-        args = [str(tool), "--exclude", r"(^|/)(tmp-test/|dev/test_.*\.py|scripts/build_executable\.py|setup\.py$)"]
+        args = [str(tool)]
+        exclude_paths = _parse_csv_items(state.exclude_csv)
+        exclude_patterns = [rf"(^|/){re.escape(path.strip('/'))}(/|$)" for path in exclude_paths if path.strip("/")]
+        mypy_exclude = state.env.get("PYTHON_QA_MYPY_EXCLUDE")
+        if mypy_exclude:
+            exclude_patterns.append(mypy_exclude)
+        if exclude_patterns:
+            args.extend(["--exclude", "|".join(f"(?:{pattern})" for pattern in exclude_patterns)])
         if state.use_json:
             args.extend(["--output", "json"])
         _append_config_arg(args, "--config-file", state.mypy_config)
@@ -2595,6 +2705,9 @@ def run_pytest(repo_root: Path, project: Project | None) -> list[Issue]:
                     )
                 ],
             )
+        pytest_ignore_paths = _dedupe_preserving_order(
+            _parse_csv_items(state.exclude_csv) + _parse_csv_items(state.env.get("PYTHON_QA_PYTEST_IGNORE_CSV"))
+        )
 
         if state.run_coverage and _coverage_available(state):
             label = "coverage run (pytest)"
@@ -2610,8 +2723,9 @@ def run_pytest(repo_root: Path, project: Project | None) -> list[Issue]:
                 "--color=yes",
                 "--junitxml",
                 str(junit_path),
-                "--ignore=tmp-test",
             ]
+            for ignore_path in pytest_ignore_paths:
+                args.extend(["--ignore", ignore_path])
             if state.pytest_config is not None:
                 args.extend(["-c", str(state.pytest_config)])
             result = _run_subprocess(state, label, args)
@@ -2621,7 +2735,9 @@ def run_pytest(repo_root: Path, project: Project | None) -> list[Issue]:
 
         label = "pytest"
         junit_path = state.log_dir / f"{_sanitize_label(label)}.junit.xml"
-        args = [str(pytest_bin), "--color=yes", "--junitxml", str(junit_path), "--ignore=tmp-test"]
+        args = [str(pytest_bin), "--color=yes", "--junitxml", str(junit_path)]
+        for ignore_path in pytest_ignore_paths:
+            args.extend(["--ignore", ignore_path])
         if state.pytest_config is not None:
             args.extend(["-c", str(state.pytest_config)])
         result = _run_subprocess(state, label, args)
@@ -2768,18 +2884,15 @@ def run_deptry(repo_root: Path, project: Project | None) -> list[Issue]:
             return ToolRunResult(rc=0, issues=[])
 
         json_output = state.log_dir / "deptry.json"
-        args = [
-            str(tool),
-            ".",
-            "--extend-exclude",
-            r"tmp-test/.*",
-            "--extend-exclude",
-            r"dev/test_.*\.py",
-            "--extend-exclude",
-            r"scripts/build_executable\.py",
-            "--json-output",
-            str(json_output),
+        args = [str(tool), ".", "--json-output", str(json_output)]
+        deptry_path_excludes = [
+            rf"(.*/)?{re.escape(path.strip('/'))}(/.*)?$"
+            for path in _parse_csv_items(state.exclude_csv)
+            if path.strip("/")
         ]
+        deptry_extra_patterns = _parse_csv_items(state.env.get("PYTHON_QA_DEPTRY_EXTEND_EXCLUDE_CSV"))
+        for exclude_pattern in _dedupe_preserving_order(deptry_path_excludes + deptry_extra_patterns):
+            args.extend(["--extend-exclude", exclude_pattern])
         _append_config_arg(args, "--config", state.deptry_config)
         return _run_subprocess(state, "deptry", args)
 
@@ -2828,29 +2941,10 @@ def run_semgrep(repo_root: Path, project: Project | None) -> list[Issue]:
         args = [str(tool), "scan"]
         if state.use_json:
             args.append("--json")
-        args.extend(
-            [
-                "--config",
-                state.semgrep_config,
-                "--exclude",
-                ".venv",
-                "--exclude",
-                ".git",
-                "--exclude",
-                "__pycache__",
-                "--exclude",
-                ".mypy_cache",
-                "--exclude",
-                ".pytest_cache",
-                "--exclude",
-                "data",
-                "--exclude",
-                "datasets",
-                "--exclude",
-                "tmp-test",
-                ".",
-            ]
-        )
+        args.extend(["--config", state.semgrep_config])
+        for exclude_path in _parse_csv_items(state.exclude_csv):
+            args.extend(["--exclude", exclude_path])
+        args.append(".")
         return _run_subprocess(state, "semgrep", args)
 
     return _run_once(state, "semgrep", _runner).issues

@@ -1,18 +1,26 @@
 # AGENTS
 
+General Guidelines:
+1. Never hardcode secrets, API keys, paths, or environment-specific values in the codebase.
+2. Follow the DRY (Don't Repeat Yourself) principle. Refactor common code into reusable functions, data types, and modules.
+
+## Python Coding Guidelines
+
 Use .venv python venv.
 Run tests (especially relevant tests) regularly while editing.
 Always keep CHANGELOG.md up to date with meaningful entries.
 
 Python coding rules:
-1. Do not use casts unless absolutely necessary.
-2. Do not use type: ignore comments unless absolutely necessary.
-3. Prefer explicit imports over wildcard imports.
-4. Prefer hypotheses / property-based tests where applicable.
-5. Make your code as acyclic as possible (avoid circular imports).
-6. Practice defensive programming (validate inputs using assertions or explicit checks, validate state).
-7. Use logging with appropriate log levels instead of print statements.
-8. Use explicit dependency injection (pass dependencies as parameters) where applicable.
+* Do not use casts unless absolutely necessary.
+* Do not use type: ignore comments unless absolutely necessary.
+* Prefer explicit imports over wildcard imports.
+* Prefer hypotheses / property-based tests where applicable.
+* Make your code as acyclic as possible (avoid circular imports).
+* Practice defensive programming (validate inputs using assertions or explicit checks, validate state).
+* Use logging with appropriate log levels instead of print statements.
+* Use explicit dependency injection (pass dependencies as parameters) where applicable.
+* Use @dataclass for data and Union[...] for sum types as if you are writing in a functional programming style with algebraic data types.
+* Prefer plain functions, and algebraic data types over classes and OOP.
 
 ## Commit Message Policy
 

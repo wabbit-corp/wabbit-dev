@@ -11,6 +11,8 @@ import asyncio
 import os
 import textwrap
 import time
+from collections.abc import Callable
+from typing import Literal, ParamSpec, TypeVar, cast
 
 import git
 
@@ -37,8 +39,17 @@ from dev.tasks.setup import (
     setup_project,
 )
 
+P = ParamSpec("P")
+R = TypeVar("R")
 
-def get_latest_version(repo) -> tuple[Version | None, git.Commit | None]:
+
+def _format_commit_message(message: str | bytes) -> str:
+    if isinstance(message, bytes):
+        return message.decode("utf-8", errors="replace").strip()
+    return message.strip()
+
+
+def get_latest_version(repo: git.Repo) -> tuple[Version | None, git.Commit | None]:
     # print(repo)
     # List known tags.
     versions: list[tuple[Version, git.Commit]] = []
@@ -91,7 +102,7 @@ def set_project_version_in_root_clj(
     current_version: str,
     new_version: str,
     root_file: str = "root.clj",
-):
+) -> None:
     """
     Finds a form like:
       (gradle "my-project"
@@ -263,7 +274,7 @@ async def poll_jitpack_build_status(api: JitPackAPI, group_id: str, artifact_id:
     return None  # Timed out
 
 
-def _check_jitpack_status_cached_ttl(status) -> int:
+def _check_jitpack_status_cached_ttl(status: BuildStatus | None) -> int | object:
     """
     Custom TTL policy function for JitPack status cache.
     If the status is OK, return a longer TTL (e.g., 1 hour).
@@ -278,12 +289,18 @@ def _check_jitpack_status_cached_ttl(status) -> int:
         return NO_CACHE
 
 
-@cache(
-    path=".dev.cache.db",
-    ttl=3600,
-    exclude_params=["jitpack_api"],
-    ttl_policy_func=_check_jitpack_status_cached_ttl,
-)  # Cache for 1 hour by default
+_jitpack_status_cache_decorator = cast(
+    Callable[[Callable[P, R]], Callable[P, R]],
+    cache(
+        path=".dev.cache.db",
+        ttl=3600,
+        exclude_params=["jitpack_api"],
+        ttl_policy_func=_check_jitpack_status_cached_ttl,
+    ),
+)
+
+
+@_jitpack_status_cache_decorator
 async def _check_jitpack_status_cached(
     jitpack_api: JitPackAPI,
     group_id: str,
@@ -342,14 +359,14 @@ class PublishError(Exception):
 
 
 class Timer:
-    def __init__(self, name: str = None):
+    def __init__(self, name: str | None = None):
         self.name = name
 
-    def __enter__(self):
+    def __enter__(self) -> "Timer":
         self.start_time = time.time()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> Literal[False]:
         elapsed_time = time.time() - self.start_time
         if self.name:
             info(f"{self.name} took {elapsed_time:.2f} seconds")
@@ -362,7 +379,7 @@ async def publish_single_project(
     proj: GradleProject,
     jitpack_api: JitPackAPI,
     repo_setup_context: RepoSetupContext,
-    openai_key: str = None,
+    openai_key: str | None = None,
 ) -> bool:
     """
     Publish a single GradleProject to JitPack. Steps:
@@ -379,13 +396,16 @@ async def publish_single_project(
         if proj.github_repo is None:
             raise PublishError(f"Project {proj.name} has no GitHub repository set.")
 
-        repo_info = repo_setup_context.known_github_repos.get(proj.github_repo)
+        github_repo = proj.github_repo
+        assert github_repo is not None
+
+        repo_info = repo_setup_context.known_github_repos.get(github_repo)
 
         if repo_info is None:
             raise PublishError(
                 f"Project {proj.name} has no actual GitHub repository.\n"
                 f"Known repos: {repo_setup_context.known_github_repos.keys()}\n"
-                f"Target repo: {proj.github_repo}"
+                f"Target repo: {github_repo}"
             )
 
         repo_is_private = repo_info.is_private
@@ -455,7 +475,7 @@ async def publish_single_project(
         if last_repo_version_tag_commit is not None:
             if str(last_repo_version_tag_commit) != str(repo.head.commit):
                 commits = list(repo.iter_commits(f"{last_repo_version_tag_commit}..HEAD"))[::-1]
-                commit_msgs = [c.message.strip() for c in commits]
+                commit_msgs = [_format_commit_message(c.message) for c in commits]
                 info("\n\n".join(textwrap.indent(m, "> ", lambda line: True) for m in commit_msgs))
                 recommended, rationale, commit_rationales = suggest_version_number(
                     commit_msgs, config_version.__str__(), api_key=openai_key
@@ -464,6 +484,7 @@ async def publish_single_project(
                 info("\n".join(f"  * {m}" for m in commit_rationales))
 
                 recommended_version = Version.parse(recommended)
+                assert last_repo_version is not None
                 if recommended_version < last_repo_version:
                     raise PublishError(
                         f"Recommended version {recommended_version} is not greater than the last tag {last_repo_version} for {proj.name}."
@@ -478,7 +499,7 @@ async def publish_single_project(
                 recommended_version = config_version
         else:
             commits = list(repo.iter_commits("HEAD"))[::-1]
-            commit_msgs = [c.message.strip() for c in commits]
+            commit_msgs = [_format_commit_message(c.message) for c in commits]
             info("\n\n".join(textwrap.indent(m, "> ", lambda line: True) for m in commit_msgs))
             recommended, rationale, commit_rationales = suggest_version_number(
                 commit_msgs, config_version.__str__(), api_key=openai_key
@@ -524,6 +545,7 @@ async def publish_single_project(
             # Step 3: Tag & push
             tag_commit = _resolve_tag_commit(repo, tag_name, proj.name)
         else:
+            assert last_repo_version_tag_commit is not None
             tag_commit = last_repo_version_tag_commit
 
     with Timer(f"Step 3: push for {proj.name}"):
@@ -545,13 +567,9 @@ async def publish_single_project(
         success(f"Skipping JitPack publish for {proj.name}.")
         return True
 
-    if not isinstance(proj, GradleProject):
-        warning(f"Skipping publishing to jitpack for {proj.name}: not a Gradle project.")
-        return True
-
     # Step 4: poll JitPack
     with Timer(f"Step 4: poll JitPack for {proj.name}"):
-        github_org = proj.github_repo.split("/")[0]
+        github_org = github_repo.split("/")[0]
         group_id = f"com.github.{github_org}"
         artifact_id = proj.name
 
@@ -634,7 +652,7 @@ async def publish_single_project(
 ##############################################################################
 
 
-async def publish_main(project_name=None):
+async def publish_main(project_name: str | None = None) -> None:
     config = load_config()
     repo_setup_mode = RepoSetupMode.PROD
     repo_setup_context = create_repo_setup_context(config, repo_setup_mode)
@@ -656,6 +674,9 @@ async def publish_main(project_name=None):
 
         for name in order:
             proj = all_projects[name]
+            if not isinstance(proj, GradleProject):
+                warning(f"Skipping {proj.name}: not a Gradle project.")
+                continue
 
             if proj.github_repo is None:
                 warning(f"Skipping {proj.name}: no GitHub repository set.")
