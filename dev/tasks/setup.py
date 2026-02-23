@@ -5,7 +5,6 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 import jinja2
 from git import Repo
@@ -26,9 +25,12 @@ from dev.config import (
     Dependency,
     DependencyTarget,
     GradleProject,
+    JarFileDependencyTarget,
+    MavenDependencyTarget,
     OwnershipType,
     PremakeProject,
     Project,
+    ProjectDependencyTarget,
     PurescriptProject,
     PythonProject,
     load_config,
@@ -41,6 +43,9 @@ class RepoSetupMode(Enum):
     PROD = "prod"
     DEV = "dev"
     LOCAL = "local"
+
+
+type ImportLinterContract = dict[str, object]
 
 
 @dataclass
@@ -92,30 +97,37 @@ def _make_dependency_strings(ctx: RepoSetupContext, project: Project) -> tuple[l
     other_dependencies: list[str] = []
     project_dependencies: list[str] = []
     for dep in project.resolved_dependencies:
-        match dep.target:
-            case DependencyTarget.Maven(_, _):
-                other_dependencies.append(dep.as_string())
+        target = dep.target
+        if isinstance(target, MavenDependencyTarget) or isinstance(target, JarFileDependencyTarget):
+            other_dependencies.append(dep.as_string())
+            continue
 
-            case DependencyTarget.JarFile(_):
-                other_dependencies.append(dep.as_string())
+        if isinstance(target, ProjectDependencyTarget):
+            name = target.project
+            subproject = ctx.config.defined_projects.get(name)
+            if subproject is None:
+                error(f"Unknown subproject dependency: {name}")
+                continue
 
-            case DependencyTarget.Project(name):
-                subproject = ctx.config.defined_projects.get(name)
-                if subproject is None:
-                    error(f"Unknown subproject dependency: {name}")
-                    continue
-
-                has_github_repo = subproject.github_repo is not None
+            has_github_repo = subproject.github_repo is not None
+            if isinstance(subproject, GradleProject):
                 artifact_name = subproject.artifact_name
-                artifact_dep = Dependency(
-                    scope=dep.scope,
-                    target=DependencyTarget.Maven(artifact=artifact_name, maven_repo=None),
-                )
+                project_version = subproject.version
+            else:
+                artifact_name = subproject.name
+                project_version = getattr(subproject, "version", None)
+            artifact_dep = Dependency(
+                scope=dep.scope,
+                target=DependencyTarget.Maven(artifact=artifact_name, maven_repo=None),
+            )
 
-                if has_github_repo and ctx.mode != RepoSetupMode.LOCAL:
-                    project_dependencies.append(artifact_dep.as_string())
-                else:
-                    project_dependencies.append(f"{dep.as_string()} // {subproject.version}")
+            if has_github_repo and ctx.mode != RepoSetupMode.LOCAL:
+                project_dependencies.append(artifact_dep.as_string())
+            else:
+                project_dependencies.append(f"{dep.as_string()} // {project_version}")
+            continue
+
+        error(f"Unsupported dependency target type: {type(target).__name__}")
 
     return project_dependencies, other_dependencies
 
@@ -174,7 +186,7 @@ def setup_project(ctx: RepoSetupContext, project: Project, interactive: bool = T
                 error(f"{project.name} does not have .git")
                 if not interactive or ask(f"Initialize git repository for {project.name}?"):
                     repo = Repo.init(project.path)
-                    scope.defer(lambda: repo.close())
+                    scope.defer(repo.close)
 
                     # Set default user and email
                     repo.config_writer().set_value("user", "email", ctx.config.default_git_user_email).set_value(
@@ -188,7 +200,7 @@ def setup_project(ctx: RepoSetupContext, project: Project, interactive: bool = T
                 repo = None
             else:
                 repo = Repo(project.path)
-                scope.defer(lambda: repo.close())
+                scope.defer(repo.close)
         else:
             repo = None
 
@@ -470,7 +482,7 @@ def _toml_inline_table_list_map(map_data: dict[str, list[str]]) -> str:
     return "{ " + ", ".join(parts) + " }"
 
 
-def _toml_value(value: Any) -> str:
+def _toml_value(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (int, float)):
@@ -486,7 +498,7 @@ def _toml_value(value: Any) -> str:
     return f'"{value}"'
 
 
-def _toml_contracts_blocks(contracts: list[dict[str, Any]]) -> str:
+def _toml_contracts_blocks(contracts: list[ImportLinterContract]) -> str:
     blocks: list[str] = []
     for contract in contracts:
         lines = ["[[tool.importlinter.contracts]]"]
@@ -671,7 +683,7 @@ def render_python_pyproject(ctx: RepoSetupContext, project: PythonProject) -> st
         deptry_package_map = {**auto_map, **deptry_package_map}
 
     importlinter_root_packages = project.importlinter_root_packages or main_source_sets or packages
-    importlinter_contracts: list[dict[str, Any]] = []
+    importlinter_contracts: list[ImportLinterContract] = []
     if project.importlinter_layers:
         importlinter_contracts.append(
             {
@@ -732,10 +744,12 @@ def _write_wabbit_legal_files(ctx: RepoSetupContext, project: Project) -> None:
     if project.ownership != OwnershipType.WABBIT:
         return
 
-    if project.license is not None:
-        license_text = ctx.licenses.get(project.license)
+    license_attr = "license"
+    project_license = getattr(project, license_attr, None)
+    if isinstance(project_license, str):
+        license_text = ctx.licenses.get(project_license)
         if license_text is None:
-            error(f"Unknown license key: {project.license}")
+            error(f"Unknown license key: {project_license}")
         else:
             dev.io.write_text_file(project.path / "LICENSE.md", license_text)
     dev.io.write_text_file(project.path / "CLA.md", render_template(ctx.cla))
@@ -750,11 +764,11 @@ def _write_wabbit_legal_files(ctx: RepoSetupContext, project: Project) -> None:
 def _write_banner(ctx: RepoSetupContext, project: Project) -> None:
     create_banner(
         image_path=ctx.repo_template / "banner4c.png",
-        font_path=ctx.repo_template / "CooperHewitt-Light.otf",
+        font_path=str(ctx.repo_template / "CooperHewitt-Light.otf"),
         main_text=project.name,
         subtitle_text=None,
         background_color=(0, 0, 0, 0),
-        output_path=project.path / ".banner.png",
+        output_path=str(project.path / ".banner.png"),
         font_size=60,
         subtitle_font_size=None,
         padding=40,
@@ -915,13 +929,13 @@ def setup_gradle_project(ctx: RepoSetupContext, project: GradleProject, interact
     _write_banner(ctx, project)
 
 
-USED_COMMIT_MESSAGES = {}
+USED_COMMIT_MESSAGES: dict[str, str] = {}
 
 
 def commit_repo_changes(
     project: Project,
     repo: Repo,
-    openai_key: str = None,
+    openai_key: str | None = None,
     interactive: bool = True,
     add_files: bool = True,
 ) -> None:
@@ -1162,11 +1176,14 @@ def commit_repo_changes(
                 print("--- End Diff Summary ---")
                 # Suggest a commit message using the assembled patch content
                 # Ensure suggest_commit_name handles potential errors
-                commit_name = suggest_commit_name(final_diff_text, api_key=openai_key)
+                api_key = openai_key if openai_key is not None else ""
+                commit_name = suggest_commit_name(final_diff_text, api_key=api_key)
                 print(f"Suggested commit message: {commit_name}")
 
         if commit_name is not None:
             commit_name = ensure_semver_impact_line(commit_name)
+        else:
+            commit_name = ensure_semver_impact_line(f"Update {project.name}")
 
         # Optionally commit if user agrees
 
@@ -1197,7 +1214,6 @@ def commit_repo_changes(
             repo.index.commit(commit_name)
 
 
-@cache(path=".dev.cache.db", ttl=7 * 24 * 3600)
 def get_coc_file() -> str:
     import requests
 
@@ -1213,7 +1229,13 @@ def get_coc_file() -> str:
         error(f"Failed to fetch CoC file: {ex}")
         raise RuntimeError("Failed to fetch CoC file") from ex
 
-    return response.text
+    response_text = response.text
+    if isinstance(response_text, str):
+        return response_text
+    return str(response_text)
+
+
+get_coc_file = cache(path=".dev.cache.db", ttl=7 * 24 * 3600)(get_coc_file)
 
 
 def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupContext:
@@ -1221,7 +1243,7 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
     from github.GithubException import GithubException
     from requests.exceptions import RequestException
 
-    all_repos: list[Any] = []
+    all_repos = []
     known_repo_names: list[str] = []
     known_github_repos: dict[str, RepoInfo] = {}
     is_github_api_available = False
@@ -1299,8 +1321,9 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
     )
 
 
-def render_template(template: jinja2.Template, **kwargs) -> str:
-    result = template.render(**kwargs)
+def render_template(template: jinja2.Template, **kwargs: object) -> str:
+    rendered = template.render(**kwargs)
+    result = rendered if isinstance(rendered, str) else str(rendered)
     result = result.rstrip() + "\n"
     return result
 

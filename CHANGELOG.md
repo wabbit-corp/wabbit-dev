@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Eliminate strict mypy failures across `dev/` by fully typing cache/decorator internals (`dev/caching.py`), hardening typed command dispatch and dependency rendering in `dev/config.py`, and tightening typing/nullability in researcher/setup/publish integration points; `dev.py check .` now clears mypy/ruff/black/pytest stages with only existing vulture warnings remaining.
 - Reduce strict check backlog by fully type-annotating `dev/git_changes.py` test/helpers and core path handling, fixing `choose-jvm` typing and Windows registry guards, tightening banner/color typing, and modernizing check/config typing surfaces (`checks/base`, `config_typed`, hardcoded checks) to remove broad mypy and ruff/black failures without adding repo-specific suppressions.
 - Continue strict-mypy cleanup in integration utilities by typing `dev/jitpack.py` request/response handling and nullable sessions, hardening `dev/ai.py` OpenAI content/nullability handling plus cached-call typing, and adding explicit publish-time OpenAI key validation in `dev/tasks/publish.py`.
 - Reduce immediate `check` noise by fixing Python QA wrapper typing (`Project | None` instead of `Any`), adding explicit `trufflehog`/`Module` exports in the check task module, exporting `subprocess` from QA common for test monkeypatching, and suppressing deptry `DEP004` findings for `pytest`/`pyinstaller` dev-only imports.

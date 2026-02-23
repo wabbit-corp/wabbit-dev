@@ -7,15 +7,17 @@ import pickle
 import sqlite3
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from functools import wraps
 from hashlib import sha256
+from typing import ParamSpec, Protocol, TypeVar, cast
 
 logger = logging.getLogger(__name__)
 
 
 # --- Sentinel for Conditional Caching ---
 class NoCacheSentinel:
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "NO_CACHE"
 
 
@@ -26,7 +28,7 @@ NO_CACHE = NoCacheSentinel()
 ###############################################################################
 
 _thread_local_storage = threading.local()
-_global_cashier_registry = {}  # Map path -> Cashier instance
+_global_cashier_registry: dict[str, "Cashier"] = {}  # Map path -> Cashier instance
 _registry_lock = threading.Lock()
 _cleanup_registered = False
 
@@ -80,7 +82,7 @@ class Cashier:
         :param path: Absolute path to the SQLite file.
         """
         self.path = path  # Assume path is already absolute
-        self._conn = None  # Initialize as None
+        self._conn: sqlite3.Connection | None = None  # Initialize as None
         self._lock = threading.RLock()  # RLock for re-entrancy if needed
 
         try:
@@ -105,13 +107,14 @@ class Cashier:
             self._conn = None  # Ensure connection is None on error
             raise  # Propagate the error
 
-    def _ensure_connection(self):
+    def _ensure_connection(self) -> sqlite3.Connection:
         """Checks if connection exists, raises error if not."""
         if self._conn is None:
             # This might happen if init failed or after close() was called
             raise sqlite3.Error(f"Cashier database connection is not available for path: {self.path}")
+        return self._conn
 
-    def close(self):
+    def close(self) -> None:
         """Closes the underlying SQLite connection and unregisters."""
         with self._lock:
             if self._conn:
@@ -130,28 +133,28 @@ class Cashier:
                     # Unregister from global cleanup
                     unregister_cashier_globally(self.path)
 
-    def delete_by_key(self, key: str):
+    def delete_by_key(self, key: str) -> None:
         logger.debug("Deleting key from cache: %s (db=%s)", key, self.path)
         with self._lock:
-            self._ensure_connection()
-            with self._conn:
-                self._conn.execute(self._DEL_SQL, (key,))
+            conn = self._ensure_connection()
+            with conn:
+                conn.execute(self._DEL_SQL, (key,))
 
-    def delete_by_fqn(self, fqn: str):
+    def delete_by_fqn(self, fqn: str) -> None:
         logger.debug("Deleting all entries by fqn: %s (db=%s)", fqn, self.path)
         with self._lock:
-            self._ensure_connection()
-            with self._conn:
-                self._conn.execute(self._DEL_FQN_SQL, (fqn,))
+            conn = self._ensure_connection()
+            with conn:
+                conn.execute(self._DEL_FQN_SQL, (fqn,))
 
-    def get(self, key: str, default_ttl: float = None):
+    def get(self, key: str, default_ttl: float | None = None) -> object | None:
         """
         Retrieve cached object. Prioritizes TTL stored with item over default_ttl.
         """
         logger.debug("Attempting to get key from cache: %s (db=%s)", key, self.path)
         with self._lock:
-            self._ensure_connection()
-            cursor = self._conn.cursor()
+            conn = self._ensure_connection()
+            cursor = conn.cursor()
             cursor.execute(self._GET_SQL, (key,))
             row = cursor.fetchone()
             if not row:
@@ -162,8 +165,8 @@ class Cashier:
 
             # Determine effective TTL: stored TTL overrides default
             effective_ttl = default_ttl
-            if stored_ttl is not None:
-                effective_ttl = stored_ttl
+            if isinstance(stored_ttl, (float, int)):
+                effective_ttl = float(stored_ttl)
                 logger.debug("Using specific stored TTL=%.1f for key %s", stored_ttl, key)
             elif default_ttl is not None:
                 logger.debug("Using default TTL=%.1f for key %s", default_ttl, key)
@@ -171,7 +174,7 @@ class Cashier:
             # Check expiration using effective TTL
             if effective_ttl is not None:
                 now = time.time()
-                if (now - insert_time) > effective_ttl:
+                if isinstance(insert_time, (float, int)) and (now - float(insert_time)) > effective_ttl:
                     logger.debug(
                         "Key %s expired (insert=%.1f, now=%.1f, effective_ttl=%.1f). Deleting.",
                         key,
@@ -180,22 +183,25 @@ class Cashier:
                         effective_ttl,
                     )
                     # Perform deletion within the same transaction lock
-                    with self._conn:
-                        self._conn.execute(self._DEL_SQL, (key,))
+                    with conn:
+                        conn.execute(self._DEL_SQL, (key,))
                     return None
 
             logger.debug("Cache hit for key: %s", key)
-            return pickle.loads(val_blob)
+            if not isinstance(val_blob, (bytes, bytearray)):
+                return None
+            loaded_value: object = pickle.loads(val_blob)
+            return loaded_value
 
     def set(
         self,
         key: str,
         fqn: str,
         val: bytes,  # Expect pickled blob
-        max_age: float = None,
-        max_fqn_capacity: int = None,
-        specific_ttl: float = None,
-    ):
+        max_age: float | None = None,
+        max_fqn_capacity: int | None = None,
+        specific_ttl: float | None = None,
+    ) -> None:
         logger.debug(
             "Setting key in cache: %s (fqn=%s, db=%s, specific_ttl=%s)",
             key,
@@ -206,11 +212,11 @@ class Cashier:
         now = time.time()
 
         with self._lock:
-            self._ensure_connection()
+            conn = self._ensure_connection()
             # Use a single transaction for set and potential cleanup
-            with self._conn:
+            with conn:
                 # Insert or replace
-                self._conn.execute(self._SET_SQL, (key, fqn, val, now, specific_ttl))
+                conn.execute(self._SET_SQL, (key, fqn, val, now, specific_ttl))
 
                 # 1) FQN-Scoped Age-based cleanup
                 if max_age is not None:
@@ -221,7 +227,7 @@ class Cashier:
                         fqn,
                     )
                     # *** MODIFIED: Use FQN-specific cleanup SQL ***
-                    deleted_rows = self._conn.execute(
+                    deleted_rows = conn.execute(
                         self._CLEANUP_AGE_FQN_SQL,  # Use the FQN specific query
                         (fqn, cutoff),  # Pass FQN and cutoff time
                     ).rowcount
@@ -235,7 +241,7 @@ class Cashier:
                 # 2) Capacity-based cleanup for this FQN
                 if max_fqn_capacity is not None and max_fqn_capacity > 0:
                     # Check count *after* potential age-based cleanup
-                    cursor = self._conn.cursor()
+                    cursor = conn.cursor()
                     cursor.execute(self._COUNT_FQN_SQL, (fqn,))
                     count_row = cursor.fetchone()
                     count = count_row[0] if count_row else 0
@@ -249,7 +255,7 @@ class Cashier:
                             to_remove,
                             fqn,
                         )
-                        self._conn.execute(self._REMOVE_OLDEST_FQN_SQL, (fqn, to_remove))
+                        conn.execute(self._REMOVE_OLDEST_FQN_SQL, (fqn, to_remove))
 
 
 # --- Cashier Factory and Cleanup Registration ---
@@ -292,7 +298,7 @@ def get_cashier_instance(path: str) -> Cashier:
             raise RuntimeError(f"Failed to get or create Cashier instance for {abs_path}")
 
 
-def unregister_cashier_globally(abs_path: str):
+def unregister_cashier_globally(abs_path: str) -> None:
     """Removes a cashier instance from the global registry (called by Cashier.close)."""
     with _registry_lock:
         if abs_path in _global_cashier_registry:
@@ -300,11 +306,11 @@ def unregister_cashier_globally(abs_path: str):
             logger.debug("Unregistered Cashier instance for path: %s", abs_path)
 
 
-def _cleanup_all_cashiers():
+def _cleanup_all_cashiers() -> None:
     """Function called by atexit to close all managed cashier connections."""
     logger.debug("Closing all registered Cashier database connections via atexit...")
     # Create a copy of instances to close, as closing modifies the registry
-    instances_to_close = []
+    instances_to_close: list[Cashier] = []
     with _registry_lock:
         instances_to_close = list(_global_cashier_registry.values())
 
@@ -330,12 +336,27 @@ def _cleanup_all_cashiers():
 ###############################################################################
 # Helpers
 ###############################################################################
-def _get_fqn(fn):
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+class _QualifiedCallable(Protocol):
+    __module__: str
+    __qualname__: str
+
+
+def _get_fqn(fn: _QualifiedCallable) -> str:
     """Gets the fully qualified name for a callable."""
     return f"{fn.__module__}.{fn.__qualname__}"
 
 
-def _build_cache_key(fqn, func_sig, args, kwargs, exclude_params):
+def _build_cache_key(
+    fqn: str,
+    func_sig: inspect.Signature,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    exclude_params: set[str],
+) -> str:
     """Builds a deterministic cache key from function and arguments."""
     try:
         bound = func_sig.bind(*args, **kwargs)
@@ -378,14 +399,16 @@ def _build_cache_key(fqn, func_sig, args, kwargs, exclude_params):
 ###############################################################################
 # The Decorator
 ###############################################################################
+
+
 def cache(
     path: str = ".cache.db",
-    ttl: float = None,
-    max_fqn_capacity: int = None,
-    max_age: float = None,
-    exclude_params=None,
-    ttl_policy_func=None,
-):
+    ttl: float | None = None,
+    max_fqn_capacity: int | None = None,
+    max_age: float | None = None,
+    exclude_params: list[str] | None = None,
+    ttl_policy_func: Callable[[object], float | NoCacheSentinel | None] | None = None,
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """
     Decorator to cache function results in a local SQLite DB. Handles both sync and async functions.
 
@@ -406,7 +429,7 @@ def cache(
     if ttl_policy_func is not None and not callable(ttl_policy_func):
         raise TypeError("ttl_policy_func must be a callable or None")
 
-    def decorator(fn):
+    def decorator(fn: Callable[P, R]) -> Callable[P, R]:
         fqn = _get_fqn(fn)
         func_sig = inspect.signature(fn)
         is_async = inspect.iscoroutinefunction(fn)
@@ -425,7 +448,7 @@ def cache(
             return fn
 
         @wraps(fn)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             # 1. Build the cache key (handles errors by raising)
             try:
                 key = _build_cache_key(fqn, func_sig, args, kwargs, exclude_params_set)
@@ -438,10 +461,13 @@ def cache(
                 )
                 if is_async:
                     # Need to return awaitable for async function
-                    async def passthrough_async():
-                        return await fn(*args, **kwargs)
+                    async def passthrough_async() -> object:
+                        async_result = fn(*args, **kwargs)
+                        if isinstance(async_result, Awaitable):
+                            return await async_result
+                        raise TypeError(f"Expected awaitable from async function {fqn}")
 
-                    return passthrough_async()
+                    return cast(R, passthrough_async())
                 else:
                     return fn(*args, **kwargs)
 
@@ -453,13 +479,13 @@ def cache(
                     if is_async:
                         # If original function was async, return an awaitable
                         # even on cache hit, resolving immediately with the cached value.
-                        async def _async_return_cached():
+                        async def _async_return_cached() -> object:
                             return cached_result
 
-                        return _async_return_cached()
+                        return cast(R, _async_return_cached())
                     else:
                         # Original function was sync, return raw value directly
-                        return cached_result
+                        return cast(R, cached_result)
             except Exception as e:
                 # Error during cache get (DB error, unpickling error)
                 logger.error(
@@ -476,9 +502,9 @@ def cache(
 
             # --- Define inner function to handle execution and caching ---
             # This avoids duplicating the policy logic for sync/async paths
-            def _execute_and_cache(result):
+            def _execute_and_cache(result: object) -> None:
                 cache_directive = None  # Default: use decorator ttl (via None passed to set)
-                specific_ttl_to_set = None
+                specific_ttl_to_set: float | None = None
 
                 if ttl_policy_func:
                     try:
@@ -501,7 +527,8 @@ def cache(
                     # Do not cache
                 else:
                     # Directive is None or a TTL number
-                    specific_ttl_to_set = cache_directive  # Pass None or the number to set
+                    if isinstance(cache_directive, (float, int)):
+                        specific_ttl_to_set = float(cache_directive)
                     try:
                         pickled_result = pickle.dumps(result, protocol=4)
                         # Call set, passing the specific TTL derived from the policy
@@ -547,10 +574,13 @@ def cache(
             else:
                 # --- Handle Asynchronous Function ---
                 # We cannot await here. Return a new coroutine that does the work.
-                async def async_executor():
+                async def async_executor() -> object:
                     try:
                         # Await the original async function
-                        result = await fn(*args, **kwargs)
+                        async_result = fn(*args, **kwargs)
+                        if not isinstance(async_result, Awaitable):
+                            raise TypeError(f"Expected awaitable from async function {fqn}")
+                        result = await async_result
                     except Exception as e:
                         logger.error(
                             "Original async function execution failed for key=%s (fqn=%s): %s",
@@ -574,9 +604,9 @@ def cache(
 
                     return result  # Return original awaited result
 
-                return async_executor()  # Return the coroutine to the caller
+                return cast(R, async_executor())  # Return the coroutine to the caller
 
-        def clear_cache_for_this_fn():
+        def clear_cache_for_this_fn() -> None:
             """Clears all cache entries associated with this specific function."""
             logger.debug("Clearing cache for function %s (path=%s)", fqn, path)
             try:
@@ -593,7 +623,7 @@ def cache(
                 )
                 # Optionally re-raise
 
-        def close_cache_for_this_fn():
+        def close_cache_for_this_fn() -> None:
             """
             Closes the database connection associated with this function's cache path.
             Note: This closes the connection for ALL functions sharing this cache path.
@@ -611,13 +641,16 @@ def cache(
                 # Optionally re-raise
 
         # Attach helper methods to the wrapped function
-        wrapper.clear_cache = clear_cache_for_this_fn
+        clear_cache_attr = "clear_cache"
+        setattr(wrapper, clear_cache_attr, clear_cache_for_this_fn)
         # Renamed for clarity as it affects the shared path connection:
-        wrapper.close_shared_cache = close_cache_for_this_fn
+        close_cache_attr = "close_shared_cache"
+        setattr(wrapper, close_cache_attr, close_cache_for_this_fn)
         # Expose FQN and potentially the cashier instance if needed (use with caution)
-        wrapper._cache_fqn = fqn
+        cache_fqn_attr = "_cache_fqn"
+        setattr(wrapper, cache_fqn_attr, fqn)
         # wrapper._cashier = cashier # Careful exposing mutable shared state
 
-        return wrapper
+        return cast(Callable[P, R], wrapper)
 
     return decorator

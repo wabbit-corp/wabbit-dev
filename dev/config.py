@@ -3,10 +3,11 @@ import os
 import re
 from abc import ABC, abstractmethod
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Union
+from typing import TypeGuard, Union
 
 from mu.exec import Quoted
 from mu.parser import sexpr
@@ -79,7 +80,7 @@ class Version:
             other_dev_val,
         )
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, Version):
             return NotImplemented
         return (self.major, self.minor, self.patch, self.is_dev) == (
@@ -192,7 +193,7 @@ class JvmKotlinApplication(Feature):
     shadedJarName: str | None = None
     unshadedJarName: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.jarName, self.shadedJarName, self.unshadedJarName = _normalize_jar_names(
             jar=self.jarName,
             shaded=self.shadedJarName,
@@ -230,7 +231,7 @@ class JvmKotlinAgent(Feature):
     shadedJarName: str | None = None
     unshadedJarName: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.jarName, self.shadedJarName, self.unshadedJarName = _normalize_jar_names(
             jar=self.jarName,
             shaded=self.shadedJarName,
@@ -281,25 +282,28 @@ def _merge_feature(existing: Feature, incoming: Feature) -> Feature:
     if type(existing) is not type(incoming):
         raise TypeError(f"Cannot merge features with different types: {type(existing)} vs {type(incoming)}")
 
-    if dataclasses.is_dataclass(existing):
-        merged_kwargs: dict[str, Any] = {}
-        for field in dataclasses.fields(existing):
-            existing_value = getattr(existing, field.name)
-            incoming_value = getattr(incoming, field.name)
-            if existing_value is None and incoming_value is not None:
-                merged_kwargs[field.name] = incoming_value
-            elif incoming_value is None or existing_value == incoming_value:
-                merged_kwargs[field.name] = existing_value
-            else:
-                raise ValueError(
-                    f"Implied feature {type(existing).__feature_name__} conflicts on "
-                    f"{field.name}: {existing_value} != {incoming_value}"
-                )
-        return type(existing)(**merged_kwargs)
+    dataclass_fields = getattr(existing, "__dataclass_fields__", None)
+    if not isinstance(dataclass_fields, dict):
+        if existing != incoming:
+            raise ValueError(
+                f"Implied feature {type(existing).__feature_name__} conflicts: " f"{existing} != {incoming}"
+            )
+        return existing
 
-    if existing != incoming:
-        raise ValueError(f"Implied feature {type(existing).__feature_name__} conflicts: " f"{existing} != {incoming}")
-    return existing
+    merged_kwargs: dict[str, object] = {}
+    for field_name in dataclass_fields:
+        existing_value = getattr(existing, field_name)
+        incoming_value = getattr(incoming, field_name)
+        if existing_value is None and incoming_value is not None:
+            merged_kwargs[field_name] = incoming_value
+        elif incoming_value is None or existing_value == incoming_value:
+            merged_kwargs[field_name] = existing_value
+        else:
+            raise ValueError(
+                f"Implied feature {type(existing).__feature_name__} conflicts on "
+                f"{field_name}: {existing_value} != {incoming_value}"
+            )
+    return type(existing)(**merged_kwargs)
 
 
 def resolve_features(features: list[Feature]) -> dict[str, Feature]:
@@ -382,51 +386,57 @@ class Dependency:
 
     @property
     def name(self) -> str:
-        match self.target:
-            case DependencyTarget.JarFile(path):
-                return path.name
-            case DependencyTarget.Project(project):
-                return project
-            case DependencyTarget.Maven(_maven_repo, artifact):
-                return artifact
+        target = self.target
+        if isinstance(target, JarFileDependencyTarget):
+            return target.path.name
+        if isinstance(target, ProjectDependencyTarget):
+            return target.project
+        if isinstance(target, MavenDependencyTarget):
+            if target.artifact is None:
+                raise ValueError("Maven dependency is missing artifact")
+            return target.artifact
+        raise ValueError(f"Unsupported dependency target type: {type(target).__name__}")
 
     @property
     def is_subproject(self) -> bool:
         return isinstance(self.target, ProjectDependencyTarget)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         assert (
             isinstance(self.scope, str) or self.scope is None
         ), f"Expected GradleDependencyScope or None, got {type(self.scope)}"
         assert isinstance(self.target, DependencyTarget), f"Expected DependencyTarget, got {type(self.target)}"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.as_string()
 
-    def as_string(self):
+    def as_string(self) -> str:
         modifier = self.scope
         if modifier is None:
             modifier = "implementation"
 
-        match self.target:
-            case DependencyTarget.JarFile(path):
-                dirname = path.parent.as_posix() or "."
-                basename = path.name
+        target = self.target
+        if isinstance(target, JarFileDependencyTarget):
+            dirname = target.path.parent.as_posix() or "."
+            basename = target.path.name
 
-                escaped_dirname = dirname.replace("\\", "\\\\").replace('"', '\\"')
-                escaped_basename = basename.replace("\\", "\\\\").replace('"', '\\"')
+            escaped_dirname = dirname.replace("\\", "\\\\").replace('"', '\\"')
+            escaped_basename = basename.replace("\\", "\\\\").replace('"', '\\"')
 
-                return (
-                    f'{modifier}(fileTree(mapOf("dir" to "{escaped_dirname}", '
-                    f'"include" to listOf("{escaped_basename}"))))'
-                )
+            return (
+                f'{modifier}(fileTree(mapOf("dir" to "{escaped_dirname}", '
+                f'"include" to listOf("{escaped_basename}"))))'
+            )
 
-            case DependencyTarget.Project(project):
-                return f'{modifier}(project(":{project}"))'
+        if isinstance(target, ProjectDependencyTarget):
+            return f'{modifier}(project(":{target.project}"))'
 
-            case DependencyTarget.Maven(_maven_repo, artifact):
-                # FIXME: repo is not used
-                return f'{modifier}("{artifact}")'
+        if isinstance(target, MavenDependencyTarget):
+            # FIXME: repo is not used
+            artifact = target.artifact or ""
+            return f'{modifier}("{artifact}")'
+
+        raise ValueError(f"Unsupported dependency target type: {type(target).__name__}")
 
 
 class DependencyTarget:
@@ -496,7 +506,7 @@ class PythonDependency:
     version_spec: str | None = None
     scope: str = "main"  # or dev/test/extras?
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.version_spec:
             return f"{self.package}{self.version_spec}"
         return self.package
@@ -537,7 +547,7 @@ class PythonProject(Project):
     deptry_auto_map: bool
     importlinter_root_packages: list[str]
     importlinter_layers: list[str]
-    importlinter_contracts: list[dict[str, Any]]
+    importlinter_contracts: list[dict[str, object]]
     coverage_source: list[str]
     coverage_omit: list[str]
     coverage_fail_under: int | None
@@ -692,6 +702,7 @@ class GradleProject(Project):
             return CoarseFileScope.BUILD_TEMP
         if rel_path.as_posix().startswith("kotlin-js-store/"):
             return CoarseFileScope.BUILD_TEMP
+        return None
 
 
 ##################################################################################################
@@ -783,8 +794,8 @@ def load_config() -> Config:
     modules = Module.load_modules()
     config.modules = modules
 
-    module_command_handlers: dict[type[Any], Any] = {}
-    module_command_types: list[type[Any]] = []
+    module_command_handlers: dict[type[object], Callable[[object], None]] = {}
+    module_command_types: list[type[object]] = []
     for module in modules.values():
         for registration in module.register_typed_config_commands():
             if registration.command_type in module_command_handlers:
@@ -793,22 +804,22 @@ def load_config() -> Config:
             module_command_types.append(registration.command_type)
 
     top_level_target = config_typed.make_top_level_target(module_command_types)
-    defines: dict[str, Any] = {}
+    defines: dict[str, object] = {}
 
-    def _extract_expr_span(expr: Any) -> Any | None:
+    def _extract_expr_span(expr: object) -> object | None:
         if isinstance(expr, (SAtom, SStr)):
             span = expr.span
             if span is None:
                 return None
-            token = getattr(span, "token", None)
+            token: object | None = getattr(span, "token", None)
             return token if token is not None else span
 
         for attr in ("open_bracket", "span"):
             value = getattr(expr, attr, None)
             if value is None:
                 continue
-            token = getattr(value, "token", None)
-            return token if token is not None else value
+            nested_token: object | None = getattr(value, "token", None)
+            return nested_token if nested_token is not None else value
         return None
 
     def _coerce_int(value: int | str | None, field_name: str) -> int | None:
@@ -821,7 +832,7 @@ def load_config() -> Config:
         raise ValueError(f"{field_name} must be an int or numeric string")
 
     def _parse_python_source_sets(
-        raw_sets: list[Any] | None,
+        raw_sets: list[object] | None,
     ) -> list[PythonSourceSet]:
         if not raw_sets:
             return []
@@ -854,7 +865,9 @@ def load_config() -> Config:
 
     def _resolve_maven_version(value: config_typed.Value[str]) -> str:
         if isinstance(value, config_typed.Const):
-            return value.value
+            if isinstance(value.value, str):
+                return value.value
+            raise ValueError(f"Maven version constant must be a string, got {type(value.value)}")
         if isinstance(value, config_typed.VarName):
             if value.name not in defines:
                 raise ValueError(f"Undefined variable referenced in maven version: {value.name}")
@@ -956,17 +969,17 @@ def load_config() -> Config:
             ]
 
         if dep in config.library_groups:
-            result: list[Dependency] = []
+            group_result: list[Dependency] = []
             for lib in config.library_groups[dep]:
                 if isinstance(lib, str):
-                    result.extend(parse_gradle_dependency(lib, modifier))
+                    group_result.extend(parse_gradle_dependency(lib, modifier))
                 elif isinstance(lib, list):
-                    result.extend(parse_gradle_dependency(lib, modifier))
+                    group_result.extend(parse_gradle_dependency(lib, modifier))
                 elif isinstance(lib, Dependency):
-                    result.extend(parse_gradle_dependency(lib, modifier))
+                    group_result.extend(parse_gradle_dependency(lib, modifier))
                 else:
                     raise ValueError(f"Unknown library-group child type: {lib}")
-            return result
+            return group_result
 
         if dep in config.libraries:
             maven_urn = config.libraries[dep].maven_urn.__str__()
@@ -1183,7 +1196,7 @@ def load_config() -> Config:
                 importlinter_layers = importlinter_feature.layers or []
 
             parsed_source_sets = _parse_python_source_sets(command.source_sets)
-            project_obj = PythonProject(
+            python_project = PythonProject(
                 path=path,
                 name=name,
                 quarantine=command.quarantine,
@@ -1231,14 +1244,14 @@ def load_config() -> Config:
                 version=Version.parse(command.version) if command.version else None,
                 resolved_dependencies=[],
             )
-            verify_project(project_obj)
-            config.defined_projects[name] = project_obj
+            verify_project(python_project)
+            config.defined_projects[name] = python_project
             return
 
         if isinstance(command, config_typed.PurescriptProjectCommand):
             ownership = _coerce_ownership(command.ownership)
             name = command.name or command.dir_name
-            project_obj = PurescriptProject(
+            purescript_project = PurescriptProject(
                 path=Path(f"./{command.dir_name}"),
                 name=name,
                 description=command.description,
@@ -1251,14 +1264,14 @@ def load_config() -> Config:
                 version=Version.parse(command.version) if command.version else None,
                 resolved_dependencies=[],
             )
-            verify_project(project_obj)
-            config.defined_projects[name] = project_obj
+            verify_project(purescript_project)
+            config.defined_projects[name] = purescript_project
             return
 
         if isinstance(command, config_typed.DataProjectCommand):
             ownership = _coerce_ownership(command.ownership)
             name = command.name or command.dir_name
-            project_obj = DataProject(
+            data_project = DataProject(
                 path=Path(f"./{command.dir_name}"),
                 name=name,
                 description=command.description,
@@ -1271,14 +1284,14 @@ def load_config() -> Config:
                 version=Version.parse(command.version) if command.version else None,
                 resolved_dependencies=[],
             )
-            verify_project(project_obj)
-            config.defined_projects[name] = project_obj
+            verify_project(data_project)
+            config.defined_projects[name] = data_project
             return
 
         if isinstance(command, config_typed.PremakeProjectCommand):
             ownership = _coerce_ownership(command.ownership)
             name = command.name or command.dir_name
-            project_obj = PremakeProject(
+            premake_project = PremakeProject(
                 path=Path(f"./{command.dir_name}"),
                 name=name,
                 description=command.description,
@@ -1291,8 +1304,8 @@ def load_config() -> Config:
                 version=Version.parse(command.version) if command.version else None,
                 resolved_dependencies=[],
             )
-            verify_project(project_obj)
-            config.defined_projects[name] = project_obj
+            verify_project(premake_project)
+            config.defined_projects[name] = premake_project
             return
 
         if isinstance(command, config_typed.GradleProjectCommand):
@@ -1321,9 +1334,13 @@ def load_config() -> Config:
                     if maven_repo not in maven_repositories:
                         maven_repositories.append(maven_repo)
 
-            project_obj = GradleProject(
+            default_group_name = config.default_maven_project_group
+            if default_group_name is None:
+                raise ValueError("default-maven-project-group must be configured for gradle projects")
+
+            gradle_project = GradleProject(
                 path=Path(f"./{command.dir_name}"),
-                group_name=config.default_maven_project_group,
+                group_name=default_group_name,
                 name=name,
                 version=Version.parse(command.version) if command.version else None,
                 description=command.description,
@@ -1339,18 +1356,24 @@ def load_config() -> Config:
                 resolved_dependencies=resolved_dependencies,
                 ownership=ownership,
             )
-            verify_project(project_obj)
-            config.defined_projects[name] = project_obj
+            verify_project(gradle_project)
+            config.defined_projects[name] = gradle_project
             return
 
         raise ValueError(f"Unknown builtin command: {type(command)}")
 
-    def _apply_command(command: Any) -> None:
+    def _is_builtin_command(command: object) -> TypeGuard[config_typed.BuiltinTopLevelCommand]:
+        return isinstance(command, config_typed.BUILTIN_TOPLEVEL_COMMAND_TYPES)
+
+    def _apply_command(command: object) -> None:
         command_handler = module_command_handlers.get(type(command))
         if command_handler is not None:
             command_handler(command)
             return
-        _apply_builtin_command(command)
+        if _is_builtin_command(command):
+            _apply_builtin_command(command)
+            return
+        raise ValueError(f"Unknown command type: {type(command)}")
 
     def _decode_and_apply(doc: SDoc, source_name: str) -> None:
         for index, expr in enumerate(doc.exprs):

@@ -7,7 +7,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 from textwrap import dedent, indent
-from typing import Any
+from typing import Protocol
 
 import arxiv
 import crossref.restful
@@ -18,34 +18,40 @@ import semanticscholar.Paper
 import yaml
 from bs4 import BeautifulSoup
 
-JSON = Any
-# type JSON = Union[str, int, float, bool, None, Dict[str, JSON], List[JSON]]
-# type JSONDict = Dict[str, JSON]
-# type JSONArray = List[JSON]
+type JSONScalar = str | int | float | bool | None
+type JSON = JSONScalar | dict[str, "JSON"] | list["JSON"]
 
 
 class Source:
-    # @property
-    # def url(self) -> str | None: raise NotImplementedError()
-    # @property
-    # def title(self) -> str: raise NotImplementedError()
-    # @property
-    # def description(self) -> str | None: raise NotImplementedError()
-    # @property
-    # def snippets(self) -> List[str]: raise NotImplementedError()
+    source_id: str
+    Web: type["WebSource"]
+    Arxiv: type["ArxivSource"]
+    CrossRef: type["CrossRefSource"]
+    SemanticScholar: type["SemanticScholarSource"]
 
-    Web: type["WebSource"] = None  # type: ignore
-    Arxiv: type["ArxivSource"] = None  # type: ignore
-    CrossRef: type["CrossRefSource"] = None  # type: ignore
-    SemanticScholar: type["SemanticScholarSource"] = None  # type: ignore
+    @property
+    def title(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def description(self) -> str | None:
+        raise NotImplementedError
+
+    @property
+    def snippets(self) -> list[str]:
+        raise NotImplementedError
+
+    @property
+    def url(self) -> str | None:
+        raise NotImplementedError
 
 
 @dataclass
 class WebSource(Source):
     source_id: str
-    raw: Any
+    raw: dict[str, JSON]
     title: str
-    url: str
+    url: str | None
     description: str
     snippets: list[str]
 
@@ -57,40 +63,11 @@ class ArxivSource(Source):
 
     @property
     def title(self) -> str:
-        return self.raw.title
+        return _as_str(self.raw.title)
 
     @property
     def description(self) -> str | None:
-        return self.raw.summary
-
-    @property
-    def snippets(self) -> list[str]:
-        return []
-
-    @property
-    def url(self) -> str:
-        return self.raw.pdf_url
-
-    @property
-    def arxiv_id(self) -> str:
-        return self.raw.entry_id
-
-
-@dataclass
-class CrossRefSource(Source):
-    source_id: str
-    raw: JSON
-
-    @property
-    def title(self) -> str:
-        titles = self.raw.get("title", [])
-        if len(titles) > 0:
-            return titles[0]
-        return "No Title"
-
-    @property
-    def description(self) -> str | None:
-        return self.raw.get("abstract", None)
+        return _as_optional_str(self.raw.summary)
 
     @property
     def snippets(self) -> list[str]:
@@ -98,8 +75,47 @@ class CrossRefSource(Source):
 
     @property
     def url(self) -> str | None:
-        link_list = self.raw.get("link", [])
-        return link_list[0]["URL"] if len(link_list) > 0 else None
+        return _as_optional_str(self.raw.pdf_url)
+
+    @property
+    def arxiv_id(self) -> str:
+        return _as_str(self.raw.entry_id)
+
+
+@dataclass
+class CrossRefSource(Source):
+    source_id: str
+    raw: dict[str, JSON]
+
+    @property
+    def title(self) -> str:
+        titles = self.raw.get("title")
+        if isinstance(titles, list) and titles and isinstance(titles[0], str):
+            return titles[0]
+        return "No Title"
+
+    @property
+    def description(self) -> str | None:
+        abstract = self.raw.get("abstract")
+        if isinstance(abstract, str):
+            return abstract
+        return None
+
+    @property
+    def snippets(self) -> list[str]:
+        return []
+
+    @property
+    def url(self) -> str | None:
+        link_list = self.raw.get("link")
+        if not isinstance(link_list, list) or not link_list:
+            return None
+        first_link = link_list[0]
+        if isinstance(first_link, dict):
+            value = first_link.get("URL")
+            if isinstance(value, str):
+                return value
+        return None
 
 
 @dataclass
@@ -109,11 +125,11 @@ class SemanticScholarSource(Source):
 
     @property
     def title(self) -> str:
-        return self.raw.title
+        return _as_str(self.raw.title)
 
     @property
     def description(self) -> str | None:
-        return self.raw.abstract
+        return _as_optional_str(self.raw.abstract)
 
     @property
     def snippets(self) -> list[str]:
@@ -121,7 +137,7 @@ class SemanticScholarSource(Source):
 
     @property
     def url(self) -> str:
-        return self.raw.url
+        return _as_str(self.raw.url)
 
 
 Source.Web = WebSource
@@ -137,7 +153,42 @@ class Query:
 
     @staticmethod
     def from_json(data: JSON) -> "Query":
-        return Query(query=data["query"], relevance=data["relevance"])
+        if not isinstance(data, dict):
+            raise ValueError("Expected query object")
+        query_value = data.get("query")
+        relevance_value = data.get("relevance")
+        if not isinstance(query_value, str) or not isinstance(relevance_value, int):
+            raise ValueError("Invalid query payload")
+        return Query(query=query_value, relevance=relevance_value)
+
+
+class ResearcherModeConfig(Protocol):
+    model: str
+    long_queries: int
+    short_queries: int
+    arxiv_cutoff: int
+    crossref_cutoff: int
+
+
+def _parse_json_object(content: str | None) -> dict[str, JSON]:
+    if content is None:
+        raise ValueError("Expected non-null JSON content")
+    parsed = json.loads(content)
+    if not isinstance(parsed, dict):
+        raise ValueError("Expected JSON object")
+    return parsed
+
+
+def _as_str(value: object, *, default: str = "") -> str:
+    return value if isinstance(value, str) else default
+
+
+def _as_optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _as_int(value: JSON, *, default: int = 0) -> int:
+    return value if isinstance(value, int) else default
 
 
 def deduplicate_queries(queries: list[Query]) -> list[Query]:
@@ -171,7 +222,7 @@ async def get_search_queries(client: openai.AsyncClient, model: str, query: str,
     queries: list[Query] = []
 
     # for _ in range(n_times):
-    async def run():
+    async def run() -> None:
         response = await client.chat.completions.create(
             model=model,
             messages=[
@@ -182,9 +233,16 @@ async def get_search_queries(client: openai.AsyncClient, model: str, query: str,
             response_format={"type": "json_object"},
         )
 
-        new_queries = json.loads(response.choices[0].message.content)["queries"]
+        response_json = _parse_json_object(response.choices[0].message.content)
+        new_queries = response_json.get("queries")
+        if not isinstance(new_queries, list):
+            return
 
-        queries.extend([Query.from_json(q) for q in new_queries])
+        for new_query in new_queries:
+            try:
+                queries.append(Query.from_json(new_query))
+            except ValueError:
+                continue
 
     await asyncio.gather(*[run() for _ in range(n_times)])
 
@@ -213,7 +271,7 @@ async def get_arxiv_search_queries(client: openai.AsyncClient, model: str, query
     queries: list[Query] = []
 
     # for _ in range(n_times):
-    async def run():
+    async def run() -> None:
         response = await client.chat.completions.create(
             model=model,
             messages=[
@@ -224,9 +282,16 @@ async def get_arxiv_search_queries(client: openai.AsyncClient, model: str, query
             response_format={"type": "json_object"},
         )
 
-        new_queries = json.loads(response.choices[0].message.content)["queries"]
+        response_json = _parse_json_object(response.choices[0].message.content)
+        new_queries = response_json.get("queries")
+        if not isinstance(new_queries, list):
+            return
 
-        queries.extend([Query.from_json(q) for q in new_queries])
+        for new_query in new_queries:
+            try:
+                queries.append(Query.from_json(new_query))
+            except ValueError:
+                continue
 
     await asyncio.gather(*[run() for _ in range(n_times)])
 
@@ -235,7 +300,7 @@ async def get_arxiv_search_queries(client: openai.AsyncClient, model: str, query
     return sorted(queries, key=lambda x: x.relevance, reverse=True)
 
 
-async def brave_search(http_client: httpx.AsyncClient, q, api_key):
+async def brave_search(http_client: httpx.AsyncClient, q: str, api_key: str) -> dict[str, JSON]:
     # curl -s --compressed "https://api.search.brave.com/res/v1/web/search?q=brave+search" -H "Accept:
     #   application/json" -H "Accept-Encoding: gzip" -H "X-Subscription-Token: <YOUR_API_KEY>"
     url = f"https://api.search.brave.com/res/v1/web/search?q={urllib.parse.quote(q)}"  # check:ignore E_HARDCODED_URL value=https://api.search.brave.com/res/v1/web/search?q=
@@ -245,14 +310,17 @@ async def brave_search(http_client: httpx.AsyncClient, q, api_key):
         "X-Subscription-Token": api_key,
     }
     response = await http_client.get(url, headers=headers)
-    return response.json()
+    body = response.json()
+    if isinstance(body, dict):
+        return body
+    return {}
 
 
-LAST_SCRAPERBEE_REQ = 0
+LAST_SCRAPERBEE_REQ = 0.0
 CONCURRENT_SCRAPERBEE_REQ = 0
 
 
-async def fetch_url(http_client: httpx.AsyncClient, url: str, scraperbee_key: str) -> str | None:
+async def fetch_url(http_client: httpx.AsyncClient, url: str | None, scraperbee_key: str) -> str | None:
     global LAST_SCRAPERBEE_REQ, CONCURRENT_SCRAPERBEE_REQ
     import random
 
@@ -351,7 +419,7 @@ class ResearcherMode:
         crossref_cutoff: int = 50
 
 
-async def main():
+async def main() -> None:
     config = yaml.safe_load(open(".env.yml"))
     brave_key = config["BRAVE_KEY"]
     openai_key = config["OPENAI_KEY"]
@@ -370,7 +438,7 @@ async def main():
     await research(config, mode, args.query)
 
 
-async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
+async def research(config: ApiConfig, mode: ResearcherModeConfig, query: str) -> None:
     # await asyncio.sleep(60 * 1)
     # return Result(
     #     sources=[ResultSource(title="Title", url="URL", relevance=55, summary="Summary")],
@@ -420,7 +488,7 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
 
         ALL_SOURCES: dict[str, Source] = {}
 
-        def next_source_id(prefix):
+        def next_source_id(prefix: str) -> str:
             index = 1
             while True:
                 source_id = f"{prefix}-{index}"
@@ -478,23 +546,39 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
             results = await brave_search(http_client, q.query, config.brave_key)
             with open("brave_search.json", "w+") as f:
                 print(json.dumps(results, indent=2), file=f)
-            for result in results.get("web", {}).get("results", []):
-                if any(x in result["url"] for x in NON_AUTHORITATIVE_SOURCES):
+            web_section = results.get("web")
+            if not isinstance(web_section, dict):
+                continue
+            results_list = web_section.get("results")
+            if not isinstance(results_list, list):
+                continue
+            for result in results_list:
+                if not isinstance(result, dict):
+                    continue
+                result_url = result.get("url")
+                if not isinstance(result_url, str):
+                    continue
+                if any(x in result_url for x in NON_AUTHORITATIVE_SOURCES):
                     continue
                 # If there is already a source with the same URL, skip
-                if any(x.url == result["url"] for x in ALL_SOURCES.values()):
+                if any(x.url == result_url for x in ALL_SOURCES.values()):
                     continue
 
                 source_id = next_source_id("web")
+                result_title = result.get("title")
+                result_description = result.get("description")
+                extra_snippets = result.get("extra_snippets")
                 ALL_SOURCES[source_id] = Source.Web(
                     source_id=source_id,
                     raw=result,
-                    title=result["title"],
-                    url=result["url"],
-                    description=result["description"],
-                    snippets=result.get("extra_snippets", []),
+                    title=result_title if isinstance(result_title, str) else "No Title",
+                    url=result_url,
+                    description=result_description if isinstance(result_description, str) else "",
+                    snippets=(
+                        [x for x in extra_snippets if isinstance(x, str)] if isinstance(extra_snippets, list) else []
+                    ),
                 )
-                print(f"Added {result['title']}")
+                print(f"Added {result_title}")
 
         logger.info("Searching using CrossRef")
         for q in long_queries:
@@ -508,6 +592,8 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
                 ):
                     continue
                 source_id = next_source_id("cr")
+                if not isinstance(item, dict):
+                    continue
                 source = Source.CrossRef(source_id=source_id, raw=item)
                 ALL_SOURCES[source_id] = source
                 logger.info(f"Added {source.title}")
@@ -522,11 +608,11 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
         #         ALL_SOURCES[source_id] = source
         #         logger.info(f"Added {source.title}")
 
-        SOURCE_RELEVANCE = {}
+        SOURCE_RELEVANCE: dict[str, int] = {}
         ALL_SOURCES_LIST = list(ALL_SOURCES.values())
         logger.info(f"Total Sources: {len(ALL_SOURCES_LIST)}")
 
-        async def process_batch(batch: list[Source]) -> JSON:
+        async def process_batch(batch: list[Source]) -> None:
             # logger.info(f"Estimating Relevance of Batch: {batch_start+1}-{batch_start+len(batch)}")
 
             def format_source(index: int, source: Source) -> str:
@@ -586,18 +672,30 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
 
             response_content = response.choices[0].message.content
             assert response_content is not None
-            response_json = json.loads(response_content)
-            batch_results = response_json["papers"]
+            response_json = _parse_json_object(response_content)
+            batch_results = response_json.get("papers")
+            if not isinstance(batch_results, list):
+                return
 
             for result in batch_results:
-                source = batch[result["num"] - 1]
+                if not isinstance(result, dict):
+                    continue
+                num_value = result.get("num")
+                if not isinstance(num_value, int):
+                    continue
+                if num_value < 1 or num_value > len(batch):
+                    continue
+                source = batch[num_value - 1]
                 # Check if title is correct
                 source_title = source.title.lower()
                 source_title = re.sub(r"\W+", " ", source_title)
                 source_title = re.sub(r"\s+", " ", source_title)
                 source_title = source_title.strip()
 
-                result_title = result.get("title", "").lower()
+                result_title_raw = result.get("title", "")
+                if not isinstance(result_title_raw, str):
+                    result_title_raw = ""
+                result_title = result_title_raw.lower()
                 result_title = re.sub(r"\W+", " ", result_title)
                 result_title = re.sub(r"\s+", " ", result_title)
                 result_title = result_title.strip()
@@ -613,21 +711,23 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
                 if not good_match:
                     logger.error(f"Title mismatch: {source.title} != {result['title']}")
 
-                SOURCE_RELEVANCE[source.source_id] = int(result["relevance"])
+                relevance_value = result.get("relevance")
+                if isinstance(relevance_value, int):
+                    SOURCE_RELEVANCE[source.source_id] = relevance_value
 
-        # for batch_start in range(0, len(ALL_SOURCES_LIST), 20):
-        #     batch = ALL_SOURCES_LIST[batch_start:batch_start+20]
+        if not ALL_SOURCES_LIST:
+            return
 
         await asyncio.gather(
             *[process_batch(ALL_SOURCES_LIST[i : i + 20]) for i in range(0, len(ALL_SOURCES_LIST), 20)]
         )
 
-        SOURCE_SUMMARIES = {}
+        SOURCE_SUMMARIES: dict[str, str] = {}
 
         with open("source_summaries.json", "w+") as f_summaries:
 
             # for source_id, relevance in SOURCE_RELEVANCE.items():
-            async def process_source(source_id, relevance):
+            async def process_source(source_id: str, relevance: int) -> None:
                 if relevance <= 3:
                     return
 
@@ -760,17 +860,17 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
                 summary = response.choices[0].message.content
                 logger.info(f"Summary: {summary}")
 
-                summary_json = json.loads(summary)
+                summary_json = _parse_json_object(summary)
                 if not summary_json.get("has_relevant_information", True):
                     logger.info("No relevant information")
                     return
 
-                relevance_score = summary_json.get("relevance_score", 0)
+                relevance_score = _as_int(summary_json.get("relevance_score", 0))
                 if relevance_score <= 25:
                     logger.info("Not relevant")
                     return
 
-                specificity_score = summary_json.get("specificity_score", 0)
+                specificity_score = _as_int(summary_json.get("specificity_score", 0))
                 if specificity_score <= 25:
                     logger.info("Not specific")
                     return
@@ -778,14 +878,15 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
                 relevance_flag = summary_json.get("relevance", None)
 
                 primary_relevance_summary = summary_json.get("primary_relevant_information", None)
-                if primary_relevance_summary is None:
+                if not isinstance(primary_relevance_summary, str):
                     logger.info("No relevant information")
                     return
-                secondary_relevance_summary = summary_json.get("secondary_relevant_information", None)
-                tertiary_relevance_summary = summary_json.get("tertiary_relevance_summary", None)
-                peripheral_relevance_summary = summary_json.get("peripheral_relevance_summary", None)
+                secondary_relevance_summary = _as_optional_str(summary_json.get("secondary_relevant_information"))
+                tertiary_relevance_summary = _as_optional_str(summary_json.get("tertiary_relevance_summary"))
+                peripheral_relevance_summary = _as_optional_str(summary_json.get("peripheral_relevance_summary"))
 
-                SOURCE_SUMMARIES[source_id] = summary
+                summary_text = summary if isinstance(summary, str) else ""
+                SOURCE_SUMMARIES[source_id] = summary_text
 
                 relevance = SOURCE_RELEVANCE[source_id]
                 source = ALL_SOURCES[source_id]

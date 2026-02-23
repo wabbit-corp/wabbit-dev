@@ -12,13 +12,13 @@ import os
 import textwrap
 import time
 from collections.abc import Callable
-from typing import Literal, ParamSpec, TypeVar, cast
+from typing import Literal, ParamSpec, TypeVar
 
 import git
 
 from dev.ai import suggest_version_number
 from dev.build_order import toposort_projects
-from dev.caching import NO_CACHE, cache
+from dev.caching import NO_CACHE, NoCacheSentinel, cache
 from dev.config import (
     GradleProject,
     Version,
@@ -274,7 +274,7 @@ async def poll_jitpack_build_status(api: JitPackAPI, group_id: str, artifact_id:
     return None  # Timed out
 
 
-def _check_jitpack_status_cached_ttl(status: BuildStatus | None) -> int | object:
+def _check_jitpack_status_cached_ttl(status: object) -> float | NoCacheSentinel | None:
     """
     Custom TTL policy function for JitPack status cache.
     If the status is OK, return a longer TTL (e.g., 1 hour).
@@ -282,21 +282,17 @@ def _check_jitpack_status_cached_ttl(status: BuildStatus | None) -> int | object
     If the status is None, return NO_CACHE.
     """
     if status == BuildStatus.OK:
-        return 3600  # 1 hour
-    elif status == BuildStatus.ERROR:
-        return 10  # 10 seconds
-    else:
-        return NO_CACHE
+        return 3600.0  # 1 hour
+    if status == BuildStatus.ERROR:
+        return 10.0  # 10 seconds
+    return NO_CACHE
 
 
-_jitpack_status_cache_decorator = cast(
-    Callable[[Callable[P, R]], Callable[P, R]],
-    cache(
-        path=".dev.cache.db",
-        ttl=3600,
-        exclude_params=["jitpack_api"],
-        ttl_policy_func=_check_jitpack_status_cached_ttl,
-    ),
+_jitpack_status_cache_decorator: Callable[[Callable[P, R]], Callable[P, R]] = cache(
+    path=".dev.cache.db",
+    ttl=3600,
+    exclude_params=["jitpack_api"],
+    ttl_policy_func=_check_jitpack_status_cached_ttl,
 )
 
 
