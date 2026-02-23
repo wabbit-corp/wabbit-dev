@@ -4,9 +4,6 @@ Thumbs.db
 /.is-dev-mode
 /.is-local-mode
 /.is-ij-mode
-/.dev.cache.db
-/test/tmp-setup-*/
-*.bak
 
 # Python .gitignore
 __pycache__/
@@ -42,3 +39,9 @@ env.bak/
 venv.bak/
 pip-log.txt
 pip-delete-this-directory.txt
+
+.dev.cache.db
+/tmp-*/
+/tmp/
+pyproject.toml.bak
+*.bak
