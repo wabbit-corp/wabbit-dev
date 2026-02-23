@@ -3,10 +3,10 @@ from __future__ import annotations
 import abc
 import enum
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from dev.base import Module
 
@@ -14,6 +14,9 @@ from dev.base import Module
 # If not, we might need a simpler text file check.
 from dev.file_properties import ExpectedFileProperties, get_expected_file_properties
 from dev.intrangeset import IntRangeSet
+
+if TYPE_CHECKING:
+    from dev.config import Project
 
 
 @dataclass(frozen=True)
@@ -28,7 +31,12 @@ class FileLocation:
         if self.path != other.path:
             raise ValueError("Cannot combine different file locations.")
 
-        combined_lines = (self.lines or []) + (other.lines or [])
+        if self.lines is None and other.lines is None:
+            return FileLocation(self.path, None)
+
+        left_lines = self.lines if self.lines is not None else IntRangeSet.empty
+        right_lines = other.lines if other.lines is not None else IntRangeSet.empty
+        combined_lines = left_lines + right_lines
         return FileLocation(self.path, combined_lines)
 
 
@@ -56,7 +64,7 @@ class IssueType:
     message: str
     severity: Severity = Severity.ERROR
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Verify that the ID is a valid IssueType Id
         if not isinstance(self.id, str):
             raise ValueError(f"Invalid ID: {self.id}")
@@ -71,7 +79,7 @@ class IssueType:
             raise ValueError(f"Duplicate IssueType ID: {self.id}")
         _KNOWN_TYPES.add(self.id)
 
-    def make(self, **kwargs) -> Issue:
+    def make(self, **kwargs: object) -> Issue:
         """
         Creates an Issue of this type.
         """
@@ -91,7 +99,7 @@ class Issue:
     """
 
     issue_type: IssueType
-    data: Mapping[str, Any] | None = None
+    data: Mapping[str, object] | None = None
     location: FileLocation | None = None
     fix: Callable[[], None] | None = None
 
@@ -108,12 +116,14 @@ class Issue:
         """
 
         if self.location is None:
-            self.location = FileLocation(path, IntRangeSet([line]) if line else None)
-        else:
-            if self.location.path != path:
-                raise ValueError("Cannot change the path of an existing issue.")
-            if line is not None:
-                self.location.lines = (self.location.lines or IntRangeSet([])) + IntRangeSet([line])
+            self.location = FileLocation(path, IntRangeSet([line]) if line is not None else None)
+            return self
+
+        if self.location.path != path:
+            raise ValueError("Cannot change the path of an existing issue.")
+        if line is not None:
+            existing_lines = self.location.lines if self.location.lines is not None else IntRangeSet.empty
+            self.location = FileLocation(path, existing_lines + IntRangeSet([line]))
         return self
 
 
@@ -140,7 +150,7 @@ class IssueList:
                     self.issues[-1].location = self.issues[-1].location + issue.location
         self.issues.append(issue)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Issue]:
         """
         Returns an iterator over the issues.
         """
@@ -313,7 +323,7 @@ class FileContext:
         tpe: IssueType,
         line: int | None = None,
         fix: Callable[[], None] | None = None,
-        **kwargs,
+        **kwargs: object,
     ) -> None:
         issue = tpe.make(**kwargs).at(self.path, line=line)
         if fix:
@@ -360,23 +370,23 @@ class FileContext:
 
 class FileCheck(Check):
     @abc.abstractmethod
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         raise NotImplementedError()
 
 
 class RepoCheck(Check):
     @abc.abstractmethod
-    def check(self, path: Path, project: Any) -> list[Issue]:
+    def check(self, path: Path, project: Project | None) -> list[Issue]:
         raise NotImplementedError()
 
 
 class ProjectCheck(Check):
     @abc.abstractmethod
-    def check(self, path: Path, project: Any) -> list[Issue]:
+    def check(self, path: Path, project: Project | None) -> list[Issue]:
         raise NotImplementedError()
 
 
 class DirectoryCheck(Check):
     @abc.abstractmethod
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         raise NotImplementedError()

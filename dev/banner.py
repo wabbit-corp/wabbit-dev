@@ -1,9 +1,12 @@
+import logging
 from pathlib import Path
 
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 
+_LOGGER = logging.getLogger(__name__)
 
-def get_text_dimensions(font: ImageFont.ImageFont, text: str) -> tuple[int, int]:
+
+def get_text_dimensions(font: ImageFont.ImageFont | ImageFont.FreeTypeFont, text: str) -> tuple[int, int]:
     """
     Measure text size using the old getmask-based approach,
     which works in older PIL/Pillow versions.
@@ -11,7 +14,28 @@ def get_text_dimensions(font: ImageFont.ImageFont, text: str) -> tuple[int, int]
     if not text:
         return 0, 0
     mask = font.getmask(text)
-    return mask.size  # returns (width, height)
+    width, height = mask.size
+    return int(width), int(height)
+
+
+def _to_rgba(color: str | tuple[int, int, int] | tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    if isinstance(color, str):
+        if color.lower() == "transparent":
+            return 0, 0, 0, 0
+        try:
+            rgb_or_rgba = ImageColor.getrgb(color)
+        except ValueError:
+            _LOGGER.warning("Unknown background color string '%s'; defaulting to transparent.", color)
+            return 0, 0, 0, 0
+        if len(rgb_or_rgba) == 3:
+            red, green, blue = rgb_or_rgba
+            return red, green, blue, 255
+        red, green, blue, alpha = rgb_or_rgba
+        return red, green, blue, alpha
+
+    if len(color) == 3:
+        return color + (255,)
+    return color
 
 
 def prepare_icon(icon_path: str | Path, target_size: int, corner_radius_factor: float = 0.15) -> Image.Image:
@@ -119,11 +143,6 @@ def create_banner(
     else:
         subtitle_font = None
 
-    # Resolve the background color as an RGBA tuple
-    background_color = (
-        ImageColor.getrgb(background_color) + (255,) if isinstance(background_color, str) else background_color
-    )
-
     # 2. Load the original PNG
     img = prepare_icon(image_path, target_size=icon_target_size)
     img_width, img_height = img.size
@@ -151,24 +170,7 @@ def create_banner(
     banner_height = max(img_height, text_block_height) + 2 * padding
 
     # 5. Determine banner background color
-    if isinstance(background_color, str):
-        if background_color.lower() == "transparent":
-            final_banner_bg_color = (0, 0, 0, 0)
-        else:
-            try:
-                # For named colors, getrgb returns RGB. We add Alpha for RGBA.
-                red, green, blue = ImageColor.getrgb(background_color)
-                final_banner_bg_color = (red, green, blue, 255)
-            except ValueError:
-                print(f"Warning: Unknown background color string '{background_color}'. Defaulting to transparent.")
-                final_banner_bg_color = (0, 0, 0, 0)  # Fallback to transparent
-    elif isinstance(background_color, tuple) and len(background_color) == 3:  # RGB tuple
-        final_banner_bg_color = background_color + (255,)  # Add opaque alpha
-    elif isinstance(background_color, tuple) and len(background_color) == 4:  # RGBA tuple
-        final_banner_bg_color = background_color
-    else:
-        print("Warning: Invalid background_color format. Defaulting to transparent.")
-        final_banner_bg_color = (0, 0, 0, 0)  # Fallback
+    final_banner_bg_color = _to_rgba(background_color)
 
     # Create the blank banner
     banner = Image.new("RGBA", (banner_width, banner_height), color=final_banner_bg_color)
@@ -211,7 +213,7 @@ def create_banner(
         banner.save(output_path)
         # print(f"Banner created and saved to {output_path}")
     except Exception as e:
-        print(f"Error saving banner: {e}")
+        _LOGGER.exception("Error saving banner to %s: %s", output_path, e)
 
 
 if __name__ == "__main__":

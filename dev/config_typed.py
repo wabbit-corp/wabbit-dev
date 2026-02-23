@@ -4,8 +4,7 @@ import re
 import typing
 from collections.abc import Sequence
 from dataclasses import dataclass
-from functools import reduce
-from typing import Any
+from types import UnionType
 
 from mu.typed import MuDecodeContext, MuDecodeError, MuDeserialize, mu_tag
 from mu.types import SAtom, SExpr, SStr
@@ -43,6 +42,13 @@ def _decode_symbol_atom(expr: SExpr, _ctx: MuDecodeContext) -> str:
             got=type(expr).__name__,
             span=getattr(expr, "span", None),
         )
+    if not isinstance(expr.value, str):
+        raise MuDecodeError(
+            path=_ctx.path,
+            expected="symbol atom",
+            got=type(expr.value).__name__,
+            span=getattr(expr, "span", None),
+        )
     return expr.value
 
 
@@ -56,6 +62,13 @@ def _decode_issue_name_or_star(expr: SExpr, ctx: MuDecodeContext) -> str:
             path=ctx.path,
             expected="issue id string (E_...) or *",
             got=type(expr).__name__,
+            span=getattr(expr, "span", None),
+        )
+    if not isinstance(value, str):
+        raise MuDecodeError(
+            path=ctx.path,
+            expected="issue id string (E_...) or *",
+            got=type(value).__name__,
             span=getattr(expr, "span", None),
         )
 
@@ -144,7 +157,7 @@ class ChecksIgnoreFindingCommand:
 @dataclass(frozen=True)
 class DefineCommand:
     name: typing.Annotated[str, MuDeserialize(_decode_symbol_atom)]
-    value: Any
+    value: str | int | float | bool | None
 
 
 @mu_tag("openai-key")
@@ -349,7 +362,7 @@ class PythonProjectCommand:
     dev_dependencies: list[str] | None = None
     scripts: list[str] | None = None
     features: list[FeatureCommand] | None = None
-    source_sets: list[Any] | None = None
+    source_sets: list[object] | None = None
     line_length: int | str | None = None
     target_version: str | None = None
     test_paths: list[str] | None = None
@@ -357,7 +370,7 @@ class PythonProjectCommand:
     deptry_package_map: dict[str, str] | None = None
     deptry_per_rule_ignores: dict[str, list[str]] | None = None
     importlinter_root_packages: list[str] | None = None
-    importlinter_contracts: list[dict[str, Any]] | None = None
+    importlinter_contracts: list[dict[str, object]] | None = None
     coverage_source: list[str] | None = None
     coverage_omit: list[str] | None = None
     coverage_fail_under: int | str | None = None
@@ -458,7 +471,7 @@ BuiltinTopLevelCommand = (
 )
 
 
-BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[Any], ...] = (
+BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[object], ...] = (
     ChecksDisableCommand,
     ChecksIgnoreFindingCommand,
     DefineCommand,
@@ -484,13 +497,19 @@ BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[Any], ...] = (
 )
 
 
-def make_top_level_target(extra_command_types: Sequence[type[Any]]) -> Any:
-    command_types = tuple(BUILTIN_TOPLEVEL_COMMAND_TYPES) + tuple(extra_command_types)
+TopLevelTarget = type[object] | UnionType
+
+
+def make_top_level_target(extra_command_types: Sequence[type[object]]) -> TopLevelTarget:
+    command_types: tuple[type[object], ...] = tuple(BUILTIN_TOPLEVEL_COMMAND_TYPES) + tuple(extra_command_types)
     if not command_types:
         raise ValueError("No command types provided")
     if len(command_types) == 1:
         return command_types[0]
-    return reduce(lambda acc, item: acc | item, command_types[1:], command_types[0])
+    target: TopLevelTarget = command_types[0]
+    for item in command_types[1:]:
+        target = target | item
+    return target
 
 
 __all__ = [

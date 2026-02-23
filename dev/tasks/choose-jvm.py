@@ -6,6 +6,16 @@ import math
 import os
 import re
 import sys
+from collections.abc import Callable, Hashable, Sequence
+from dataclasses import dataclass
+from functools import cmp_to_key
+from importlib import import_module
+
+type VersionComponent = int | float
+type VersionTuple = tuple[VersionComponent, ...]
+type VersionInput = str | Sequence[VersionComponent]
+type VersionRange = tuple[VersionTuple, VersionTuple]
+type ParsedQuery = tuple[VersionRange, str, set[str]]
 
 
 class VersionComparison(enum.Enum):
@@ -18,48 +28,54 @@ class VersionComparison(enum.Enum):
     GT = 1  # e.g. 8.0.2 > 8.0.1 or 8.1.0 > 8.0.2
 
 
-def compare_versions(a, b):
-    a = [int(x) for x in a.split(".")] if isinstance(a, str) else list(a)
-    b = [int(x) for x in b.split(".")] if isinstance(b, str) else list(b)
+def _normalize_version(version: VersionInput) -> list[VersionComponent]:
+    if isinstance(version, str):
+        return [int(x) for x in version.split(".")]
+    return list(version)
+
+
+def compare_versions(a: VersionInput, b: VersionInput) -> int:
+    left = _normalize_version(a)
+    right = _normalize_version(b)
 
     # remove trailing zeros
-    while a and a[-1] == 0:
-        a = a[:-1]
-    while b and b[-1] == 0:
-        b = b[:-1]
+    while left and left[-1] == 0:
+        left = left[:-1]
+    while right and right[-1] == 0:
+        right = right[:-1]
 
-    for i in range(min(len(a), len(b))):
-        if a[i] < b[i]:
+    for i in range(min(len(left), len(right))):
+        if left[i] < right[i]:
             return -1
-        if a[i] > b[i]:
+        if left[i] > right[i]:
             return 1
 
-    if len(a) < len(b):
+    if len(left) < len(right):
         return -1
-    if len(a) > len(b):
+    if len(left) > len(right):
         return 1
     return 0
 
 
-def version_signed_distance(a, b, normalize=False):
-    a = [int(x) for x in a.split(".")] if isinstance(a, str) else list(a)
-    b = [int(x) for x in b.split(".")] if isinstance(b, str) else list(b)
+def version_signed_distance(a: VersionInput, b: VersionInput, normalize: bool = False) -> tuple[float, ...]:
+    left = _normalize_version(a)
+    right = _normalize_version(b)
 
     # remove trailing zeros
-    while a and a[-1] == 0:
-        a = a[:-1]
-    while b and b[-1] == 0:
-        b = b[:-1]
+    while left and left[-1] == 0:
+        left = left[:-1]
+    while right and right[-1] == 0:
+        right = right[:-1]
 
-    d = []
-    for i in range(max(len(a), len(b))):
-        av = a[i] if i < len(a) else 0
-        bv = b[i] if i < len(b) else 0
-        abv = av - bv
+    distance: list[float] = []
+    for i in range(max(len(left), len(right))):
+        av = float(left[i]) if i < len(left) else 0.0
+        bv = float(right[i]) if i < len(right) else 0.0
+        delta = av - bv
         if normalize:
-            abv /= max(1, max(av, bv))
-        d.append(abv)
-    return tuple(d)
+            delta /= max(1.0, max(av, bv))
+        distance.append(delta)
+    return tuple(distance)
 
 
 # for test_version_pair in [('8', '8.0'), ('8.0', '8.0.0'), ('8.0.1', '8.0.1'), ('8.0.1', '8.0.2'), ('8.0.2', '8.1.0'), ('9.0.1', '10')]:
@@ -73,8 +89,8 @@ def version_signed_distance(a, b, normalize=False):
 #         assert all(x == 0 for x in d)
 
 
-def find_installed_jvms_win32():
-    FOUND_JVMS = set()
+def find_installed_jvms_win32() -> set[str]:
+    found_jvms: set[str] = set()
 
     # Step 1: check PATH to find Java installations
     for path in os.environ.get("PATH", "").split(";"):
@@ -90,7 +106,7 @@ def find_installed_jvms_win32():
         java_home = os.path.abspath(path + os.sep + "..")
 
         # print("Found Java installation in PATH: {}".format(java_home))
-        FOUND_JVMS.add(java_home)
+        found_jvms.add(java_home)
 
     # Step 2: check JAVA_HOME to find Java installations
     java_home = os.environ.get("JAVA_HOME", "")
@@ -100,28 +116,48 @@ def find_installed_jvms_win32():
 
         if has_java and has_javaw:
             # print("Found Java installation in JAVA_HOME: {}".format(java_home))
-            FOUND_JVMS.add(os.path.abspath(java_home))
+            found_jvms.add(os.path.abspath(java_home))
 
     # Step 3: check registry to find Java installations
-    import winreg
+    try:
+        winreg_module = import_module("winreg")
+    except ModuleNotFoundError:
+        winreg_module = None
 
-    root_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\JavaSoft\JDK")
-    # print(winreg.QueryInfoKey(root_key))
-    for i in range(0, winreg.QueryInfoKey(root_key)[0]):
-        key_name = winreg.EnumKey(root_key, i)
+    if winreg_module is not None:
+        open_key = getattr(winreg_module, "OpenKey", None)
+        hkey_local_machine = getattr(winreg_module, "HKEY_LOCAL_MACHINE", None)
+        query_info_key = getattr(winreg_module, "QueryInfoKey", None)
+        enum_key = getattr(winreg_module, "EnumKey", None)
+        query_value_ex = getattr(winreg_module, "QueryValueEx", None)
 
-        try:
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\JavaSoft\JDK\\{key_name}")
-            value, regtype = winreg.QueryValueEx(key, "JavaHome")
-        except OSError:
-            continue
+        if (
+            callable(open_key)
+            and hkey_local_machine is not None
+            and callable(query_info_key)
+            and callable(enum_key)
+            and callable(query_value_ex)
+        ):
+            try:
+                root_key = open_key(hkey_local_machine, r"SOFTWARE\JavaSoft\JDK")
+                key_count = query_info_key(root_key)[0]
+            except OSError:
+                key_count = 0
 
-        has_java = os.path.exists(os.path.join(value, "bin", "java.exe"))
-        has_javaw = os.path.exists(os.path.join(value, "bin", "javaw.exe"))
+            for i in range(0, key_count):
+                key_name = enum_key(root_key, i)
+                try:
+                    key = open_key(hkey_local_machine, rf"SOFTWARE\JavaSoft\JDK\\{key_name}")
+                    java_home_value, _ = query_value_ex(key, "JavaHome")
+                except OSError:
+                    continue
+                if not isinstance(java_home_value, str):
+                    continue
 
-        if has_java and has_javaw:
-            # print("Found Java installation in registry: {}".format(value))
-            FOUND_JVMS.add(os.path.abspath(value))
+                has_java = os.path.exists(os.path.join(java_home_value, "bin", "java.exe"))
+                has_javaw = os.path.exists(os.path.join(java_home_value, "bin", "javaw.exe"))
+                if has_java and has_javaw:
+                    found_jvms.add(os.path.abspath(java_home_value))
 
     # Step 4: check common locations to find Java installations
     win32api = __import__("win32api")
@@ -166,7 +202,7 @@ def find_installed_jvms_win32():
 
                             if has_java and has_javaw:
                                 # print("Found Java installation in common location: {}".format(java_home))
-                                FOUND_JVMS.add(os.path.abspath(java_home))
+                                found_jvms.add(os.path.abspath(java_home))
 
                 if any(keyword in test_dir.lower() for keyword in JVM_KEYWORDS):
                     # two options: either there are subdirectories listing versions, or there is a single directory
@@ -178,7 +214,7 @@ def find_installed_jvms_win32():
                         has_javaw = os.path.exists(os.path.join(java_home, "bin", "javaw.exe"))
                         if has_java and has_javaw:
                             print(f"Found Java installation in common location: {java_home}")
-                            FOUND_JVMS.add(os.path.abspath(java_home))
+                            found_jvms.add(os.path.abspath(java_home))
                     else:
                         for version_dir in os.listdir(java_home):
                             if not os.path.isdir(os.path.join(java_home, version_dir)):
@@ -190,7 +226,7 @@ def find_installed_jvms_win32():
                             has_javaw = os.path.exists(os.path.join(java_home, "bin", "javaw.exe"))
                             if has_java and has_javaw:
                                 # print("Found Java installation in common location: {}".format(java_home))
-                                FOUND_JVMS.add(os.path.abspath(java_home))
+                                found_jvms.add(os.path.abspath(java_home))
 
     # Step 5: check home directory to find Java installations
     user_home = os.path.expanduser("~")
@@ -207,51 +243,52 @@ def find_installed_jvms_win32():
 
             if has_java and has_javaw:
                 # print("Found Java installation in home directory: {}".format(java_home))
-                FOUND_JVMS.add(os.path.abspath(java_home))
+                found_jvms.add(os.path.abspath(java_home))
 
-    return FOUND_JVMS
+    return found_jvms
 
 
-def get_jvm_version(java_home):
+def get_jvm_version(java_home: str) -> tuple[tuple[int, ...], str | None] | None:
     # Step 6: find out the versions
-    if not os.path.exists(os.path.join(jvm_home, "release")):
-        print(f"No release file found in {jvm_home}")
+    release_path = os.path.join(java_home, "release")
+    if not os.path.exists(release_path):
+        print(f"No release file found in {java_home}")
         return None
 
-    with open(os.path.join(jvm_home, "release")) as f:
+    with open(release_path, encoding="utf-8") as f:
         java_version = None
         java_implementor = None
 
         for line in f:
             if line.startswith("JAVA_VERSION="):
-                version = line.split("=")[1].strip().strip('"')
-                if version.startswith("1."):
-                    version = version[2:].replace("_", ".")
+                version_text = line.split("=")[1].strip().strip('"')
+                if version_text.startswith("1."):
+                    version_text = version_text[2:].replace("_", ".")
 
-                version = tuple(int(x) for x in version.split("."))
+                parsed_version = tuple(int(x) for x in version_text.split("."))
 
-                # print("Found version {} in {}".format(version, jvm_home))
-                java_version = version
+                # print("Found version {} in {}".format(version, java_home))
+                java_version = parsed_version
             elif line.startswith("IMPLEMENTOR="):
                 implementor = line.split("=")[1].strip().strip('"')
-                # print("Found implementor {} in {}".format(implementor, jvm_home))
+                # print("Found implementor {} in {}".format(implementor, java_home))
                 java_implementor = implementor
 
         if java_version is not None:
             return java_version, java_implementor
+    return None
 
 
-def parse_query(query):
-    query = query.strip().lower()
-    query = query.split(" ")
-    query_version = query.pop(0)
+def parse_query(query: str) -> ParsedQuery:
+    query_parts = query.strip().lower().split(" ")
+    query_version = query_parts.pop(0)
 
     assert re.match(r"^\d+(\.\d+)*\+?$", query_version), f"Invalid version: {query_version}"
 
     if "+" in query_version:
         query_version = query_version[:-1]
-        query_version_range_lower = [int(x) for x in query_version.split(".")]
-        query_version_range_upper = query_version_range_lower[:-1] + [math.inf]
+        query_version_range_lower: list[VersionComponent] = [int(x) for x in query_version.split(".")]
+        query_version_range_upper: list[VersionComponent] = query_version_range_lower[:-1] + [math.inf]
     else:
         query_version_range_lower = [int(x) for x in query_version.split(".")]
         query_version_range_upper = query_version_range_lower + [math.inf]
@@ -262,14 +299,14 @@ def parse_query(query):
     )
 
     query_order = "earliest"
-    while "latest" in query:
+    while "latest" in query_parts:
         query_order = "latest"
-        query.remove("latest")
-    while "earliest" in query:
+        query_parts.remove("latest")
+    while "earliest" in query_parts:
         query_order = "earliest"
-        query.remove("earliest")
+        query_parts.remove("earliest")
 
-    query_keywords = set(query)
+    query_keywords = set(query_parts)
 
     return query_version_range, query_order, query_keywords
 
@@ -278,21 +315,26 @@ def parse_query(query):
 #     print(parse_query(test_query))
 
 
-def rank_remapping(values, zero, cmp=None, reverse=False):
-    from functools import cmp_to_key
-
+def rank_remapping[T: Hashable](
+    values: Sequence[T],
+    zero: T,
+    cmp: Callable[[T, T], int] | None = None,
+    reverse: bool = False,
+) -> list[float]:
     mapping = [x for x in values if x != zero]
     if len(mapping) == 0:
-        return [0 for x in values]
-    mapping.sort(reverse=reverse, key=cmp_to_key(cmp))
+        return [0.0 for _ in values]
+    if cmp is None:
+        mapping.sort(reverse=reverse, key=repr)
+    else:
+        mapping.sort(reverse=reverse, key=cmp_to_key(cmp))
 
     # remove consecutive duplicates
-    mapping = [x for i, x in enumerate(mapping) if i == 0 or x != mapping[i - 1]]
+    unique_mapping = [x for i, x in enumerate(mapping) if i == 0 or x != mapping[i - 1]]
 
-    mapping = {score: (i + 1) / len(mapping) for i, score in enumerate(mapping)}
+    score_to_rank = {score: (i + 1) / len(unique_mapping) for i, score in enumerate(unique_mapping)}
 
-    values = [mapping[score] if score != zero else 0 for score in values]
-    return values
+    return [score_to_rank[score] if score != zero else 0.0 for score in values]
 
 
 if __name__ == "__main__":
@@ -320,27 +362,33 @@ if __name__ == "__main__":
 
     jvm_homes = find_installed_jvms_win32()
 
-    JVMS = []
+    jvms: list[tuple[str, tuple[int, ...], str | None]] = []
     for jvm_home in jvm_homes:
-        jvm_version, java_implementor = get_jvm_version(jvm_home)
-
-        JVMS.append((jvm_home, jvm_version, java_implementor))
-
-    from dataclasses import dataclass
+        jvm_info = get_jvm_version(jvm_home)
+        if jvm_info is None:
+            continue
+        jvm_version, java_implementor = jvm_info
+        jvms.append((jvm_home, jvm_version, java_implementor))
 
     @dataclass
     class Scores:
-        version: tuple
+        version: tuple[float, ...] | None
         keywords: int
-        order: tuple
+        order: tuple[float, ...] | None
+
+    @dataclass
+    class ScoreRanks:
+        version: float
+        keywords: float
+        order: float
 
     @dataclass
     class QueryResult:
         jvm_path: str
-        java_version: tuple
-        java_implementor: str
+        java_version: tuple[int, ...]
+        java_implementor: str | None
         scores: Scores
-        score_ranks: Scores
+        score_ranks: ScoreRanks
 
     # query = '16+' # or '8 adopt' or '8+ adopt latest' or '8+ jetbrains earliest' or '8+ jetbrains latest' ...
     if query:
@@ -348,8 +396,8 @@ if __name__ == "__main__":
         # print(repr(query), parse_query(query))
         version_range, version_order, version_keywords = parse_query(query)
 
-        scored_jvms = []
-        for jvm_home, java_version, java_implementor in JVMS:
+        scored_jvms: list[QueryResult] = []
+        for jvm_home, java_version, java_implementor in jvms:
             min_version = version_range[0]
             max_version = version_range[1]
 
@@ -359,6 +407,7 @@ if __name__ == "__main__":
             # print(f'{min_version} cmp {java_version} = {min_cmp}')
             # print(f'{max_version} cmp {java_version} = {max_cmp}')
 
+            version_distance: tuple[float, ...] | None
             if min_cmp <= 0 and max_cmp >= 0:
                 version_distance = None
                 # print("Found exact version range match")
@@ -372,6 +421,7 @@ if __name__ == "__main__":
             # print("Distance score: {}".format(distance_score))
 
             sd0 = version_signed_distance("0.0.0", java_version)
+            order_score: tuple[float, ...] | None
             if version_order == "earliest":
                 order_score = tuple(-x for x in sd0)
             elif version_order == "latest":
@@ -392,24 +442,43 @@ if __name__ == "__main__":
 
             all_scores = Scores(version_distance, keyword_score, order_score)
 
-            scored_jvms.append(QueryResult(jvm_home, java_version, java_implementor, all_scores, [0, 0, 0]))
+            scored_jvms.append(
+                QueryResult(jvm_home, java_version, java_implementor, all_scores, ScoreRanks(0.0, 0.0, 0.0))
+            )
 
         # print(f"JVM Versions: {[qr.java_version for qr in scored_jvms]}")
         distance_scores = [qr.scores.version for qr in scored_jvms]
+
+        def _compare_optional_tuples(
+            left: tuple[float, ...] | None,
+            right: tuple[float, ...] | None,
+        ) -> int:
+            if left is None and right is None:
+                return 0
+            if left is None:
+                return -1
+            if right is None:
+                return 1
+            return compare_versions(left, right)
+
         # print(f"Distance scores: {distance_scores}")
-        distance_scores = rank_remapping(distance_scores, None, cmp=compare_versions)
+        distance_rank_scores = rank_remapping(distance_scores, None, cmp=_compare_optional_tuples)
         # print(f"Distance scores: {distance_scores}")
         order_scores = [qr.scores.order for qr in scored_jvms]
         # print(f"Order scores: {order_scores}")
-        order_scores = rank_remapping(order_scores, None, cmp=compare_versions)
+        order_rank_scores = rank_remapping(order_scores, None, cmp=_compare_optional_tuples)
         # print(f"Order scores: {order_scores}")
         keyword_scores = [qr.scores.keywords for qr in scored_jvms]
         # print(f"Keyword scores: {keyword_scores}")
-        keyword_scores = rank_remapping(keyword_scores, 0, cmp=lambda x, y: x - y)
+        keyword_rank_scores = rank_remapping(keyword_scores, 0, cmp=lambda x, y: x - y)
         # print(f"Keyword scores: {keyword_scores}")
 
         for i, qr in enumerate(scored_jvms):
-            qr.score_ranks = Scores(distance_scores[i], keyword_scores[i], order_scores[i])
+            qr.score_ranks = ScoreRanks(
+                distance_rank_scores[i],
+                keyword_rank_scores[i],
+                order_rank_scores[i],
+            )
 
         perfect_matches = [qr for qr in scored_jvms if qr.scores.version is None and qr.scores.keywords == 0]
 

@@ -15,6 +15,7 @@
 
 import re
 from bisect import bisect_right
+from collections.abc import Callable
 from pathlib import Path
 from re import Pattern
 
@@ -191,7 +192,7 @@ def _compute_comment_spans(text: str, style: CommentStyle | None) -> list[tuple[
     return _merge_spans(spans)
 
 
-def _position_in_spans_checker(spans: list[tuple[int, int]]):
+def _position_in_spans_checker(spans: list[tuple[int, int]]) -> Callable[[int], bool]:
     """
     Return a predicate pos -> bool that is O(log N) using bisect, assuming merged non-overlapping spans.
     """
@@ -311,7 +312,7 @@ class HardcodedAbsolutePathCheck(FileCheck):
         self.abs_path_regex = abs_path_regex
         self.url_regex = url_regex
 
-    def _is_part_of_url(self, path_match: re.Match, line: str) -> bool:
+    def _is_part_of_url(self, path_match: re.Match[str], line: str) -> bool:
         """Treat the path as 'inside a URL' if its start sits inside any URL span,
         or immediately after (to tolerate a trailing quote/paren captured by the path regex).
         """
@@ -325,7 +326,7 @@ class HardcodedAbsolutePathCheck(FileCheck):
                 return True
         return False
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if not ctx.path.is_file():
             return
         if not ctx.expected_properties.is_text:
@@ -441,7 +442,7 @@ class HardcodedUrlCheck(FileCheck):
         except Exception:
             return None  # Could not parse domain
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if not ctx.path.is_file():
             return
         if not ctx.expected_properties.is_text:
@@ -550,7 +551,7 @@ class HardcodedInternalHostnameIpCheck(FileCheck):
                         return True
         return False
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if not ctx.path.is_file():
             return
         if not ctx.expected_properties.is_text:

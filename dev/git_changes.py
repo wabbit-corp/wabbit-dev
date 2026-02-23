@@ -25,7 +25,7 @@ from git.exc import GitCommandError, InvalidGitRepositoryError
 
 # IndexEntry is needed for type hints if used explicitly
 from git.index.typ import IndexEntry
-from git.util import hex_to_bin
+from git.objects.commit import Commit
 
 # Configure logging for debugging if needed
 # logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -70,10 +70,12 @@ class IndexContent:
     stage: int = 0  # For merge conflicts
 
     @classmethod
-    def from_entry(cls, entry_tuple) -> "IndexContent":
+    def from_entry(cls, entry_tuple: tuple[tuple[int, str | bytes, int, str], ...]) -> "IndexContent":
         """Create from IndexFile.entries dictionary value tuple."""
         # Structure is like: ((mode, sha, stage, path), ...)
         mode, sha, stage, path = entry_tuple[0]  # entry is a tuple containing a tuple
+        if isinstance(sha, bytes):
+            sha = sha.hex()
         return cls(mode=mode, sha=sha, path=path, stage=stage)
 
 
@@ -110,7 +112,7 @@ class FileDiff:
     # Field to store the path used for display/identification
     path: str | None = field(init=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Ensure path consistency, prefer new_path if available for general use
         # The _path_key is used internally for dictionary lookups
         self.path = self.new_path if self.new_path is not None else self.old_path
@@ -219,9 +221,11 @@ def _calculate_blob_sha(repo: Repo, content_bytes: bytes | None) -> str | None:
         # io.BytesIO(content_bytes) provides the stream interface
         istream = gitdb.IStream(Blob.type, len(content_bytes), io.BytesIO(content_bytes))
         # Store the stream in the object database and get the SHA
-        sha = repo.odb.store(istream).hexsha
+        sha_value = repo.odb.store(istream).hexsha
+        if isinstance(sha_value, str):
+            return sha_value
         # logging.debug(f"Calculated SHA {sha} for content: {content_bytes[:50]}...") # Debug SHA calc
-        return sha
+        return str(sha_value)
     except Exception as e:
         logging.error(f"Error calculating blob SHA for content: {e}")
         return None
@@ -246,6 +250,8 @@ def _calculate_wt_sha_via_hash_object(repo: Repo, path: str) -> str | None:
         # Use git hash-object command to get the SHA as Git would calculate it
         # The '-w' option is not needed here, we just want the hash ID.
         sha = repo.git.hash_object(full_path)
+        if not isinstance(sha, str):
+            sha = str(sha)
         # FIX: Handle empty output case
         if not sha:
             logging.warning(f"hash-object for {path} returned empty string.")
@@ -404,6 +410,8 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
         else:  # Modified, TypeChange, ModeChange
             old_path, new_path = diff.a_path, diff.b_path
             path_key = new_path  # Use new path as key
+        if path_key is None:
+            continue
 
         # Determine Change Type based on the diff object
         if is_rename:
@@ -483,7 +491,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
         logging.error(f"Unexpected error during unstaged diff: {e}")
         unstaged_diff_list = []
 
-    processed_unstaged_paths = set()  # Keep track of paths handled here
+    processed_unstaged_paths: set[str] = set()  # Keep track of paths handled here
 
     for diff in unstaged_diff_list:
         # For Index vs WT diff:
@@ -491,6 +499,8 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
         # Note: b_blob might be None if create_patch=False
         idx_path = diff.a_path  # Path is taken from the index side (a_path)
         path_key = idx_path
+        if path_key is None:
+            continue
         processed_unstaged_paths.add(path_key)
 
         # Get working tree state
@@ -637,7 +647,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
                 # before the first commit. index.diff(None) might not report it,
                 # but repo.untracked_files lists it.
                 # We need to ensure it's correctly flagged if already in diffs_dict.
-                existing_diff = next(
+                matching_diff = next(
                     (
                         fd
                         for fd in diffs_dict.values()
@@ -645,11 +655,11 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
                     ),
                     None,
                 )
-                if existing_diff:
+                if matching_diff:
                     # If it exists, it should have unstaged=True, but not untracked=True
                     # It might be ADDED or MODIFIED depending on previous steps
-                    existing_diff.untracked = False
-                    existing_diff.unstaged = True  # Ensure unstaged is true
+                    matching_diff.untracked = False
+                    matching_diff.unstaged = True  # Ensure unstaged is true
                     logging.warning(f"Path '{path}' listed as untracked but found in existing diffs. Correcting flags.")
                 else:
                     # Should not happen based on path_key_exists check, but log if it does
@@ -735,7 +745,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
             # Read index blob content for diff generation
             if final_sha:
                 try:
-                    final_content = repo.odb.stream(hex_to_bin(final_sha)).read()
+                    final_content = repo.odb.stream(bytes.fromhex(final_sha)).read()
                     # Re-classify based on actual index content just to be safe
                     final_type = _classify_data(final_content)
                 except Exception as e:
@@ -850,16 +860,16 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
 # Base class with setup, teardown, and helpers
 class GitTestBase(unittest.TestCase):
     repo: Repo
-    temp_dir: tempfile.TemporaryDirectory
+    temp_dir: tempfile.TemporaryDirectory[str]
     repo_path: str
 
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls) -> None:
         # Configure logging once for the test suite if needed for debugging
         # logging.basicConfig(level=logging.DEBUG, format='%(levelname)s:%(name)s:%(message)s')
         pass
 
-    def setUp(self):
+    def setUp(self) -> None:
         """Set up a temporary directory and initialize a Git repository."""
         self.temp_dir = tempfile.TemporaryDirectory()
         self.repo_path = self.temp_dir.name
@@ -874,7 +884,7 @@ class GitTestBase(unittest.TestCase):
         except Exception as e:
             logging.warning(f"Could not write git config: {e}")
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         """Clean up the temporary directory."""
         # Close repo object first to release file handles, especially on Windows
         if hasattr(self, "repo") and self.repo:
@@ -887,11 +897,11 @@ class GitTestBase(unittest.TestCase):
             self.temp_dir.cleanup()
 
     # --- Helper Methods ---
-    def _path(self, filename):
+    def _path(self, filename: str) -> Path:
         """Gets the absolute path for a file in the repo."""
         return Path(self.repo_path) / filename
 
-    def _write_file(self, filename, content):
+    def _write_file(self, filename: str, content: str | bytes) -> str:
         """Writes content to a file in the repo working directory."""
         filepath = self._path(filename)
         filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -908,7 +918,7 @@ class GitTestBase(unittest.TestCase):
             raise
         return str(filepath)  # Return string path
 
-    def _stage_file(self, filename, content=None):
+    def _stage_file(self, filename: str, content: str | bytes | None = None) -> None:
         """Writes content (optional) and stages the file."""
         if content is not None:
             self._write_file(filename, content)
@@ -921,7 +931,7 @@ class GitTestBase(unittest.TestCase):
             logging.error(f"Error staging {filename}: {e}")
             raise
 
-    def _commit_file(self, filename, content, commit_msg="Commit"):
+    def _commit_file(self, filename: str, content: str | bytes, commit_msg: str = "Commit") -> Commit:
         """Writes, stages, and commits a file."""
         self._write_file(filename, content)
         rel_path = Path(filename).as_posix()
@@ -935,7 +945,7 @@ class GitTestBase(unittest.TestCase):
         # return self._path(filename) # Return Path object
 
     # FIX: Updated _stage_remove to use 'git rm -f'
-    def _stage_remove(self, filename):
+    def _stage_remove(self, filename: str) -> None:
         """Removes a file from the index and working tree, forcing if necessary."""
         rel_path = Path(filename).as_posix()
         filepath = self._path(filename)
@@ -971,15 +981,15 @@ class GitTestBase(unittest.TestCase):
 
     def _assert_diff(
         self,
-        diffs,
-        expected_path,
-        expected_type,
-        expected_staged,
-        expected_unstaged,
-        expected_untracked=False,
-        expected_partial=False,
-        expected_old_path=None,
-    ):
+        diffs: list[FileDiff],
+        expected_path: str,
+        expected_type: ChangeType,
+        expected_staged: bool,
+        expected_unstaged: bool,
+        expected_untracked: bool = False,
+        expected_partial: bool = False,
+        expected_old_path: str | None = None,
+    ) -> FileDiff:
         """Asserts the properties of a specific FileDiff in a list."""
         # Normalize expected paths to posix format for comparison
         expected_path_key = Path(expected_path).as_posix()
@@ -1086,12 +1096,27 @@ class GitTestBase(unittest.TestCase):
 
         return target_diff  # Return the found diff for further assertions if needed
 
+    def _require_unified_diff(self, diff: FileDiff) -> str:
+        self.assertIsNotNone(diff.unified_diff, "Expected unified diff to be present")
+        assert diff.unified_diff is not None
+        return diff.unified_diff
+
+    def _require_similarity_index(self, diff: FileDiff) -> int:
+        self.assertIsNotNone(diff.similarity_index, "Expected similarity index to be present")
+        assert diff.similarity_index is not None
+        return diff.similarity_index
+
+    def _require_mode(self, mode: int | None, label: str) -> int:
+        self.assertIsNotNone(mode, f"Expected {label} to be present")
+        assert mode is not None
+        return mode
+
 
 # Inherit from GitTestBase to get helpers
 class TestGatherChanges(GitTestBase):
     """Original test cases, adapted to use helpers."""
 
-    def test_no_head_commit(self):
+    def test_no_head_commit(self) -> None:
         """
         If there's no commit yet, everything in index is effectively new (ADDED).
         """
@@ -1103,7 +1128,7 @@ class TestGatherChanges(GitTestBase):
         # Use _assert_diff for consistent checks
         self._assert_diff(diffs, "file.txt", ChangeType.ADDED, True, False)
 
-    def test_filetype_change(self):
+    def test_filetype_change(self) -> None:
         """
         Start with text => commit => replace with binary => expect MODIFIED, binary_different=True.
         """
@@ -1119,7 +1144,7 @@ class TestGatherChanges(GitTestBase):
         )
         self.assertIsNone(d.unified_diff, "Expected no unified diff for text->binary change")
 
-    def test_basic_scenario(self):
+    def test_basic_scenario(self) -> None:
         """Test basic unstaged modification and an untracked file."""
         self._commit_file("hello.txt", "Hello\n", "Initial")
         # modify (unstaged)
@@ -1142,7 +1167,7 @@ class TestGatherChanges(GitTestBase):
         # Check modified file
         self._assert_diff(diffs, "hello.txt", ChangeType.MODIFIED, False, True)
 
-    def test_mode_change(self):
+    def test_mode_change(self) -> None:
         """Test staging a mode change (non-exec -> exec)."""
         self._commit_file("script.sh", "#!/bin/bash\necho Hello\n", "Init Script")
         # Get path from commit object if needed, or just use relative path
@@ -1158,7 +1183,7 @@ class TestGatherChanges(GitTestBase):
         # Assert MODE_CHANGED, staged=True
         self._assert_diff(diffs, "script.sh", ChangeType.MODE_CHANGED, True, False)
 
-    def test_partial_staging(self):
+    def test_partial_staging(self) -> None:
         """Test partial staging: stage one change, make another unstaged change."""
         self._commit_file("example.txt", "Line1\nLine2\nLine3\n", "Init")
         # Stage partial change (add Line4)
@@ -1171,11 +1196,11 @@ class TestGatherChanges(GitTestBase):
         # Overall change HEAD vs WT is MODIFIED, staged=T, unstaged=T, partial=T
         d = self._assert_diff(diffs, "example.txt", ChangeType.MODIFIED, True, True, expected_partial=True)
         # Check that the unified diff reflects the *final* state (including Line5)
-        self.assertIsNotNone(d.unified_diff)
-        self.assertIn("+Line4", d.unified_diff)
-        self.assertIn("+Line5", d.unified_diff)
+        unified_diff = self._require_unified_diff(d)
+        self.assertIn("+Line4", unified_diff)
+        self.assertIn("+Line5", unified_diff)
 
-    def test_empty_file_classified_correctly(self):
+    def test_empty_file_classified_correctly(self) -> None:
         """Test adding content to a previously empty file."""
         self._commit_file("empty.txt", "", "Init empty")
         diffs = compute_repo_diffs(self.repo)
@@ -1188,10 +1213,9 @@ class TestGatherChanges(GitTestBase):
         d = self._assert_diff(diffs2, "empty.txt", ChangeType.MODIFIED, False, True)
         self.assertEqual(d.old_type, FileType.EMPTY, "Old type should be EMPTY")
         self.assertEqual(d.new_type, FileType.TEXT, "New type should be TEXT")
-        self.assertIsNotNone(d.unified_diff)
-        self.assertIn("+Hello", d.unified_diff)
+        self.assertIn("+Hello", self._require_unified_diff(d))
 
-    def test_unified_diff_correctness(self):
+    def test_unified_diff_correctness(self) -> None:
         """Test the content of the unified diff for a simple modification."""
         self._commit_file("data.txt", "Apple\nBanana\nCherry\n", "Init")
         # Unstaged change: modify Banana, add Dates
@@ -1200,8 +1224,7 @@ class TestGatherChanges(GitTestBase):
         diffs = compute_repo_diffs(self.repo)
         self.assertEqual(len(diffs), 1)
         d = self._assert_diff(diffs, "data.txt", ChangeType.MODIFIED, False, True)
-        self.assertIsNotNone(d.unified_diff)
-        lines = d.unified_diff.splitlines()  # Split into lines for easier checking
+        lines = self._require_unified_diff(d).splitlines()  # Split into lines for easier checking
         # Check standard diff format headers
         self.assertTrue(any(line.startswith("--- a/data.txt") for line in lines))
         self.assertTrue(any(line.startswith("+++ b/data.txt") for line in lines))
@@ -1211,7 +1234,7 @@ class TestGatherChanges(GitTestBase):
         self.assertTrue(any(line.startswith(" Cherry") for line in lines))  # Context line
         self.assertTrue(any(line.startswith("+Dates") for line in lines))  # Added line
 
-    def test_multiline_diff_correctness(self):
+    def test_multiline_diff_correctness(self) -> None:
         """Test unified diff for multiple changes across lines."""
         orig = ["Line1", "Line2", "Line3", "Line4", "Line5"]
         self._commit_file("big.txt", "\n".join(orig) + "\n", "Init")
@@ -1222,15 +1245,15 @@ class TestGatherChanges(GitTestBase):
         diffs = compute_repo_diffs(self.repo)
         self.assertEqual(len(diffs), 1)
         d = self._assert_diff(diffs, "big.txt", ChangeType.MODIFIED, False, True)
-        self.assertIsNotNone(d.unified_diff)
+        unified_diff = self._require_unified_diff(d)
         # Check specific lines in the diff
-        self.assertIn("-Line2", d.unified_diff)
-        self.assertIn("+Line2Changed", d.unified_diff)
-        self.assertIn("-Line4", d.unified_diff)
-        self.assertIn(" Line5", d.unified_diff)  # Check context line
-        self.assertIn("+Line6", d.unified_diff)
+        self.assertIn("-Line2", unified_diff)
+        self.assertIn("+Line2Changed", unified_diff)
+        self.assertIn("-Line4", unified_diff)
+        self.assertIn(" Line5", unified_diff)  # Check context line
+        self.assertIn("+Line6", unified_diff)
 
-    def test_deleted_staged_then_readded_in_working_tree(self):
+    def test_deleted_staged_then_readded_in_working_tree(self) -> None:
         """Test staging a delete, then recreating the file unstaged."""
         self._commit_file("dupe.txt", "Old\n", "Init")
         # Stage deletion (removes from index and WT using 'git rm -f')
@@ -1246,11 +1269,11 @@ class TestGatherChanges(GitTestBase):
         self.assertEqual(len(diffs), 1)
         d = self._assert_diff(diffs, "dupe.txt", ChangeType.MODIFIED, True, True, expected_partial=True)
         self.assertFalse(d.untracked, "File should not be marked untracked")
-        self.assertIsNotNone(d.unified_diff)
-        self.assertIn("-Old", d.unified_diff)
-        self.assertIn("+New", d.unified_diff)
+        unified_diff = self._require_unified_diff(d)
+        self.assertIn("-Old", unified_diff)
+        self.assertIn("+New", unified_diff)
 
-    def test_add_then_delete_without_commit(self):
+    def test_add_then_delete_without_commit(self) -> None:
         """Test staging an add, then staging a delete before committing."""
         # Repo is empty initially
         # Stage add
@@ -1262,7 +1285,7 @@ class TestGatherChanges(GitTestBase):
         # Staged Add + Staged Delete should cancel out relative to empty HEAD
         self.assertEqual(len(diffs), 0, f"Expected 0 diffs, got {len(diffs)}")
 
-    def test_real_life_scenario_with_new_and_modified(self):
+    def test_real_life_scenario_with_new_and_modified(self) -> None:
         """Test a mix of new staged files and modified staged files."""
         needkt_rel = os.path.join("src", "main", "kotlin", "one", "wabbit", "data", "Need.kt")
         gradle_rel = "build.gradle.kts"
@@ -1293,7 +1316,7 @@ class TestGatherChanges(GitTestBase):
         # Assert modified kotlin file
         self._assert_diff(diffs, needkt_posix, ChangeType.MODIFIED, True, False)
 
-    def test_rename_file(self):
+    def test_rename_file(self) -> None:
         """Test staging a simple file rename."""
         oldp = "old.txt"
         newp = "new.txt"
@@ -1310,12 +1333,10 @@ class TestGatherChanges(GitTestBase):
         self.assertEqual(len(diffs), 1)
         d = self._assert_diff(diffs, newp, ChangeType.RENAMED, True, False, expected_old_path=oldp)
         # Check similarity score if needed (optional)
-        self.assertIsNotNone(d.similarity_index, "Rename should have a similarity score")
-        self.assertGreater(
-            d.similarity_index, 50, "Similarity score should be > 50 for simple rename"
-        )  # Git default threshold
+        similarity_index = self._require_similarity_index(d)
+        self.assertGreater(similarity_index, 50, "Similarity score should be > 50 for simple rename")
 
-    def test_subdirectory_modified(self):
+    def test_subdirectory_modified(self) -> None:
         """Test staging a modification in a subdirectory."""
         relp = os.path.join("src", "main", "kotlin", "File.kt")
         self._commit_file(relp, "val x=1\n", "Init")
@@ -1328,7 +1349,7 @@ class TestGatherChanges(GitTestBase):
         relp_posix = Path(relp).as_posix()
         self._assert_diff(diffs, relp_posix, ChangeType.MODIFIED, True, False)
 
-    def test_new_file_includes_content_in_diff(self):
+    def test_new_file_includes_content_in_diff(self) -> None:
         """Test that a newly staged file has a correct unified diff."""
         # Need at least one commit for HEAD to exist
         self._commit_file("dummy.txt", "Initial file\n", "Initial commit")
@@ -1341,16 +1362,12 @@ class TestGatherChanges(GitTestBase):
         # Use posix path for assertion key
         new_file_posix = Path(new_file_rel).as_posix()
         newfile_diff = self._assert_diff(diffs, new_file_posix, ChangeType.ADDED, True, False)
-
-        self.assertIsNotNone(
-            newfile_diff.unified_diff,
-            "Expected a unified diff for newly added text file",
-        )
+        unified_diff = self._require_unified_diff(newfile_diff)
         # Check diff headers and content
-        self.assertIn("--- /dev/null", newfile_diff.unified_diff)
-        self.assertIn(f"+++ b/{new_file_posix}", newfile_diff.unified_diff)
-        self.assertIn("+Hello", newfile_diff.unified_diff)
-        self.assertIn("+World", newfile_diff.unified_diff)
+        self.assertIn("--- /dev/null", unified_diff)
+        self.assertIn(f"+++ b/{new_file_posix}", unified_diff)
+        self.assertIn("+Hello", unified_diff)
+        self.assertIn("+World", unified_diff)
 
 
 # Inherit from GitTestBase
@@ -1363,19 +1380,19 @@ class TestGatherChangesEnhanced(GitTestBase):
 
     # --- Test Cases ---
 
-    def test_00_empty_repo(self):
+    def test_00_empty_repo(self) -> None:
         """Test an empty repository with no commits."""
         diffs = compute_repo_diffs(self.repo)
         self.assertEqual(len(diffs), 0)
 
-    def test_01_no_head_commit_staged_add(self):
+    def test_01_no_head_commit_staged_add(self) -> None:
         """Test staging a file with no prior commits (unborn HEAD)."""
         self._stage_file("file.txt", "Hello\n")
         diffs = compute_repo_diffs(self.repo)
         self.assertEqual(len(diffs), 1)
         self._assert_diff(diffs, "file.txt", ChangeType.ADDED, True, False)
 
-    def test_02_no_head_commit_untracked_add(self):
+    def test_02_no_head_commit_untracked_add(self) -> None:
         """Test an untracked file with no prior commits."""
         self._write_file("untracked.txt", "Untracked content\n")
         diffs = compute_repo_diffs(self.repo)
@@ -1389,7 +1406,7 @@ class TestGatherChangesEnhanced(GitTestBase):
             expected_untracked=True,
         )
 
-    def test_03_no_head_commit_staged_then_deleted_from_index_and_wt(self):
+    def test_03_no_head_commit_staged_then_deleted_from_index_and_wt(self) -> None:
         """Test staging add, then staging remove before commit."""
         # Stage add
         self._stage_file("temp.txt", "Hello\n")
@@ -1399,7 +1416,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         # The add and remove should cancel out
         self.assertEqual(len(diffs), 0)
 
-    def test_04_no_head_commit_staged_then_deleted_from_index_only(self):
+    def test_04_no_head_commit_staged_then_deleted_from_index_only(self) -> None:
         """Test staging add, then removing from index only before commit."""
         f_path = self._path("temp.txt")
         f_path.write_text("Hello\n", encoding="utf-8")
@@ -1422,7 +1439,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         # Should now be no changes
         self.assertEqual(len(diffs2), 0)
 
-    def test_10_basic_commit_then_modify_unstaged(self):
+    def test_10_basic_commit_then_modify_unstaged(self) -> None:
         """Test unstaged modification after a commit."""
         self._commit_file("hello.txt", "Hello\n", "Initial")
         self._write_file("hello.txt", "Hello\nAnother line.\n")
@@ -1430,7 +1447,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         self.assertEqual(len(diffs), 1)
         self._assert_diff(diffs, "hello.txt", ChangeType.MODIFIED, False, True)
 
-    def test_11_basic_commit_then_modify_staged(self):
+    def test_11_basic_commit_then_modify_staged(self) -> None:
         """Test staged modification after a commit."""
         self._commit_file("hello.txt", "Hello\n", "Initial")
         self._stage_file("hello.txt", "Hello\nStaged change.\n")
@@ -1438,7 +1455,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         self.assertEqual(len(diffs), 1)
         self._assert_diff(diffs, "hello.txt", ChangeType.MODIFIED, True, False)
 
-    def test_12_basic_commit_then_delete_unstaged(self):
+    def test_12_basic_commit_then_delete_unstaged(self) -> None:
         """Test unstaged deletion after a commit."""
         self._commit_file("delete_me.txt", "Content\n", "Initial")
         # Use path from helper
@@ -1447,7 +1464,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         self.assertEqual(len(diffs), 1)
         self._assert_diff(diffs, "delete_me.txt", ChangeType.DELETED, False, True)
 
-    def test_13_basic_commit_then_delete_staged(self):
+    def test_13_basic_commit_then_delete_staged(self) -> None:
         """Test staged deletion after a commit."""
         self._commit_file("delete_me_staged.txt", "Content\n", "Initial")
         self._stage_remove("delete_me_staged.txt")  # Removes from index and WT
@@ -1455,7 +1472,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         self.assertEqual(len(diffs), 1)
         self._assert_diff(diffs, "delete_me_staged.txt", ChangeType.DELETED, True, False)
 
-    def test_14_basic_untracked_file(self):
+    def test_14_basic_untracked_file(self) -> None:
         """Test a simple untracked file after a commit."""
         self._commit_file("dummy.txt", "Dummy\n", "Initial")
         self._write_file("untracked.log", "Log message\n")
@@ -1471,7 +1488,7 @@ class TestGatherChangesEnhanced(GitTestBase):
             expected_untracked=True,
         )
 
-    def test_20_mode_change_executable_staged(self):
+    def test_20_mode_change_executable_staged(self) -> None:
         """Test staging a mode change (add execute bit)."""
         self._commit_file("script.sh", "#!/bin/bash\necho Hello\n", "Init")
         script_path_str = str(self._path("script.sh"))
@@ -1482,7 +1499,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         self.assertEqual(len(diffs), 1)
         self._assert_diff(diffs, "script.sh", ChangeType.MODE_CHANGED, True, False)
 
-    def test_21_mode_change_executable_unstaged(self):
+    def test_21_mode_change_executable_unstaged(self) -> None:
         """Test an unstaged mode change (add execute bit)."""
         self._commit_file("script_u.sh", "#!/bin/bash\necho Hello\n", "Init")
         script_path_str = str(self._path("script_u.sh"))
@@ -1494,7 +1511,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         # FIX: Using hash-object for WT SHA and adjusted logic should fix this
         self._assert_diff(diffs, "script_u.sh", ChangeType.MODE_CHANGED, False, True)
 
-    def test_22_mode_change_and_content_change_staged(self):
+    def test_22_mode_change_and_content_change_staged(self) -> None:
         """Test staging both mode and content changes simultaneously."""
         self._commit_file("script_mc.sh", "#!/bin/bash\necho Hello\n", "Init")
         script_path_str = str(self._path("script_mc.sh"))
@@ -1510,16 +1527,18 @@ class TestGatherChangesEnhanced(GitTestBase):
         self.assertEqual(len(diffs), 1)
         # Change should be MODIFIED as content changed, even if mode also changed
         d = self._assert_diff(diffs, "script_mc.sh", ChangeType.MODIFIED, True, False)
-        self.assertIsNotNone(d.unified_diff)
-        self.assertIn("-echo Hello", d.unified_diff)
-        self.assertIn("+echo World", d.unified_diff)
+        unified_diff = self._require_unified_diff(d)
+        self.assertIn("-echo Hello", unified_diff)
+        self.assertIn("+echo World", unified_diff)
         # Check modes (optional)
-        self.assertNotEqual(d.old_mode, d.new_mode)
-        self.assertTrue(stat.S_ISREG(d.old_mode))
-        self.assertTrue(stat.S_ISREG(d.new_mode))
-        self.assertTrue(bool(d.new_mode & stat.S_IXUSR))  # Check execute bit
+        old_mode = self._require_mode(d.old_mode, "old mode")
+        new_mode = self._require_mode(d.new_mode, "new mode")
+        self.assertNotEqual(old_mode, new_mode)
+        self.assertTrue(stat.S_ISREG(old_mode))
+        self.assertTrue(stat.S_ISREG(new_mode))
+        self.assertTrue(bool(new_mode & stat.S_IXUSR))  # Check execute bit
 
-    def test_30_partial_staging_modification(self):
+    def test_30_partial_staging_modification(self) -> None:
         """Test partial staging: stage one modification, make another unstaged."""
         self._commit_file("partial.txt", "Line1\nLine2\nLine3\n", "Init")
         # Stage addition of Line4
@@ -1530,11 +1549,11 @@ class TestGatherChangesEnhanced(GitTestBase):
         self.assertEqual(len(diffs), 1)
         # Overall HEAD vs WT is MODIFIED, staged=T, unstaged=T, partial=T
         d = self._assert_diff(diffs, "partial.txt", ChangeType.MODIFIED, True, True, expected_partial=True)
-        self.assertIsNotNone(d.unified_diff)
-        self.assertIn("+Line4", d.unified_diff)
-        self.assertIn("+Line5", d.unified_diff)
+        unified_diff = self._require_unified_diff(d)
+        self.assertIn("+Line4", unified_diff)
+        self.assertIn("+Line5", unified_diff)
 
-    def test_31_partial_staging_new_file_staged_then_modified(self):
+    def test_31_partial_staging_new_file_staged_then_modified(self) -> None:
         """Test staging a new file, then modifying it unstaged."""
         # Stage a new file
         self._stage_file("new_partial.txt", "Initial content\n")
@@ -1551,11 +1570,11 @@ class TestGatherChangesEnhanced(GitTestBase):
             True,
             expected_partial=True,
         )
-        self.assertIsNotNone(d.unified_diff)
-        self.assertIn("+Initial content", d.unified_diff)
-        self.assertIn("+More content", d.unified_diff)
+        unified_diff = self._require_unified_diff(d)
+        self.assertIn("+Initial content", unified_diff)
+        self.assertIn("+More content", unified_diff)
 
-    def test_32_partial_staging_delete_staged_then_recreated(self):
+    def test_32_partial_staging_delete_staged_then_recreated(self) -> None:
         """Test staging a delete, then recreating the file unstaged."""
         self._commit_file("del_recreate.txt", "Original\n", "Init")
         # Stage deletion (uses 'git rm -f')
@@ -1576,11 +1595,11 @@ class TestGatherChangesEnhanced(GitTestBase):
             expected_partial=True,
         )
         self.assertFalse(d.untracked)  # Not untracked
-        self.assertIsNotNone(d.unified_diff)
-        self.assertIn("-Original", d.unified_diff)
-        self.assertIn("+Recreated", d.unified_diff)
+        unified_diff = self._require_unified_diff(d)
+        self.assertIn("-Original", unified_diff)
+        self.assertIn("+Recreated", unified_diff)
 
-    def test_40_rename_simple_staged(self):
+    def test_40_rename_simple_staged(self) -> None:
         """Test staging a simple rename with no content change."""
         oldp = "old_name.txt"
         newp = "new_name.txt"
@@ -1592,7 +1611,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         self.assertEqual(len(diffs), 1)
         self._assert_diff(diffs, newp, ChangeType.RENAMED, True, False, expected_old_path=oldp)
 
-    def test_41_rename_with_modification_staged(self):
+    def test_41_rename_with_modification_staged(self) -> None:
         """Test staging a rename along with content modifications."""
         oldp = "old_mod.txt"
         newp = "new_mod.txt"
@@ -1612,30 +1631,27 @@ class TestGatherChangesEnhanced(GitTestBase):
         # We check for the RENAMED case first, as R=True was used.
         if len(diffs) == 1 and diffs[0].change_type == ChangeType.RENAMED:
             d = self._assert_diff(diffs, newp, ChangeType.RENAMED, True, False, expected_old_path=oldp)
-            self.assertIsNotNone(d.unified_diff, "Unified diff expected for rename+mod")
+            unified_diff = self._require_unified_diff(d)
             # Check diff content reflects the modification
-            self.assertIn("-Line 1", d.unified_diff)
-            self.assertIn("+Line 1 Changed", d.unified_diff)
-            self.assertIn("-Line 3", d.unified_diff)
-            self.assertNotIn("+Line 3", d.unified_diff)  # Check deleted line
-            self.assertIn("+Line 5 Added", d.unified_diff)  # Check added line
+            self.assertIn("-Line 1", unified_diff)
+            self.assertIn("+Line 1 Changed", unified_diff)
+            self.assertIn("-Line 3", unified_diff)
+            self.assertNotIn("+Line 3", unified_diff)  # Check deleted line
+            self.assertIn("+Line 5 Added", unified_diff)  # Check added line
         elif len(diffs) == 2:
             # Handle case where Git didn't detect rename (similarity too low?)
             logging.warning("Rename+Mod test resulted in separate Delete+Add diffs.")
             self._assert_diff(diffs, oldp, ChangeType.DELETED, True, False)
             add_diff = self._assert_diff(diffs, newp, ChangeType.ADDED, True, False)
-            self.assertIsNotNone(
-                add_diff.unified_diff,
-                "Unified diff expected for added part of rename+mod",
-            )
-            self.assertIn("+Line 1 Changed", add_diff.unified_diff)
-            self.assertIn("+Line 5 Added", add_diff.unified_diff)
+            add_unified_diff = self._require_unified_diff(add_diff)
+            self.assertIn("+Line 1 Changed", add_unified_diff)
+            self.assertIn("+Line 5 Added", add_unified_diff)
         else:
             self.fail(
                 f"Unexpected number of diffs ({len(diffs)}) for staged rename+mod. Expected 1 (RENAMED) or 2 (DELETE+ADD)."
             )
 
-    def test_42_rename_unstaged(self):
+    def test_42_rename_unstaged(self) -> None:
         """Test an unstaged rename (rename in WT only)."""
         oldp = "old_un.txt"
         newp = "new_un.txt"
@@ -1649,7 +1665,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         # The new file is untracked because it wasn't added to index
         self._assert_diff(diffs, newp, ChangeType.ADDED, False, True, expected_untracked=True)
 
-    def test_50_filetype_change_text_to_binary_staged(self):
+    def test_50_filetype_change_text_to_binary_staged(self) -> None:
         """Test staging a change from text content to binary content."""
         self._commit_file("type_change.dat", "Text data\n", "Init Text")
         # Stage binary content
@@ -1662,7 +1678,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         self.assertEqual(d.old_type, FileType.TEXT)
         self.assertEqual(d.new_type, FileType.BINARY)
 
-    def test_51_filetype_change_binary_to_text_unstaged(self):
+    def test_51_filetype_change_binary_to_text_unstaged(self) -> None:
         """Test an unstaged change from binary content to text content."""
         self._commit_file("type_change_b.dat", b"\xca\xfe\xba\xbe", "Init binary")
         # Write text content to WT, do not stage
@@ -1676,12 +1692,12 @@ class TestGatherChangesEnhanced(GitTestBase):
         # Git diff output for binary->text might vary, check for key elements
         # It might include "Binary files ... differ" or just the text diff
         # self.assertIn("Binary files", d.unified_diff) # This might not always appear
-        self.assertIn("+New text content", d.unified_diff)
+        self.assertIn("+New text content", self._require_unified_diff(d))
         self.assertEqual(d.old_type, FileType.BINARY)
         self.assertEqual(d.new_type, FileType.TEXT)
 
     # FIX: Modified assertion in test_52
-    def test_52_binary_file_modified_staged(self):
+    def test_52_binary_file_modified_staged(self) -> None:
         """Test staging a modification to a binary file."""
         # Note: Content chosen might be misclassified as TEXT by simple heuristic
         self._commit_file("binary_mod.bin", b"\x11\x22\x33\x00", "Init binary")
@@ -1699,7 +1715,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         # self.assertEqual(d.new_type, FileType.BINARY) # This might fail
         self.assertNotEqual(d.old_content_sha, d.new_content_sha)
 
-    def test_60_empty_file_add_staged(self):
+    def test_60_empty_file_add_staged(self) -> None:
         """Test staging the addition of an empty file."""
         self._stage_file("empty_new.txt", "")
         diffs = compute_repo_diffs(self.repo)
@@ -1711,7 +1727,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         # Diff for adding empty file might be None or minimal
         # self.assertIsNone(d.unified_diff) # Or check for specific minimal diff
 
-    def test_61_empty_file_commit_then_modify_staged(self):
+    def test_61_empty_file_commit_then_modify_staged(self) -> None:
         """Test committing an empty file, then staging content addition."""
         self._commit_file("empty_mod.txt", "", "Init empty")
         # Stage content addition
@@ -1719,12 +1735,11 @@ class TestGatherChangesEnhanced(GitTestBase):
         diffs = compute_repo_diffs(self.repo)
         self.assertEqual(len(diffs), 1)
         d = self._assert_diff(diffs, "empty_mod.txt", ChangeType.MODIFIED, True, False)
-        self.assertIsNotNone(d.unified_diff)
-        self.assertIn("+Not empty anymore", d.unified_diff)
+        self.assertIn("+Not empty anymore", self._require_unified_diff(d))
         self.assertEqual(d.old_type, FileType.EMPTY)
         self.assertEqual(d.new_type, FileType.TEXT)
 
-    def test_62_empty_file_commit_then_delete_staged(self):
+    def test_62_empty_file_commit_then_delete_staged(self) -> None:
         """Test committing an empty file, then staging its deletion."""
         self._commit_file("empty_del.txt", "", "Init empty")
         self._stage_remove("empty_del.txt")
@@ -1735,7 +1750,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         # New type might be UNKNOWN or EMPTY depending on how deletion is handled
         # self.assertEqual(d.new_type, FileType.UNKNOWN)
 
-    def test_70_subdirectory_commit_then_modify_staged(self):
+    def test_70_subdirectory_commit_then_modify_staged(self) -> None:
         """Test staging a modification within a subdirectory."""
         relp = os.path.join("src", "app", "main.kt")
         self._commit_file(relp, "fun main() {}\n", "Init")
@@ -1745,11 +1760,11 @@ class TestGatherChangesEnhanced(GitTestBase):
         self.assertEqual(len(diffs), 1)
         relp_posix = Path(relp).as_posix()
         d = self._assert_diff(diffs, relp_posix, ChangeType.MODIFIED, True, False)
-        self.assertIsNotNone(d.unified_diff)
-        self.assertIn("-fun main() {}", d.unified_diff)
-        self.assertIn('+fun main() { println("Hi") }', d.unified_diff)
+        unified_diff = self._require_unified_diff(d)
+        self.assertIn("-fun main() {}", unified_diff)
+        self.assertIn('+fun main() { println("Hi") }', unified_diff)
 
-    def test_71_subdirectory_untracked(self):
+    def test_71_subdirectory_untracked(self) -> None:
         """Test an untracked file within a subdirectory."""
         self._commit_file("dummy.txt", "Dummy", "Init")
         relp = os.path.join("src", "app", "config.json")
@@ -1761,7 +1776,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         relp_posix = Path(relp).as_posix()
         self._assert_diff(diffs, relp_posix, ChangeType.ADDED, False, True, expected_untracked=True)
 
-    def test_72_subdirectory_rename_out_staged(self):
+    def test_72_subdirectory_rename_out_staged(self) -> None:
         """Test staging a rename from a subdirectory to the root."""
         old_relp = os.path.join("src", "util", "helper.py")
         new_relp = "helper_moved.py"
@@ -1785,7 +1800,7 @@ class TestGatherChangesEnhanced(GitTestBase):
             expected_old_path=old_relp_posix,
         )
 
-    def test_80_file_with_space_in_name(self):
+    def test_80_file_with_space_in_name(self) -> None:
         """Test staging a modification to a file with spaces in its name."""
         fname = "file with space.txt"
         self._commit_file(fname, "Initial content\n", "Init")
@@ -1795,12 +1810,12 @@ class TestGatherChangesEnhanced(GitTestBase):
         self.assertEqual(len(diffs), 1)
         fname_posix = Path(fname).as_posix()
         d = self._assert_diff(diffs, fname_posix, ChangeType.MODIFIED, True, False)
-        self.assertIsNotNone(d.unified_diff)
+        unified_diff = self._require_unified_diff(d)
         # Correct assertion - check for added line, not deleted initial line
-        self.assertIn(" Initial content", d.unified_diff)  # Check context line
-        self.assertIn("+Modified content", d.unified_diff)  # Check added line
+        self.assertIn(" Initial content", unified_diff)  # Check context line
+        self.assertIn("+Modified content", unified_diff)  # Check added line
 
-    def test_90_committed_deleted_from_index_only(self):
+    def test_90_committed_deleted_from_index_only(self) -> None:
         """Test state where file is committed, then removed from index only ('git rm --cached')."""
         fname = "cached_delete.txt"
         fname_rel = Path(fname).as_posix()

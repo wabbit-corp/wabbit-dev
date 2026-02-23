@@ -472,6 +472,9 @@ async def publish_single_project(
         assert last_repo_version is None or config_version >= last_repo_version
         assert config_version == proj.version
 
+        if openai_key is None:
+            raise PublishError("OpenAI key is required for AI-based version recommendations.")
+
         if last_repo_version_tag_commit is not None:
             if str(last_repo_version_tag_commit) != str(repo.head.commit):
                 commits = list(repo.iter_commits(f"{last_repo_version_tag_commit}..HEAD"))[::-1]

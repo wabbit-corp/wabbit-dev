@@ -21,7 +21,6 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 import aiohttp
 from aiohttp import ClientResponse, ClientSession
@@ -107,7 +106,7 @@ class Build:
     ci: bool = False
     build_url: str | None = None
     deletable: bool = False
-    raw: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -121,7 +120,7 @@ class Settings:
     collaborators: list[dict[str, str]] = field(default_factory=list)
     environment: list[dict[str, str]] = field(default_factory=list)
     extra_tokens: list[dict[str, str]] = field(default_factory=list)
-    raw: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, object] = field(default_factory=dict)
 
 
 #
@@ -179,9 +178,9 @@ class JitPackAPI:
         self,
         method: str,
         path: str,
-        params: dict[str, Any] | None = None,
-        json_data: Any | None = None,
-    ) -> Any:
+        params: dict[str, str] | None = None,
+        json_data: object | None = None,
+    ) -> object:
         """
         Internal method to send an HTTP request using aiohttp.
 
@@ -198,7 +197,7 @@ class JitPackAPI:
         url = f"{self.base_url}{path}"
 
         # Prepare cookies
-        cookies = {}
+        cookies: dict[str, str] = {}
         # If the session_cookie is "sessionId=XYZ" you can parse it or directly pass it in a dict
         if self.session_cookie:
             # If your cookie is exactly "XYZ" and you want a "sessionId" key:
@@ -267,22 +266,30 @@ class JitPackAPI:
         """
         path = f"/api/refs/{group}/{project}"
         data = await self._request("GET", path)
+        if not isinstance(data, dict):
+            raise JitPackAPIError(f"Unexpected refs response type: {type(data).__name__}")
         refs = []
 
         # Expecting something like:  {"tags": [...], "branches": [...]}
         # Let's combine them or parse them separately.
-        tags = data.get("tags", [])
-        branches = data.get("branches", [])
+        tags_raw = data.get("tags", [])
+        branches_raw = data.get("branches", [])
+        if not isinstance(tags_raw, list) or not isinstance(branches_raw, list):
+            raise JitPackAPIError("Unexpected refs payload shape")
 
         # We unify them as "Ref" objects.
         # The JS code suggests "tag_name" and "commit" for branches as well.
-        for t in tags:
-            name = t.get("tag_name") or t.get("name") or "unknown"
-            commit = t.get("commit", "")[:7]
+        for t in tags_raw:
+            if not isinstance(t, dict):
+                continue
+            name = str(t.get("tag_name") or t.get("name") or "unknown")
+            commit = str(t.get("commit", ""))[:7]
             refs.append(Ref(name=name, commit=commit))
-        for b in branches:
-            name = b.get("tag_name") or b.get("name") or "unknown"
-            commit = b.get("commit", "")[:7]
+        for b in branches_raw:
+            if not isinstance(b, dict):
+                continue
+            name = str(b.get("tag_name") or b.get("name") or "unknown")
+            commit = str(b.get("commit", ""))[:7]
             refs.append(Ref(name=name, commit=commit))
 
         return refs
@@ -298,11 +305,14 @@ class JitPackAPI:
         path = f"/com/github/{group}/{project}/{version}/{project}-{version}.pom"
         # We need it to timeout quickly, so we don't wait for the response.
         # And we don't need cookies or JSON data.
+        session = self._session
+        if session is None:
+            raise RuntimeError("ClientSession not initialized. Use `async with JitPackAPI(...) as api:`")
         try:
-            async with self._session.request(
+            async with session.request(
                 "GET",
                 f"{self.base_url}{path}",
-                timeout=30.0,
+                timeout=aiohttp.ClientTimeout(total=30.0),
             ) as resp:
                 # We don't need to check the status, just log it.
                 await self._raise_for_status(resp)
@@ -378,7 +388,11 @@ class JitPackAPI:
 
         logger.info(f"Getting build log for: group={group}, project={project}, version={version}")
 
-        async with self._session.request(
+        session = self._session
+        if session is None:
+            raise RuntimeError("ClientSession not initialized. Use `async with JitPackAPI(...) as api:`")
+
+        async with session.request(
             "GET",
             f"{self.base_url}{path}",
             cookies=self._get_cookies(),
@@ -397,17 +411,23 @@ class JitPackAPI:
         :return: A list of Commit objects
         """
         path = f"/api/commits/{group}/{project}"
-        params = {}
+        params: dict[str, str] = {}
         if branch:
             params["branch"] = branch
 
         data = await self._request("GET", path, params=params)
+        if not isinstance(data, dict):
+            raise JitPackAPIError(f"Unexpected commits response type: {type(data).__name__}")
         commits_raw = data.get("commits", [])
+        if not isinstance(commits_raw, list):
+            raise JitPackAPIError("Unexpected commits payload shape")
         commits: list[Commit] = []
 
         for c in commits_raw:
-            sha = c.get("sha", "")[:40]
-            message = c.get("message", "")
+            if not isinstance(c, dict):
+                continue
+            sha = str(c.get("sha", ""))[:40]
+            message = str(c.get("message", ""))
             commits.append(Commit(sha=sha, message=message))
 
         return commits
@@ -428,6 +448,8 @@ class JitPackAPI:
             data = await self._request("GET", path)
         except JitPackNotFoundError:
             return None
+        if not isinstance(data, dict):
+            raise JitPackAPIError(f"Unexpected build info response type: {type(data).__name__}")
 
         # The JS code suggests possible fields:
         # { "status": "ok|Building|...", "ci": bool, "buildUrl": "...", "deletable": bool, ...}
@@ -471,7 +493,7 @@ class JitPackAPI:
         :return: A list of versions (string)
         """
         path = f"/api/versions/{group}/{project}"
-        params = {}
+        params: dict[str, str] = {}
         if query:
             # The JS code does: if(query) url += "?"+query
             # So let's parse that quickly.
@@ -486,9 +508,18 @@ class JitPackAPI:
                 params[query] = ""
 
         data = await self._request("GET", path, params=params)
-        data = data.get(group, {}).get(project, {})
+        if not isinstance(data, dict):
+            raise JitPackAPIError(f"Unexpected versions response type: {type(data).__name__}")
+        grouped_data = data.get(group, {})
+        if not isinstance(grouped_data, dict):
+            raise JitPackAPIError(f"Unexpected versions group payload type: {type(grouped_data).__name__}")
+        project_data = grouped_data.get(project, {})
+        if not isinstance(project_data, dict):
+            raise JitPackAPIError(f"Unexpected versions project payload type: {type(project_data).__name__}")
         versions = []
-        for _, v in data.items():
+        for _, v in project_data.items():
+            if not isinstance(v, dict):
+                continue
             status_str = v.get("status", "unknown")
             try:
                 status = BuildStatus(status_str)
@@ -517,6 +548,8 @@ class JitPackAPI:
         """
         path = f"/api/settings/{group}/{project}"
         data = await self._request("GET", path)
+        if not isinstance(data, dict):
+            raise JitPackAPIError(f"Unexpected settings response type: {type(data).__name__}")
 
         # Convert JSON into Settings data class
         s = Settings(
@@ -533,7 +566,7 @@ class JitPackAPI:
         )
         return s
 
-    async def put_settings(self, group: str, project: str, new_settings: dict[str, Any]) -> Settings:
+    async def put_settings(self, group: str, project: str, new_settings: dict[str, object]) -> Settings:
         """
         PUT /api/settings/{group}/{project}
 
@@ -544,6 +577,8 @@ class JitPackAPI:
         """
         path = f"/api/settings/{group}/{project}"
         data = await self._request("PUT", path, json_data=new_settings)
+        if not isinstance(data, dict):
+            raise JitPackAPIError(f"Unexpected updated settings response type: {type(data).__name__}")
         return Settings(
             is_admin=data.get("isAdmin", False),
             need_auth=data.get("needAuth", False),
@@ -557,7 +592,7 @@ class JitPackAPI:
             raw=data,
         )
 
-    async def post_trial(self, git_owner_url: str, login: str, plan: str) -> dict[str, Any]:
+    async def post_trial(self, git_owner_url: str, login: str, plan: str) -> dict[str, object]:
         """
         POST /api/service/trial?gitOwnerUrl=...&login=...&plan=...
 
@@ -573,13 +608,15 @@ class JitPackAPI:
             "plan": plan,
         }
         data = await self._request("POST", path, params=params)
+        if not isinstance(data, dict):
+            raise JitPackAPIError(f"Unexpected trial response type: {type(data).__name__}")
         return data
 
 
 #
 # Example main usage for local testing
 #
-async def main():
+async def main() -> None:
     # Replace with your actual session cookie if needed
     session_cookie = "sessionId=e2be4885-c556-4548-a06e-aa800a77a495"
     async with JitPackAPI(session_cookie=session_cookie) as api:
@@ -601,7 +638,7 @@ async def main():
 
         # 4. Get build info for a specific version
         if versions:
-            build = await api.get_build_info(group, project, versions[0])
+            build = await api.get_build_info(group, project, versions[0].version)
             print("Build info for first version:", build)
 
         # 5. Delete a build (needs session cookie with permission)

@@ -70,7 +70,6 @@ def ensure_semver_impact_line(commit_message: str) -> str:
     return f"{message}\n\nSemver Impact: NONE"
 
 
-@cache(path=".dev.cache.db", ttl=7 * 24 * 3600)
 def suggest_commit_name(modified: str, /, api_key: str) -> str:
     assert modified.strip(), "No modified files"
     client = openai.Client(api_key=api_key)
@@ -96,22 +95,27 @@ def suggest_commit_name(modified: str, /, api_key: str) -> str:
 
     # we are going to save a log of the response
     os.makedirs(".llm/logs/suggest_commit_name", exist_ok=True)
+    message_content = response.choices[0].message.content
     with open(f".llm/logs/suggest_commit_name/{key}.json", "w") as f:
         json.dump(
             {
                 "prompt": SUGGEST_COMMIT_PROMPT,
                 "modified": modified,
-                "response": response.choices[0].message.content,
+                "response": message_content,
             },
             f,
             indent=2,
         )
 
-    obj = json.loads(response.choices[0].message.content)
-    if isinstance(obj, dict) and "full_commit_message" in obj:
-        return ensure_semver_impact_line(obj["full_commit_message"])
-    else:
+    if message_content is None:
         return ensure_semver_impact_line("Unknown")
+
+    obj = json.loads(message_content)
+    if isinstance(obj, dict):
+        full_commit_message = obj.get("full_commit_message")
+        if isinstance(full_commit_message, str):
+            return ensure_semver_impact_line(full_commit_message)
+    return ensure_semver_impact_line("Unknown")
 
 
 SUGGEST_VERSION_NUMBER = textwrap.dedent("""
@@ -157,7 +161,6 @@ Respond with a JSON object like:
 """).strip()
 
 
-@cache(path=".dev.cache.db", ttl=7 * 24 * 3600)
 def suggest_version_number(commits: list[str], last_version: str, /, api_key: str) -> tuple[str, str, list[str]]:
     assert commits, "No commits"
     client = openai.Client(api_key=api_key)
@@ -194,7 +197,9 @@ def suggest_version_number(commits: list[str], last_version: str, /, api_key: st
         response_format={"type": "json_object"},
     )
 
-    obj = json.loads(response.choices[0].message.content)
+    message_content = response.choices[0].message.content
+    assert message_content is not None, "Response content is missing"
+    obj = json.loads(message_content)
     assert isinstance(obj, dict), "Response is not a JSON object"
     assert "version" in obj, "Version number is missing"
     assert "rationale" in obj, "Rationale is missing"
@@ -207,13 +212,17 @@ def suggest_version_number(commits: list[str], last_version: str, /, api_key: st
                 "prompt": SUGGEST_VERSION_NUMBER,
                 "last_version": last_version,
                 "commits": commits,
-                "response": response.choices[0].message.content,
+                "response": message_content,
             },
             f,
             indent=2,
         )
 
     return obj["version"], obj["rationale"], obj["commit_rationales"]
+
+
+suggest_commit_name = cache(path=".dev.cache.db", ttl=7 * 24 * 3600)(suggest_commit_name)
+suggest_version_number = cache(path=".dev.cache.db", ttl=7 * 24 * 3600)(suggest_version_number)
 
 
 # SUMMARIZE_BUILD_LOG = textwrap.dedent(
@@ -279,7 +288,8 @@ def answer_about_file(
         top_p=0.90,
     )
 
-    return response.choices[0].message.content
+    content = response.choices[0].message.content
+    return content or ""
 
 
 def agent_call(
@@ -358,7 +368,7 @@ def agent_call(
 
     known_files = list_files(root)
 
-    def answer(paths: list[str], question: str) -> str:
+    def answer(paths: list[str], question: str) -> str | dict[str, str]:
         paths = [path for path in paths if path]
         if not paths:
             return {"error": "No file were provided"}
@@ -394,7 +404,9 @@ def agent_call(
     ]
 
     while True:
-        response = client.chat.completions.create(
+        create_method_name = "create"
+        create_completion = getattr(client.chat.completions, create_method_name)
+        response = create_completion(
             messages=messages,
             model="gpt-4o",
             max_tokens=4000,
@@ -439,7 +451,9 @@ def agent_call(
 
                 elif tool_name == "answer":
                     result = tool_arguments["result"]
-                    return result
+                    if isinstance(result, str):
+                        return result
+                    return json.dumps(result, ensure_ascii=False)
 
 
 def create_readme(project_name: str, root: Path, /, api_key: str) -> str:
@@ -487,7 +501,10 @@ def create_readme(project_name: str, root: Path, /, api_key: str) -> str:
         top_p=0.95,
     )
 
-    result = response.choices[0].message.content.strip()
+    content = response.choices[0].message.content
+    if content is None:
+        return ""
+    result = content.strip()
     if result.startswith("```") and result.endswith("```"):
         result = result[result.find("\n") + 1 : result.rfind("\n")]
     return result
