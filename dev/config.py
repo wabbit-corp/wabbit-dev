@@ -803,6 +803,7 @@ class Config:
     )
 
     disabled_checks: List[Tuple[str, str]] = dataclasses.field(default_factory=list)
+    ignored_findings: List[Tuple[str, str, str]] = dataclasses.field(default_factory=list)
 
     modules: Dict[str, Module] = dataclasses.field(default_factory=dict)
     python_defaults: PythonDefaults = dataclasses.field(default_factory=PythonDefaults)
@@ -1065,6 +1066,12 @@ def load_config() -> Config:
     def _apply_builtin_command(command: config_typed.BuiltinTopLevelCommand) -> None:
         if isinstance(command, config_typed.ChecksDisableCommand):
             config.disabled_checks.append((command.error_name, command.pathspec))
+            return
+
+        if isinstance(command, config_typed.ChecksIgnoreFindingCommand):
+            config.ignored_findings.append(
+                (command.error_name, command.pathspec, command.value)
+            )
             return
 
         if isinstance(command, config_typed.DefineCommand):

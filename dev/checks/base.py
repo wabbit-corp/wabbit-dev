@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Mapping, Union, Callable, ClassVar
 from dataclasses import dataclass, field
 from pathlib import Path
 import enum
+import re
 import uuid
 
 from dev.base import Module
@@ -201,6 +202,112 @@ E_GENERIC_READ_ERROR = IssueType(
 )
 
 
+INLINE_CHECK_IGNORE_RE = re.compile(
+    r"(?:#|//|;|--|/\*|\*)\s*check:ignore\s+"
+    r"(?P<issue_id>\*|E_[A-Z0-9_]+)"
+    r"(?:\s+value=(?P<value>.*\S))?\s*$"
+)
+
+
+@dataclass(frozen=True)
+class InlineFindingIgnoreRule:
+    issue_id: str
+    line_number: int
+    value: str | None = None
+
+
+@dataclass(frozen=True)
+class ScopedFindingIgnoreRule:
+    issue_id: str
+    value: str
+
+
+@dataclass(frozen=True)
+class ScopedReadSuppressions:
+    config_ignores: tuple[ScopedFindingIgnoreRule, ...] = ()
+
+
+def _issue_id_matches(rule_issue_id: str, issue_id: str) -> bool:
+    return rule_issue_id == "*" or rule_issue_id == issue_id
+
+
+def _mask_text_preserve_newlines(text: str) -> str:
+    return "".join(ch if ch in ("\n", "\r") else " " for ch in text)
+
+
+def _mask_value_occurrences(text: str, value: str) -> str:
+    if value == "":
+        return text
+
+    chars = list(text)
+    start = 0
+    value_len = len(value)
+    while True:
+        idx = text.find(value, start)
+        if idx == -1:
+            break
+        end = idx + value_len
+        for i in range(idx, end):
+            if chars[i] not in ("\n", "\r"):
+                chars[i] = " "
+        start = idx + 1
+    return "".join(chars)
+
+
+def parse_inline_finding_ignore_rules(text: str) -> list[InlineFindingIgnoreRule]:
+    rules: list[InlineFindingIgnoreRule] = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        match = INLINE_CHECK_IGNORE_RE.search(line)
+        if match is None:
+            continue
+        value = match.group("value")
+        if value is not None:
+            value = value.strip()
+            if value == "":
+                value = None
+        rules.append(
+            InlineFindingIgnoreRule(
+                issue_id=match.group("issue_id"),
+                line_number=line_number,
+                value=value,
+            )
+        )
+    return rules
+
+
+def apply_scoped_read_suppressions(
+    text: str,
+    issue_type: IssueType,
+    suppressions: "ScopedReadSuppressions | None" = None,
+) -> str:
+    masked_text = text
+
+    inline_rules = parse_inline_finding_ignore_rules(text)
+    if inline_rules:
+        lines = masked_text.splitlines(keepends=True)
+        for rule in inline_rules:
+            if not _issue_id_matches(rule.issue_id, issue_type.id):
+                continue
+            line_index = rule.line_number - 1
+            if line_index < 0 or line_index >= len(lines):
+                continue
+            if rule.value is None:
+                lines[line_index] = _mask_text_preserve_newlines(lines[line_index])
+            elif rule.value in lines[line_index]:
+                lines[line_index] = _mask_value_occurrences(lines[line_index], rule.value)
+        masked_text = "".join(lines)
+
+    if suppressions is not None:
+        for config_rule in suppressions.config_ignores:
+            if not _issue_id_matches(config_rule.issue_id, issue_type.id):
+                continue
+            if config_rule.value == "":
+                continue
+            masked_text = _mask_value_occurrences(masked_text, config_rule.value)
+
+    return masked_text
+
+
 @dataclass(frozen=True)
 class FileContext:
     check_name: str
@@ -208,6 +315,7 @@ class FileContext:
     issues: IssueList = field(default_factory=IssueList)
     project_type: CoarseProjectType | None = None
     file_scope: CoarseFileScope | None = None
+    scoped_read_suppressions: ScopedReadSuppressions | None = None
 
     def add_issue(
         self,
@@ -234,7 +342,14 @@ class FileContext:
 
     def read_text(self: "FileContext", issue_type: IssueType | None = None) -> str:
         try:
-            return self.path.read_text(encoding="utf-8")
+            text = self.path.read_text(encoding="utf-8")
+            if issue_type is None:
+                return text
+            return apply_scoped_read_suppressions(
+                text,
+                issue_type,
+                suppressions=self.scoped_read_suppressions,
+            )
         except (IOError, OSError) as e:
             self.issues.append(
                 E_GENERIC_READ_ERROR.make(

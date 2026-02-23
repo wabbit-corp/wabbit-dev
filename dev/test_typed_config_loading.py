@@ -147,3 +147,36 @@ def test_strict_kebab_case_rejects_legacy_python_keyword_names(tmp_path: Path) -
                 ]
             ),
         )
+
+
+def test_checks_ignore_finding_is_loaded(tmp_path: Path) -> None:
+    config = _load_from_temp_root(
+        tmp_path,
+        '(checks/ignore-finding "E_HARDCODED_INTERNAL_HOSTNAME_IP" "**/*.py" "10.0.0.0")\n',
+    )
+
+    assert (
+        "E_HARDCODED_INTERNAL_HOSTNAME_IP",
+        "**/*.py",
+        "10.0.0.0",
+    ) in config.ignored_findings
+
+
+def test_checks_ignore_finding_rejects_invalid_issue_id(tmp_path: Path) -> None:
+    from mu.typed import MuDecodeError
+
+    with pytest.raises(MuDecodeError):
+        _load_from_temp_root(
+            tmp_path,
+            '(checks/ignore-finding "bad_issue" "**/*.py" "10.0.0.0")\n',
+        )
+
+
+def test_checks_ignore_finding_rejects_missing_args(tmp_path: Path) -> None:
+    from mu.typed import MuDecodeError
+
+    with pytest.raises(MuDecodeError):
+        _load_from_temp_root(
+            tmp_path,
+            '(checks/ignore-finding "E_HARDCODED_INTERNAL_HOSTNAME_IP" "**/*.py")\n',
+        )

@@ -51,6 +51,28 @@ For example, to run repository checks on the current directory:
 python dev.py check .
 ```
 
+Checks honor `.gitignore` and also `.checkignore`. Use `.checkignore` for
+check-specific exclusions and overrides (including `!` unignore patterns).
+
+For precise false-positive suppression, use:
+
+```clojure
+(checks/ignore-finding "E_HARDCODED_INTERNAL_HOSTNAME_IP" "**/*.py" "10.0.0.0")
+```
+
+or inline pragmas on specific lines:
+
+```python
+HOST = "10.0.0.0"  # check:ignore E_HARDCODED_INTERNAL_HOSTNAME_IP value=10.0.0.0
+```
+
+Inline syntax supports:
+
+- `# check:ignore <ISSUE_ID>`
+- `# check:ignore <ISSUE_ID> value=<TEXT>`
+
+`(checks/disable ...)` remains the broad path-based suppression mechanism.
+
 To list outdated dependencies:
 
 ```bash

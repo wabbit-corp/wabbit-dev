@@ -1,6 +1,19 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Add targeted false-positive suppression with `(checks/ignore-finding "<ISSUE_ID|*>" "<PATHSPEC>" "<VALUE>")` plus inline `# check:ignore` pragmas, including scoped-read masking and report-time fallback filtering.
+- Improve Python QA test diagnostics by deduplicating identical parsed pytest/unittest findings and including node/test context in emitted messages, with better pytest JUnit collection-failure detail extraction.
+- Improve Python QA unittest/deptry failure clarity by extracting specific unittest exception reasons from failure blocks and including first meaningful tool error lines in fallback failure messages.
+- Improve Python QA failure reporting for silent tool exits by surfacing the failed command when output is empty, and strip ANSI escape sequences before parsing so deptry text findings are recognized reliably.
+- Add `.checkignore` support for `dev.py check` traversal and `UniqueIdentifiersCheck`, including non-repo usage and `.checkignore`-after-`.gitignore` precedence for overrides.
+- Prevent `UniqueIdentifiersCheck` from crashing on non-UTF-8 source files by skipping known binary files and reading text with UTF-8 replacement.
+- Migrate Python QA checks from `python-jeeves/check.py` into per-tool `RepoCheck` modules under `dev/checks/` with shared parser/runtime helpers in `dev/checks/python_qa_common.py`.
+- Run both pytest and unittest by default in the migrated Python QA pipeline, while preserving coverage/diff-cover prerequisite gating behavior.
+- Reuse Python QA config files with target-first precedence and fallback defaults from `/Users/wabbit/ws/datatron/python-jeeves/` for `pyproject.toml`, `mypy.ini`, and `pyrightconfig.json`.
+- Remove duplicate Python Black file-check reporting from `dev/checks/code_linting.py` in favor of the new repo-level Black QA check.
+- Make check execution deterministic by sorting checks by `order` then class name across repo/project/file/directory check types.
+- Return and propagate check command exit status so `python dev.py check ...` exits non-zero when error-severity findings are emitted.
+- Add Python QA migration regression tests for parser parity, check orchestration/defaults, and check-runner exit/no-config behavior.
 - Enforce `Semver Impact: ...` in suggested and edited commit messages.
 - Add repository-level `AGENTS.md` workflow and commit message policy guidance.
 - Add JVM version config parsing (`jvm-version`, `jvm-defaults`) and propagate Java/Kotlin JVM target values to setup rendering.

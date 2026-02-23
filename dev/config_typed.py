@@ -47,6 +47,30 @@ def _decode_symbol_atom(expr: SExpr, _ctx: MuDecodeContext) -> str:
     return expr.value
 
 
+def _decode_issue_name_or_star(expr: SExpr, ctx: MuDecodeContext) -> str:
+    if isinstance(expr, SStr):
+        value = expr.value
+    elif isinstance(expr, SAtom):
+        value = expr.value
+    else:
+        raise MuDecodeError(
+            path=ctx.path,
+            expected="issue id string (E_...) or *",
+            got=type(expr).__name__,
+            span=getattr(expr, "span", None),
+        )
+
+    if value == "*" or re.fullmatch(r"E_[A-Z0-9_]+", value):
+        return value
+
+    raise MuDecodeError(
+        path=ctx.path,
+        expected="issue id string (E_...) or *",
+        got=value,
+        span=getattr(expr, "span", None),
+    )
+
+
 def _decode_maven_coordinate_expr(expr: SExpr, ctx: MuDecodeContext) -> MavenCoordinateExpr:
     if isinstance(expr, SStr):
         raw = expr.value
@@ -107,6 +131,14 @@ def _decode_maven_coordinate_expr(expr: SExpr, ctx: MuDecodeContext) -> MavenCoo
 class ChecksDisableCommand:
     error_name: str
     pathspec: str
+
+
+@mu_tag("checks/ignore-finding")
+@dataclass(frozen=True)
+class ChecksIgnoreFindingCommand:
+    error_name: typing.Annotated[str, MuDeserialize(_decode_issue_name_or_star)]
+    pathspec: str
+    value: str
 
 
 @mu_tag("define")
@@ -403,6 +435,7 @@ class GradleProjectCommand:
 
 BuiltinTopLevelCommand = (
     ChecksDisableCommand
+    | ChecksIgnoreFindingCommand
     | DefineCommand
     | OpenaiKeyCommand
     | GithubTokenCommand
@@ -428,6 +461,7 @@ BuiltinTopLevelCommand = (
 
 BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[Any], ...] = (
     ChecksDisableCommand,
+    ChecksIgnoreFindingCommand,
     DefineCommand,
     OpenaiKeyCommand,
     GithubTokenCommand,
@@ -464,6 +498,7 @@ __all__ = [
     "BUILTIN_TOPLEVEL_COMMAND_TYPES",
     "BuiltinTopLevelCommand",
     "ChecksDisableCommand",
+    "ChecksIgnoreFindingCommand",
     "Const",
     "DataProjectCommand",
     "DefaultMavenProjectGroupCommand",
