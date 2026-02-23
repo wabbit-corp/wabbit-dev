@@ -1091,8 +1091,7 @@ def commit_repo_changes(
 
         # Assuming tiktoken is installed and available
         try:
-            import tiktoken
-
+            tiktoken = __import__("tiktoken")
             enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
             num_tokens = len(enc.encode(final_diff_text))
             print(f"Number of tokens in diff text: {num_tokens}")

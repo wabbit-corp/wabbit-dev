@@ -1,4 +1,6 @@
-from typing import Any, overload
+from typing import Any, TypeVar, overload
+
+T = TypeVar("T")
 
 ###############################################################################
 # Output prefixes
@@ -18,7 +20,7 @@ except ImportError:
     INFOMARK = "[i]"
 
 
-def _message(prefix: str, raw_prefix: str, *args):
+def _message(prefix: str, raw_prefix: str, *args: object) -> None:
     msg = "\n".join(str(arg) for arg in args)
     first = True
     for line in msg.split("\n"):
@@ -30,22 +32,22 @@ def _message(prefix: str, raw_prefix: str, *args):
 
 
 # Use CROSSMARK for errors
-def error(*msg):
+def error(*msg: object) -> None:
     _message(CROSSMARK, "[✗]", *msg)
 
 
 # Use QUESTIONMARK for warnings
-def warning(*msg):
+def warning(*msg: object) -> None:
     _message(QUESTIONMARK, "[?]", *msg)
 
 
 # Use INFOMARK for information
-def info(*msg):
+def info(*msg: object) -> None:
     _message(INFOMARK, "[i]", *msg)
 
 
 # Use CHECKMARK for success
-def success(*msg):
+def success(*msg: object) -> None:
     _message(CHECKMARK, "[✓]", *msg)
 
 
@@ -53,18 +55,18 @@ YN: dict[str, bool] = {"Y": True, "N": False}
 
 
 @overload
-def ask(*msg, result_type: None = None) -> bool: ...
+def ask(*msg: object, result_type: None = None) -> bool: ...
 
 
 @overload
-def ask(*msg, result_type: str) -> str: ...
+def ask(*msg: object, result_type: str) -> str: ...
 
 
 @overload
-def ask[T](*msg, result_type: dict[str, T]) -> T: ...
+def ask[T](*msg: object, result_type: dict[str, T]) -> T: ...
 
 
-def ask(*msg, result_type: dict[str, Any] | str | None = None) -> Any:
+def ask(*msg: object, result_type: dict[str, Any] | str | None = None) -> Any:
     _message(QUESTIONMARK, "[?]", *msg)
 
     if result_type is None:

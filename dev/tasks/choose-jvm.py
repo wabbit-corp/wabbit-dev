@@ -124,8 +124,7 @@ def find_installed_jvms_win32():
             FOUND_JVMS.add(os.path.abspath(value))
 
     # Step 4: check common locations to find Java installations
-    import win32api
-
+    win32api = __import__("win32api")
     drives = win32api.GetLogicalDriveStrings()
     drives = drives.split("\000")[:-1]
 

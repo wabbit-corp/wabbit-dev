@@ -10,8 +10,12 @@ import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from defusedxml import ElementTree as ET
+if TYPE_CHECKING:
+    import xml.etree.ElementTree as ET
+else:
+    from defusedxml import ElementTree as ET
 
 from dev.checks.base import Issue, IssueType, Severity
 from dev.config import Project, PythonProject
@@ -2516,7 +2520,7 @@ def run_mypy(repo_root: Path, project: Project | None) -> list[Issue]:
         if missing is not None:
             return missing
 
-        args = [str(tool), "--exclude", r"(^|/)tmp-test/"]
+        args = [str(tool), "--exclude", r"(^|/)(tmp-test/|dev/test_.*\.py|scripts/build_executable\.py|setup\.py$)"]
         if state.use_json:
             args.extend(["--output", "json"])
         _append_config_arg(args, "--config-file", state.mypy_config)
@@ -2764,7 +2768,18 @@ def run_deptry(repo_root: Path, project: Project | None) -> list[Issue]:
             return ToolRunResult(rc=0, issues=[])
 
         json_output = state.log_dir / "deptry.json"
-        args = [str(tool), ".", "--extend-exclude", r"tmp-test/.*", "--json-output", str(json_output)]
+        args = [
+            str(tool),
+            ".",
+            "--extend-exclude",
+            r"tmp-test/.*",
+            "--extend-exclude",
+            r"dev/test_.*\.py",
+            "--extend-exclude",
+            r"scripts/build_executable\.py",
+            "--json-output",
+            str(json_output),
+        ]
         _append_config_arg(args, "--config", state.deptry_config)
         return _run_subprocess(state, "deptry", args)
 

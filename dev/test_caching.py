@@ -2,20 +2,13 @@ import asyncio
 import os
 import pickle
 import sqlite3
-import sys
 import time
 
 import pytest
 
-# Add the directory containing your cache module to the Python path
-# Adjust this path if your cache module is located elsewhere
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-
-# Import the components to be tested
-# Assuming your caching code is in 'my_cache_module.py'
 try:
-    import caching
-    from caching import (
+    from dev import caching
+    from dev.caching import (
         NO_CACHE,
         Cashier,
         _cleanup_all_cashiers,

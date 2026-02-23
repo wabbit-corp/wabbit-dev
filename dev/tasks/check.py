@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from argparse import ArgumentParser
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
+from typing import TypeVar
 
 import pathspec
 
@@ -104,16 +106,22 @@ def check_main(
     check_set = set(enabled_checks) if enabled_checks else set(all_checks.keys())
     all_checks = {k: v for k, v in all_checks.items() if k in check_set}
 
-    def sort_checks(checks: list[Check]) -> list[Check]:
+    TCheck = TypeVar("TCheck", bound=Check)
+
+    def sort_checks_typed(checks: Sequence[TCheck]) -> list[TCheck]:
         return sorted(
             checks,
             key=lambda c: (getattr(c, "order", 1000), c.__class__.__name__),
         )
 
-    repo_checks: list[RepoCheck] = sort_checks([v for v in all_checks.values() if isinstance(v, RepoCheck)])
-    project_checks: list[ProjectCheck] = sort_checks([v for v in all_checks.values() if isinstance(v, ProjectCheck)])
-    file_checks: list[FileCheck] = sort_checks([v for v in all_checks.values() if isinstance(v, FileCheck)])
-    dir_checks: list[DirectoryCheck] = sort_checks([v for v in all_checks.values() if isinstance(v, DirectoryCheck)])
+    repo_checks: list[RepoCheck] = sort_checks_typed([v for v in all_checks.values() if isinstance(v, RepoCheck)])
+    project_checks: list[ProjectCheck] = sort_checks_typed(
+        [v for v in all_checks.values() if isinstance(v, ProjectCheck)]
+    )
+    file_checks: list[FileCheck] = sort_checks_typed([v for v in all_checks.values() if isinstance(v, FileCheck)])
+    dir_checks: list[DirectoryCheck] = sort_checks_typed(
+        [v for v in all_checks.values() if isinstance(v, DirectoryCheck)]
+    )
 
     disabled_checks: dict[str, pathspec.PathSpec] = {}
     ignored_findings: list[tuple[str, pathspec.PathSpec, str]] = []
@@ -217,7 +225,7 @@ def check_main(
 
     has_errors = False
 
-    def report(issue: Issue | IssueList | list) -> None:
+    def report(issue: Issue | IssueList | list[Issue]) -> None:
         nonlocal has_errors
         if isinstance(issue, IssueList) or isinstance(issue, list):
             for i in issue:
@@ -328,8 +336,8 @@ def check_main(
             else:
                 project_at_path = None
             if project_at_path is not None:
-                for check in project_checks:
-                    issues = check.check(path, project_at_path)
+                for project_check in project_checks:
+                    issues = project_check.check(path, project_at_path)
                     report(issues)
                 project = project_at_path
 
@@ -358,11 +366,11 @@ def check_main(
                 repo = repo.with_ignore(ignore)
 
             accumulated_issues = IssueList()
-            for check in dir_checks:
+            for directory_check in dir_checks:
                 # FIXME: File Context?
-                ctx = FileContext(path=path, check_name=check.__class__.__name__)
+                ctx = FileContext(path=path, check_name=directory_check.__class__.__name__)
                 try:
-                    check.check(ctx=ctx)
+                    directory_check.check(ctx=ctx)
                 except CheckFailedWithReportedIssues:
                     pass  # Issues already reported in context
                 accumulated_issues.extend(ctx.issues)
@@ -388,23 +396,23 @@ def check_main(
 
             accumulated_issues = IssueList()
             scoped_suppressions = scoped_read_suppressions_for(path)
-            for check in file_checks:
+            for file_check in file_checks:
                 # print(f"Checking {path} with {check} {ctx}")
                 ctx = FileContext(
-                    check_name=check.__class__.__name__,
+                    check_name=file_check.__class__.__name__,
                     path=path,
                     project_type=project_type,
                     file_scope=file_scope,
                     scoped_read_suppressions=scoped_suppressions,
                 )
                 try:
-                    check.check(ctx=ctx)
+                    file_check.check(ctx=ctx)
                 except CheckFailedWithReportedIssues:
                     pass  # Issues already reported in context
                 accumulated_issues.extend(ctx.issues)
 
             for issue in accumulated_issues:
-                report([issue])
+                report(issue)
                 if issue.fix and fix and is_check_disabled(issue) is False:
                     info("Fixing")
                     issue.fix()
