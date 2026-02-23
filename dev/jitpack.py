@@ -18,10 +18,10 @@ An asynchronous Python client for interacting with the JitPack.io API.
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from enum import Enum
-import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import aiohttp
 from aiohttp import ClientResponse, ClientSession
@@ -105,9 +105,9 @@ class Build:
     version: str
     status: BuildStatus = BuildStatus.UNKNOWN
     ci: bool = False
-    build_url: Optional[str] = None
+    build_url: str | None = None
     deletable: bool = False
-    raw: Dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -117,11 +117,11 @@ class Settings:
     show_ci: bool = False
     enable_ci: bool = False
     public: bool = True
-    access_tokens: List[str] = field(default_factory=list)
-    collaborators: List[Dict[str, str]] = field(default_factory=list)
-    environment: List[Dict[str, str]] = field(default_factory=list)
-    extra_tokens: List[Dict[str, str]] = field(default_factory=list)
-    raw: Dict[str, Any] = field(default_factory=dict)
+    access_tokens: list[str] = field(default_factory=list)
+    collaborators: list[dict[str, str]] = field(default_factory=list)
+    environment: list[dict[str, str]] = field(default_factory=list)
+    extra_tokens: list[dict[str, str]] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 #
@@ -140,7 +140,7 @@ class JitPackAPI:
     def __init__(
         self,
         base_url: str = "https://jitpack.io",
-        session_cookie: Optional[str] = None,
+        session_cookie: str | None = None,
         timeout: float = 30.0,
     ) -> None:
         """
@@ -156,7 +156,7 @@ class JitPackAPI:
         self.session_cookie = session_cookie
         self.timeout = timeout
 
-        self._session: Optional[ClientSession] = None
+        self._session: ClientSession | None = None
 
     async def __aenter__(self) -> "JitPackAPI":
         self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout))
@@ -173,8 +173,8 @@ class JitPackAPI:
         self,
         method: str,
         path: str,
-        params: Optional[Dict[str, Any]] = None,
-        json_data: Optional[Any] = None,
+        params: dict[str, Any] | None = None,
+        json_data: Any | None = None,
     ) -> Any:
         """
         Internal method to send an HTTP request using aiohttp.
@@ -251,7 +251,7 @@ class JitPackAPI:
     #
     # Public methods
     #
-    async def get_refs(self, group: str, project: str) -> List[Ref]:
+    async def get_refs(self, group: str, project: str) -> list[Ref]:
         """
         GET /api/refs/{group}/{project}
 
@@ -307,7 +307,7 @@ class JitPackAPI:
                     version,
                 )
                 time.sleep(5)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "Timeout while forcing build for: group=%s, project=%s, version=%s",
                 group,
@@ -332,7 +332,7 @@ class JitPackAPI:
             )
             raise
 
-    def _get_cookies(self) -> Dict[str, str]:
+    def _get_cookies(self) -> dict[str, str]:
         # Prepare cookies
         cookies = {}
         # If the session_cookie is "sessionId=XYZ" you can parse it or directly pass it in a dict
@@ -381,7 +381,7 @@ class JitPackAPI:
             await self._raise_for_status(resp)
             return await resp.text()
 
-    async def get_commits(self, group: str, project: str, branch: Optional[str] = None) -> List[Commit]:
+    async def get_commits(self, group: str, project: str, branch: str | None = None) -> list[Commit]:
         """
         GET /api/commits/{group}/{project}?branch=<branch>
 
@@ -397,7 +397,7 @@ class JitPackAPI:
 
         data = await self._request("GET", path, params=params)
         commits_raw = data.get("commits", [])
-        commits: List[Commit] = []
+        commits: list[Commit] = []
 
         for c in commits_raw:
             sha = c.get("sha", "")[:40]
@@ -455,7 +455,7 @@ class JitPackAPI:
         await self._request("DELETE", path)
         logger.info("Deleted build: group=%s, artifact=%s, version=%s", group, artifact, version)
 
-    async def get_versions(self, group: str, project: str, query: Optional[str] = None) -> List[Version]:
+    async def get_versions(self, group: str, project: str, query: str | None = None) -> list[Version]:
         """
         GET /api/versions/{group}/{project}?{query}
 
@@ -527,7 +527,7 @@ class JitPackAPI:
         )
         return s
 
-    async def put_settings(self, group: str, project: str, new_settings: Dict[str, Any]) -> Settings:
+    async def put_settings(self, group: str, project: str, new_settings: dict[str, Any]) -> Settings:
         """
         PUT /api/settings/{group}/{project}
 
@@ -551,7 +551,7 @@ class JitPackAPI:
             raw=data,
         )
 
-    async def post_trial(self, git_owner_url: str, login: str, plan: str) -> Dict[str, Any]:
+    async def post_trial(self, git_owner_url: str, login: str, plan: str) -> dict[str, Any]:
         """
         POST /api/service/trial?gitOwnerUrl=...&login=...&plan=...
 

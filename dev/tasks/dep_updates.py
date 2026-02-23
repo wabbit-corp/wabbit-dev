@@ -1,8 +1,5 @@
-from dev.config import Config, load_config, MavenRepositoryDefinition
-
-from dev.maven import fetch_metadata, MavenVersion
-
-import time
+from dev.config import MavenRepositoryDefinition, load_config
+from dev.maven import MavenVersion, fetch_metadata
 
 MAVEN_CENTRAL = MavenRepositoryDefinition(name="Maven Central", url="https://repo1.maven.org/maven2/")
 
@@ -29,7 +26,7 @@ def check_for_updates():
 
         try:
             metadata = fetch_metadata(repo.url, group_id, artifact_id)
-        except Exception as e:
+        except Exception:
             # print(f"Failed to fetch metadata for {library.name}: {e}")
             continue
 

@@ -1,45 +1,40 @@
-from typing import Any
-from enum import Enum
-from dataclasses import dataclass
-import dataclasses
-
-from pathlib import Path
-import os, io
 import ast
+import io
+import os
 import re
-
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
-from packaging.requirements import InvalidRequirement, Requirement
-from packaging.version import InvalidVersion, Version as PythonVersion
-
-import git
-from git import Repo
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+from typing import Any
 
 import jinja2
-
-import dev.io
-from dev.caching import cache
-from dev.messages import info, error, warning, ask
-from dev.config import (
-    load_config,
-    GradleProject,
-    Project,
-    PythonProject,
-    PurescriptProject,
-    DataProject,
-    PremakeProject,
-    Version,
-    Config,
-    Dependency,
-    DependencyTarget,
-    OwnershipType,
-)
-from dev.banner import create_banner
-from dev.base import Scope
-from dev.ai import suggest_commit_name, ensure_semver_impact_line
+from git import Repo
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion
+from packaging.version import Version as PythonVersion
 
 import dev.git_changes
-from dev.git_changes import compute_repo_diffs, FileType, ChangeType, FileDiff
+import dev.io
+from dev.ai import ensure_semver_impact_line, suggest_commit_name
+from dev.banner import create_banner
+from dev.base import Scope
+from dev.caching import cache
+from dev.config import (
+    Config,
+    DataProject,
+    Dependency,
+    DependencyTarget,
+    GradleProject,
+    OwnershipType,
+    PremakeProject,
+    Project,
+    PurescriptProject,
+    PythonProject,
+    load_config,
+)
+from dev.git_changes import ChangeType, FileDiff, FileType, compute_repo_diffs
+from dev.messages import ask, error, info, warning
 
 
 class RepoSetupMode(Enum):
@@ -1056,7 +1051,7 @@ def commit_repo_changes(
                 # Indent diff lines for readability
                 for line in diff_item.unified_diff.splitlines():
                     print(f"    {line}", file=buf)
-                print(f"</diff>", file=buf)
+                print("</diff>", file=buf)
             elif (
                 not diff_item.binary_different
                 and not diff_item.unified_diff
@@ -1078,7 +1073,7 @@ def commit_repo_changes(
                     print(f'<diff path="{diff_item.path}">', file=buf)
                     for line in diff_item.unified_diff.splitlines():
                         print(f"    {line}", file=buf)
-                    print(f"</diff>", file=buf)
+                    print("</diff>", file=buf)
                 else:  # New text file, but no diff generated (shouldn't happen often)
                     print("  New text file (no diff content found)", file=buf)
             elif diff_item.change_type == ChangeType.DELETED:
@@ -1135,7 +1130,7 @@ def commit_repo_changes(
                     if status != 0:
                         warning(f"Editor '{editor}' exited with status {status}. Commit message might not be saved.")
 
-                    with open(commit_file_path, "r", encoding="utf-8") as f:
+                    with open(commit_file_path, encoding="utf-8") as f:
                         # Read the commit message from the file and strip it
                         # of leading/trailing whitespace and comments
                         commit_name = f.read().strip()
@@ -1192,7 +1187,7 @@ def commit_repo_changes(
                     with open(commit_file, "w") as f:
                         f.write(commit_name)
                     os.system(f"{editor} {repo.working_dir}/.git/COMMIT_EDITMSG")
-                    with open(commit_file, "r") as f:
+                    with open(commit_file) as f:
                         commit_name = f.read().strip()
                     if commit_name:
                         commit_name = ensure_semver_impact_line(commit_name)
@@ -1326,7 +1321,7 @@ def setup(mode: RepoSetupMode, *, interactive: bool = True) -> None:
         dev.io.write_text_file(Path("settings.gradle.kts"), result)
 
     defined_projects = config.defined_projects
-    for name, project in defined_projects.items():
+    for _name, project in defined_projects.items():
         setup_project(ctx, project, interactive=interactive)
 
     project_dirs = [p.path.name for p in defined_projects.values()]

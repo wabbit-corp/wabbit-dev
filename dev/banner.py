@@ -1,5 +1,4 @@
-import os
-from PIL import Image, ImageDraw, ImageFont, ImageColor
+from PIL import Image, ImageColor, ImageDraw, ImageFont
 
 
 def get_text_dimensions(font, text):
@@ -164,7 +163,7 @@ def create_banner(
     elif isinstance(background_color, tuple) and len(background_color) == 4:  # RGBA tuple
         final_banner_bg_color = background_color
     else:
-        print(f"Warning: Invalid background_color format. Defaulting to transparent.")
+        print("Warning: Invalid background_color format. Defaulting to transparent.")
         final_banner_bg_color = (0, 0, 0, 0)  # Fallback
 
     # Create the blank banner

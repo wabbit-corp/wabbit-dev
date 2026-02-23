@@ -1,25 +1,27 @@
+from __future__ import annotations
+
 import abc
-from typing import Any, Dict, List, Optional, Mapping, Union, Callable, ClassVar
-from dataclasses import dataclass, field
-from pathlib import Path
 import enum
 import re
-import uuid
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 from dev.base import Module
-from dev.intrangeset import IntRangeSet
 
 # Assuming get_expected_file_properties exists and helps identify text files
 # If not, we might need a simpler text file check.
-from dev.file_properties import get_expected_file_properties, ExpectedFileProperties
+from dev.file_properties import ExpectedFileProperties, get_expected_file_properties
+from dev.intrangeset import IntRangeSet
 
 
 @dataclass(frozen=True)
 class FileLocation:
     path: Path
-    lines: Optional[IntRangeSet] = None
+    lines: IntRangeSet | None = None
 
-    def __add__(self, other: "FileLocation") -> "FileLocation":
+    def __add__(self, other: FileLocation) -> FileLocation:
         """
         Combines two FileLocations.
         """
@@ -69,13 +71,13 @@ class IssueType:
             raise ValueError(f"Duplicate IssueType ID: {self.id}")
         _KNOWN_TYPES.add(self.id)
 
-    def make(self, **kwargs) -> "Issue":
+    def make(self, **kwargs) -> Issue:
         """
         Creates an Issue of this type.
         """
         return Issue(self, data=kwargs)
 
-    def at(self, path: Path, line: int | None = None) -> "Issue":
+    def at(self, path: Path, line: int | None = None) -> Issue:
         """
         Returns an Issue with the specified path.
         """
@@ -93,14 +95,14 @@ class Issue:
     location: FileLocation | None = None
     fix: Callable[[], None] | None = None
 
-    def fixable(self, fix: Callable[[], None]) -> "Issue":
+    def fixable(self, fix: Callable[[], None]) -> Issue:
         """
         Marks the issue as fixable.
         """
         self.fix = fix
         return self
 
-    def at(self, path: Path, line: int | None = None) -> "Issue":
+    def at(self, path: Path, line: int | None = None) -> Issue:
         """
         Returns an Issue with the specified path.
         """
@@ -121,7 +123,7 @@ class IssueList:
     Represents a list of issues found during a check.
     """
 
-    issues: List[Issue] = field(default_factory=list)
+    issues: list[Issue] = field(default_factory=list)
 
     def append(self, issue: Issue) -> None:
         """
@@ -144,7 +146,7 @@ class IssueList:
         """
         return iter(self.issues)
 
-    def extend(self, issues: List[Issue] | "IssueList") -> None:
+    def extend(self, issues: list[Issue] | IssueList) -> None:
         """
         Adds multiple issues to the list.
         """
@@ -267,7 +269,7 @@ def parse_inline_finding_ignore_rules(text: str) -> list[InlineFindingIgnoreRule
 def apply_scoped_read_suppressions(
     text: str,
     issue_type: IssueType,
-    suppressions: "ScopedReadSuppressions | None" = None,
+    suppressions: ScopedReadSuppressions | None = None,
 ) -> str:
     masked_text = text
 
@@ -329,7 +331,7 @@ class FileContext:
             return ExpectedFileProperties()
         return props
 
-    def read_text(self: "FileContext", issue_type: IssueType | None = None) -> str:
+    def read_text(self: FileContext, issue_type: IssueType | None = None) -> str:
         try:
             text = self.path.read_text(encoding="utf-8")
             if issue_type is None:
@@ -339,21 +341,21 @@ class FileContext:
                 issue_type,
                 suppressions=self.scoped_read_suppressions,
             )
-        except (IOError, OSError) as e:
+        except OSError as e:
             self.issues.append(
                 E_GENERIC_READ_ERROR.make(error=f"I/O error: {e}", check_name=self.check_name).at(self.path)
             )
-            raise CheckFailedWithReportedIssues()
+            raise CheckFailedWithReportedIssues() from e
         except UnicodeDecodeError as e:
             self.issues.append(
                 E_GENERIC_READ_ERROR.make(error=f"UTF-8 decode error: {e}", check_name=self.check_name).at(self.path)
             )
-            raise CheckFailedWithReportedIssues()
+            raise CheckFailedWithReportedIssues() from e
         except Exception as e:
             self.issues.append(
                 E_GENERIC_READ_ERROR.make(error=f"Unexpected error: {e}", check_name=self.check_name).at(self.path)
             )
-            raise CheckFailedWithReportedIssues()
+            raise CheckFailedWithReportedIssues() from e
 
 
 class FileCheck(Check):
@@ -364,13 +366,13 @@ class FileCheck(Check):
 
 class RepoCheck(Check):
     @abc.abstractmethod
-    def check(self, path: Path, project: Any) -> List[Issue]:
+    def check(self, path: Path, project: Any) -> list[Issue]:
         raise NotImplementedError()
 
 
 class ProjectCheck(Check):
     @abc.abstractmethod
-    def check(self, path: Path, project: Any) -> List[Issue]:
+    def check(self, path: Path, project: Any) -> list[Issue]:
         raise NotImplementedError()
 
 

@@ -10,12 +10,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import List
-
 from packaging.requirements import Requirement
 
-from dev.checks.base import FileCheck, IssueType, IssueList, FileContext
+from dev.checks.base import FileCheck, FileContext, IssueType
 
 E_UNPINNED_DEPENDENCY = IssueType(
     "E_UNPINNED_DEPENDENCY",

@@ -6,12 +6,22 @@
 * [ ] Check that files that are supposed to be executable (e.g., scripts) have the correct executable permissions.
 """
 
+import argparse
 import os
 import stat
-import argparse
 import sys  # Added for stderr
 
 # --- Configuration ---
+EXECUTABLE_EXTENSIONS = {
+    ".bat",
+    ".bin",
+    ".cmd",
+    ".com",
+    ".exe",
+    ".ps1",
+    ".run",
+    ".sh",
+}
 
 # --- Helper Functions ---
 
@@ -24,10 +34,10 @@ def has_shebang(filepath):
     try:
         with open(filepath, "rb") as f:
             return f.read(2) == b"#!"
-    except (IOError, OSError):
+    except OSError:
         # print(f"Warning: Could not read {filepath} to check for shebang.", file=sys.stderr)
         return False
-    except Exception as e:
+    except Exception:
         # print(f"Warning: Error reading {filepath}: {e}", file=sys.stderr)
         return False
 
@@ -73,7 +83,7 @@ def is_elf_exe_mach(filepath):
             return "mach-o"
 
         return None
-    except (IOError, OSError):
+    except OSError:
         return None
     except Exception:
         return None
@@ -222,7 +232,7 @@ if __name__ == "__main__":
     if suspicious_files:
         print(f"Found {len(suspicious_files)} potentially suspicious file(s).")
         if args.fix:
-            print(f"Attempted to fix permissions:")
+            print("Attempted to fix permissions:")
             print(f"  - Successfully fixed: {fixed_count}")
             print(f"  - Errors encountered: {error_count}")
             if error_count > 0:

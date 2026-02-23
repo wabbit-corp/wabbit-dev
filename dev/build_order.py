@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 Subproject Dependency Graph & Topological Sort
 """
 
-from collections import deque, defaultdict
-from typing import List, Dict, Tuple
-from dev.config import Project
+from collections import defaultdict, deque
 
 
-def build_dependency_graph(projects) -> Tuple[Dict[str, List[str]], Dict[str, int]]:
+def build_dependency_graph(projects) -> tuple[dict[str, list[str]], dict[str, int]]:
     """
     Creates adjacency lists for subproject dependencies {project: [depends_on...]}.
     Returns (graph, in_degs).
     """
-    graph: Dict[str, List[str]] = dict()
-    in_degs: Dict[str, int] = {name: 0 for name in projects}
+    graph: dict[str, list[str]] = dict()
+    in_degs: dict[str, int] = {name: 0 for name in projects}
 
-    for name, proj in projects.items():
+    for name, _proj in projects.items():
         graph[name] = []
 
     for name, proj in projects.items():

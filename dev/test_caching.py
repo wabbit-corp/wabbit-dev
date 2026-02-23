@@ -1,12 +1,11 @@
-import sys
-import os
-import time
-import pytest
 import asyncio
-import threading
-import sqlite3
+import os
 import pickle
-from unittest.mock import patch
+import sqlite3
+import sys
+import time
+
+import pytest
 
 # Add the directory containing your cache module to the Python path
 # Adjust this path if your cache module is located elsewhere
@@ -15,15 +14,15 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 # Import the components to be tested
 # Assuming your caching code is in 'my_cache_module.py'
 try:
+    import caching
     from caching import (
-        Cashier,
-        cache,
         NO_CACHE,
+        Cashier,
+        _cleanup_all_cashiers,
         _global_cashier_registry,
         _registry_lock,
-        _cleanup_registered,
+        cache,
         get_cashier_instance,
-        _cleanup_all_cashiers,
     )
 except ImportError:
     pytest.skip("Cache module not found. Skipping tests.", allow_module_level=True)
@@ -34,12 +33,12 @@ except ImportError:
 @pytest.fixture(autouse=True)
 def clean_global_state():
     """Ensures global registry and flags are reset between tests."""
-    global _global_cashier_registry, _cleanup_registered
+    global _global_cashier_registry
     # Close any existing connections before clearing
     _cleanup_all_cashiers()  # Call cleanup to close open connections
     with _registry_lock:
         _global_cashier_registry.clear()
-    _cleanup_registered = False
+    caching._cleanup_registered = False
     # Ensure atexit doesn't hold onto the old cleanup function if tests re-register
     import atexit
 
@@ -52,7 +51,7 @@ def clean_global_state():
     _cleanup_all_cashiers()
     with _registry_lock:
         _global_cashier_registry.clear()
-    _cleanup_registered = False
+    caching._cleanup_registered = False
     try:
         atexit.unregister(_cleanup_all_cashiers)
     except ValueError:

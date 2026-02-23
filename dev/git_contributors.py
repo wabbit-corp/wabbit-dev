@@ -1,9 +1,9 @@
 from __future__ import annotations
-from typing import List, Tuple, Optional, Dict
-from dataclasses import dataclass
-import subprocess
-import re
+
 import os
+import re
+import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -19,7 +19,7 @@ class GitContributor:
         return f"GitContributor(name={self.name}, email={self.email})"
 
 
-def list_git_contributors(path: Path) -> Dict[GitContributor, int]:
+def list_git_contributors(path: Path) -> dict[GitContributor, int]:
     """
     List all git contributors in the current repository.
     """
@@ -71,7 +71,7 @@ def list_git_contributors(path: Path) -> Dict[GitContributor, int]:
         os.chdir(change_dir)
 
 
-def get_git_user_name(path: Path) -> Optional[str]:
+def get_git_user_name(path: Path) -> str | None:
     """
     Get the git user name from the git configuration.
     """
@@ -98,7 +98,7 @@ def get_git_user_name(path: Path) -> Optional[str]:
         os.chdir(change_dir)
 
 
-def get_git_user_email(path: Path) -> Optional[str]:
+def get_git_user_email(path: Path) -> str | None:
     """
     Get the git user email from the git configuration.
     """
@@ -125,7 +125,7 @@ def get_git_user_email(path: Path) -> Optional[str]:
         os.chdir(change_dir)
 
 
-def get_git_user() -> Optional[GitContributor]:
+def get_git_user() -> GitContributor | None:
     """
     Get the git user name and email from the git configuration.
     """

@@ -1,9 +1,10 @@
 from __future__ import annotations
+
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from collections import defaultdict
 
-from dev.config import load_config, GradleProject, PythonProject, PremakeProject
+from dev.config import GradleProject, PremakeProject, PythonProject, load_config
 from dev.messages import warning
 
 

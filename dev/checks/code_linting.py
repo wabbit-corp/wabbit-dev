@@ -4,12 +4,11 @@
 """
 
 from __future__ import annotations
-from typing import Sequence, Optional
 
-import re
 import subprocess
+from collections.abc import Sequence
 
-from dev.checks.base import FileCheck, IssueType, FileContext
+from dev.checks.base import FileCheck, FileContext, IssueType
 from dev.messages import error
 
 E_KTLINT_MISSING = IssueType("E_KTLINT_MISSING", "The 'ktlint' formatter is not installed.")
@@ -203,7 +202,7 @@ class CSharpFormattingCheck(FileCheck):
         dotnet_cmd = ["dotnet", "csharpier"]
         legacy_cmd = ["csharpier"]  # legacy tool alias still used in some setups
 
-        selected: Optional[str] = None  # "dotnet" | "legacy"
+        selected: str | None = None  # "dotnet" | "legacy"
 
         try:
             # Prefer modern CLI: dotnet csharpier check <file>

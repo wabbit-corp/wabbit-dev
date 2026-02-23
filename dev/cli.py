@@ -1,10 +1,10 @@
-from typing import Any
 import argparse
 import asyncio
 import logging
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
+from typing import Any
 
 ##################################################################################################
 # Main
@@ -255,11 +255,7 @@ async def async_main() -> int:
 
         case "test":
             from dev.config import load_config
-            from dev.git_contributors import (
-                list_git_contributors,
-                get_git_user_email,
-                get_git_user_name,
-            )
+            from dev.git_contributors import list_git_contributors
 
             config = load_config()
             for project in config.defined_projects.values():
@@ -274,8 +270,6 @@ async def async_main() -> int:
                     # print(f"Path {path} is not a valid git repository.")
                     continue
                 contributors = list_git_contributors(path)
-                configured_email = get_git_user_email(path)
-                configured_name = get_git_user_name(path)
 
                 expected_email = config.default_git_user_email
                 expected_name = config.default_git_user_name

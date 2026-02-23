@@ -1,6 +1,6 @@
-from dev.jitpack import JitPackAPI
-from dev.config import Version
 import termcolor
+
+from dev.jitpack import JitPackAPI
 
 
 async def get_jitpack_info(group: str, artifact: str, target_version: str | None) -> None:
@@ -9,17 +9,17 @@ async def get_jitpack_info(group: str, artifact: str, target_version: str | None
         refs = await api.get_refs(group, artifact)
         commits = await api.get_commits(group, artifact, "master")
 
-        print(f"# Refs:")
+        print("# Refs:")
         for ref in refs:
             print(f"* {ref}")
         print()
 
-        print(f"# Commits (master):")
+        print("# Commits (master):")
         for commit in commits:
             print(f"* {commit}")
         print()
 
-        print(f"# Versions:")
+        print("# Versions:")
         for version in versions:
             if target_version and version.version != target_version:
                 continue

@@ -1,5 +1,5 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -10,7 +10,7 @@ def _load_feature_types():
     sys.path.insert(0, str(repo_root))
     sys.path.insert(0, str(workspace_root / "python-lang-mu"))
 
-    from dev.config import JvmKotlinApplication, JvmKotlinAgent
+    from dev.config import JvmKotlinAgent, JvmKotlinApplication
 
     return JvmKotlinApplication, JvmKotlinAgent
 

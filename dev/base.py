@@ -1,12 +1,12 @@
-from typing import Any, List, Callable, TypeAlias
-from dataclasses import dataclass
-from dev.messages import error
-import traceback
-from types import TracebackType
-import enum
 import abc
+from collections.abc import Callable
+from dataclasses import dataclass
+from types import TracebackType
+from typing import Any
 
 from mu.exec import ExecutionContext
+
+from dev.messages import error
 
 
 class Callback:
@@ -36,7 +36,7 @@ class OnSuccessCallback(Callback):
 
 class Scope:
     def __init__(self) -> None:
-        self.deferred: List[Callback] = []
+        self.deferred: list[Callback] = []
 
     def defer(self, fn: Callable[[], None]) -> None:
         self.deferred.append(OnExitCallback(fn))
@@ -83,7 +83,7 @@ class Scope:
                         error(f"Error during deferred execution: {e}")
 
 
-class Module(abc.ABC):
+class Module:
 
     def register_script_commands(self, ctx: ExecutionContext) -> None:
         pass
@@ -93,9 +93,9 @@ class Module(abc.ABC):
 
     @staticmethod
     def load_modules() -> dict[str, "Module"]:
+        import inspect
         from importlib import import_module
         from pathlib import Path
-        import inspect
 
         dev_dir = Path(__file__).parent
 

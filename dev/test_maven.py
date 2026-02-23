@@ -1,21 +1,21 @@
-from dev.maven import *
+from dev.maven import MavenCoordinate, MavenVersion, fetch_metadata, is_valid_maven_coordinate
 
 
 def assertThrows(func, *args):
     try:
         func(*args)
-        assert False, f"Function {func.__name__} did not raise an exception"
     except Exception:
-        pass
+        return
+    raise AssertionError(f"Function {func.__name__} did not raise an exception")
 
 
 comparison_ops = {
     "<": lambda a, b: a < b,
     "<=": lambda a, b: a <= b,
     "=": lambda a, b: a == b,
-    "~": lambda a, b: a.approx_eq(b) == True,
+    "~": lambda a, b: a.approx_eq(b),
     "!=": lambda a, b: a != b,
-    "!~": lambda a, b: a.approx_eq(b) == False,
+    "!~": lambda a, b: not a.approx_eq(b),
     ">=": lambda a, b: a >= b,
     ">": lambda a, b: a > b,
 }

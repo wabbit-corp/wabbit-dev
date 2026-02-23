@@ -5,34 +5,27 @@ Final 'git_changes.py' that:
   - Attempts to correctly handle various Git states and edge cases.
 """
 
-import os
 import difflib
-import hashlib
 import io  # Added for BytesIO
 import logging
-import mimetypes
-import platform
+import os
 import stat
-import sys
-import unittest
 import tempfile
-from enum import Enum, auto
+import unittest
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Tuple, Union, Generator, Set
+from enum import Enum, auto
 
-import git
+# is_git_dir is not directly available, using internal check logic if needed
+# Assume python 3.8+ for typing syntax if used implicitly before
+from pathlib import Path
+
 import gitdb  # Added for IStream
-from git import Repo, Blob, Tree, IndexFile, Diff, Commit
+from git import Blob, Diff, IndexFile, Repo, Tree
+from git.exc import GitCommandError, InvalidGitRepositoryError
 
 # IndexEntry is needed for type hints if used explicitly
 from git.index.typ import IndexEntry
-from git.exc import GitCommandError, NoSuchPathError, InvalidGitRepositoryError
-from git.util import Actor, finalize_process, hex_to_bin
-
-# is_git_dir is not directly available, using internal check logic if needed
-
-# Assume python 3.8+ for typing syntax if used implicitly before
-from pathlib import Path
+from git.util import hex_to_bin
 
 # Configure logging for debugging if needed
 # logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -88,8 +81,8 @@ class IndexContent:
 class FileDiff:
     """Represents the difference for a single file."""
 
-    old_path: Optional[str] = None
-    new_path: Optional[str] = None
+    old_path: str | None = None
+    new_path: str | None = None
     change_type: ChangeType = ChangeType.UNCHANGED
     staged: bool = False
     unstaged: bool = False
@@ -97,25 +90,25 @@ class FileDiff:
     partial_staging_suspected: bool = False  # If staged and unstaged flags differ
 
     # Content representation
-    old_content_sha: Optional[str] = None
-    new_content_sha: Optional[str] = None
-    old_mode: Optional[int] = None
-    new_mode: Optional[int] = None
+    old_content_sha: str | None = None
+    new_content_sha: str | None = None
+    old_mode: int | None = None
+    new_mode: int | None = None
     # old_kind: FileKind = FileKind.FILE # Removed for simplicity, mode implies kind
     # new_kind: FileKind = FileKind.FILE
     old_type: FileType = FileType.UNKNOWN
     new_type: FileType = FileType.UNKNOWN
     binary_different: bool = False  # True if binary files differ or type changed text<->binary
-    unified_diff: Optional[str] = None  # Text diff if applicable
+    unified_diff: str | None = None  # Text diff if applicable
 
     # Additional Git info
-    similarity_index: Optional[int] = None  # For RENAMED/COPIED
+    similarity_index: int | None = None  # For RENAMED/COPIED
 
     # Internal field to track the primary path key used in the dictionary
-    _path_key: Optional[str] = field(default=None, repr=False)
+    _path_key: str | None = field(default=None, repr=False)
 
     # Field to store the path used for display/identification
-    path: Optional[str] = field(init=False)
+    path: str | None = field(init=False)
 
     def __post_init__(self):
         # Ensure path consistency, prefer new_path if available for general use
@@ -128,7 +121,7 @@ class FileDiff:
 
 # Simple heuristic to guess if data is binary or text.
 # Based on Git's own heuristic: check for null bytes.
-def _classify_data(data: Optional[bytes]) -> FileType:
+def _classify_data(data: bytes | None) -> FileType:
     """Classify bytes data as TEXT, BINARY, or EMPTY."""
     if data is None:
         return FileType.UNKNOWN  # Indicate content wasn't available/read
@@ -146,7 +139,7 @@ def _classify_data(data: Optional[bytes]) -> FileType:
 
 
 # Safely get blob from a tree or return None
-def _get_blob_or_none(tree: Optional[Tree], path: str) -> Optional[Blob]:
+def _get_blob_or_none(tree: Tree | None, path: str) -> Blob | None:
     """Safely retrieve a blob from a tree by path."""
     if tree is None or not path:
         return None
@@ -164,7 +157,7 @@ def _get_blob_or_none(tree: Optional[Tree], path: str) -> Optional[Blob]:
 
 
 # Safely get index entry or return None
-def _get_index_entry(index: IndexFile, path: str) -> Optional[IndexEntry]:
+def _get_index_entry(index: IndexFile, path: str) -> IndexEntry | None:
     """Safely retrieve an IndexEntry object (stage 0) from the index by path."""
     try:
         # Use posix path for index lookup
@@ -177,12 +170,12 @@ def _get_index_entry(index: IndexFile, path: str) -> Optional[IndexEntry]:
 
 
 # Get content and type from working tree file
-def _read_working_tree_file(repo: Repo, path: str) -> Tuple[Optional[bytes], FileType, Optional[int]]:
+def _read_working_tree_file(repo: Repo, path: str) -> tuple[bytes | None, FileType, int | None]:
     """Reads content, classifies type, and gets mode from a working tree file."""
     full_path = os.path.join(repo.working_dir, path)
-    content: Optional[bytes] = None
+    content: bytes | None = None
     file_type: FileType = FileType.UNKNOWN
-    mode: Optional[int] = None
+    mode: int | None = None
 
     try:
         if not os.path.lexists(full_path):  # Use lexists to detect broken symlinks
@@ -214,7 +207,7 @@ def _read_working_tree_file(repo: Repo, path: str) -> Tuple[Optional[bytes], Fil
 
 
 # Helper to calculate correct Git blob SHA for raw content bytes
-def _calculate_blob_sha(repo: Repo, content_bytes: Optional[bytes]) -> Optional[str]:
+def _calculate_blob_sha(repo: Repo, content_bytes: bytes | None) -> str | None:
     """Calculates the Git blob SHA for given bytes content using gitdb."""
     if content_bytes is None:
         # Cannot calculate SHA if content is None (e.g., symlink, directory, read error)
@@ -235,7 +228,7 @@ def _calculate_blob_sha(repo: Repo, content_bytes: Optional[bytes]) -> Optional[
 
 
 # FIX: New helper using 'git hash-object' for WT files
-def _calculate_wt_sha_via_hash_object(repo: Repo, path: str) -> Optional[str]:
+def _calculate_wt_sha_via_hash_object(repo: Repo, path: str) -> str | None:
     """Calculates WT file SHA using 'git hash-object'.
     This is generally more reliable than reading/calculating manually,
     as it respects gitattributes, line endings etc.
@@ -271,17 +264,16 @@ def _calculate_wt_sha_via_hash_object(repo: Repo, path: str) -> Optional[str]:
 
 # Generate unified diff text if applicable
 def _generate_diff_text(
-    old_path: Optional[str],
-    new_path: Optional[str],
-    old_content: Optional[bytes],
-    new_content: Optional[bytes],
+    old_path: str | None,
+    new_path: str | None,
+    old_content: bytes | None,
+    new_content: bytes | None,
     old_type: FileType,
     new_type: FileType,
-) -> Optional[str]:
+) -> str | None:
     """Generates unified diff text if the change involves text files."""
     # Generate diff unless both are binary or unknown
     # Allows diff for binary -> text, text -> empty, empty -> text etc.
-    is_binary_change = old_type == FileType.BINARY or new_type == FileType.BINARY
     if old_type == FileType.BINARY and new_type == FileType.BINARY:
         return None  # No text diff for binary<->binary
     if old_type == FileType.UNKNOWN or new_type == FileType.UNKNOWN:
@@ -290,7 +282,7 @@ def _generate_diff_text(
         if not (old_type in (FileType.TEXT, FileType.EMPTY) or new_type in (FileType.TEXT, FileType.EMPTY)):
             return None
 
-    def decode_lines(content: Optional[bytes]) -> List[str]:
+    def decode_lines(content: bytes | None) -> list[str]:
         if content is None:
             return []
         try:
@@ -298,7 +290,7 @@ def _generate_diff_text(
             return content.decode("utf-8").splitlines(keepends=True)
         except UnicodeDecodeError:
             # Fallback to latin-1 for binary-ish files, replacing errors
-            logging.debug(f"UTF-8 decode failed for diff content, falling back to latin-1.")
+            logging.debug("UTF-8 decode failed for diff content, falling back to latin-1.")
             return content.decode("latin-1", errors="replace").splitlines(keepends=True)
 
     old_lines = decode_lines(old_content)
@@ -340,16 +332,16 @@ def _generate_diff_text(
 EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
-def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileDiff]:
+def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileDiff]:
     """
     Computes a list of file differences between HEAD, the index, and the working directory.
     """
-    diffs_dict: Dict[str, FileDiff] = {}
+    diffs_dict: dict[str, FileDiff] = {}
     index: IndexFile = repo.index
     # Removed index.read()
 
     # --- Determine HEAD commit tree ---
-    head_tree: Optional[Tree] = None
+    head_tree: Tree | None = None
     try:
         if repo.head.is_valid() and repo.head.commit:
             head_tree = repo.head.commit.tree
@@ -383,7 +375,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
     try:
         # Diff HEAD tree against the index, detect renames (R=True)
         # create_patch=False as we'll generate diffs later if needed
-        staged_diff_list: List[Diff] = index.diff(head_tree, R=True, create_patch=False)
+        staged_diff_list: list[Diff] = index.diff(head_tree, R=True, create_patch=False)
     except GitCommandError as e:
         logging.error(f"Git command error during staged diff (HEAD vs Index): {e}")
         staged_diff_list = []
@@ -392,8 +384,8 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
         staged_diff_list = []
 
     for diff in staged_diff_list:
-        a_blob: Optional[Blob] = diff.a_blob  # State in HEAD
-        b_blob: Optional[Blob] = diff.b_blob  # State in Index
+        a_blob: Blob | None = diff.a_blob  # State in HEAD
+        b_blob: Blob | None = diff.b_blob  # State in Index
         is_rename = diff.renamed_file
         is_delete = diff.deleted_file
         is_new = diff.new_file
@@ -483,7 +475,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
     try:
         # Diff index against the working tree (None means working tree)
         # R=False because rename detection Index<->WT is less reliable/standard
-        unstaged_diff_list: List[Diff] = index.diff(None, R=False, create_patch=False)
+        unstaged_diff_list: list[Diff] = index.diff(None, R=False, create_patch=False)
     except GitCommandError as e:
         logging.error(f"Error getting unstaged diffs (Index vs Working Tree): {e}")
         unstaged_diff_list = []
@@ -500,19 +492,6 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
         idx_path = diff.a_path  # Path is taken from the index side (a_path)
         path_key = idx_path
         processed_unstaged_paths.add(path_key)
-
-        # Get corresponding index entry details
-        idx_entry = _get_index_entry(index, path_key)
-        idx_mode = idx_entry.mode if idx_entry else None
-        idx_sha = idx_entry.hexsha if idx_entry else None
-        idx_type = FileType.UNKNOWN
-        idx_content = None
-        if idx_sha:
-            try:
-                idx_content = repo.odb.stream(hex_to_bin(idx_sha)).read()
-                idx_type = _classify_data(idx_content)
-            except Exception as e:
-                logging.warning(f"Could not read index blob {idx_sha} for {path_key}: {e}")
 
         # Get working tree state
         wt_content, wt_type, wt_mode = _read_working_tree_file(repo, path_key)
@@ -638,7 +617,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
     if include_untracked:
         try:
             # Get list of files not tracked by Git (neither in index nor HEAD)
-            untracked_files: List[str] = repo.untracked_files
+            untracked_files: list[str] = repo.untracked_files
         except Exception as e:
             logging.error(f"Error getting untracked files: {e}")
             untracked_files = []
@@ -708,7 +687,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
                     )
 
     # --- 4. Final Refinement (Partial Staging, Unified Diff, Final Type) ---
-    final_diffs: List[FileDiff] = []
+    final_diffs: list[FileDiff] = []
     processed_keys = set()  # Handle potential duplicates from rename cases if logic slips
 
     for path_key in list(diffs_dict.keys()):  # Iterate over copy of keys
@@ -735,10 +714,10 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> List[FileD
         # --- Determine Final State and Content for Diff ---
         # The 'final' state is the working tree if unstaged changes exist,
         # otherwise it's the index state.
-        final_content: Optional[bytes] = None
+        final_content: bytes | None = None
         final_type: FileType = FileType.UNKNOWN
-        final_mode: Optional[int] = None
-        final_sha: Optional[str] = None
+        final_mode: int | None = None
+        final_sha: str | None = None
 
         if file_diff.unstaged:
             # Final state is the working tree
@@ -1165,7 +1144,7 @@ class TestGatherChanges(GitTestBase):
 
     def test_mode_change(self):
         """Test staging a mode change (non-exec -> exec)."""
-        commit = self._commit_file("script.sh", "#!/bin/bash\necho Hello\n", "Init Script")
+        self._commit_file("script.sh", "#!/bin/bash\necho Hello\n", "Init Script")
         # Get path from commit object if needed, or just use relative path
         script_path_str = str(self._path("script.sh"))
         current_mode = os.stat(script_path_str).st_mode
@@ -1461,7 +1440,7 @@ class TestGatherChangesEnhanced(GitTestBase):
 
     def test_12_basic_commit_then_delete_unstaged(self):
         """Test unstaged deletion after a commit."""
-        commit = self._commit_file("delete_me.txt", "Content\n", "Initial")
+        self._commit_file("delete_me.txt", "Content\n", "Initial")
         # Use path from helper
         Path(self._path("delete_me.txt")).unlink()  # Delete from working tree only
         diffs = compute_repo_diffs(self.repo)
@@ -1494,7 +1473,7 @@ class TestGatherChangesEnhanced(GitTestBase):
 
     def test_20_mode_change_executable_staged(self):
         """Test staging a mode change (add execute bit)."""
-        commit = self._commit_file("script.sh", "#!/bin/bash\necho Hello\n", "Init")
+        self._commit_file("script.sh", "#!/bin/bash\necho Hello\n", "Init")
         script_path_str = str(self._path("script.sh"))
         current_mode = os.stat(script_path_str).st_mode
         os.chmod(script_path_str, current_mode | stat.S_IEXEC)
@@ -1505,7 +1484,7 @@ class TestGatherChangesEnhanced(GitTestBase):
 
     def test_21_mode_change_executable_unstaged(self):
         """Test an unstaged mode change (add execute bit)."""
-        commit = self._commit_file("script_u.sh", "#!/bin/bash\necho Hello\n", "Init")
+        self._commit_file("script_u.sh", "#!/bin/bash\necho Hello\n", "Init")
         script_path_str = str(self._path("script_u.sh"))
         current_mode = os.stat(script_path_str).st_mode
         os.chmod(script_path_str, current_mode | stat.S_IEXEC)
@@ -1517,7 +1496,7 @@ class TestGatherChangesEnhanced(GitTestBase):
 
     def test_22_mode_change_and_content_change_staged(self):
         """Test staging both mode and content changes simultaneously."""
-        commit = self._commit_file("script_mc.sh", "#!/bin/bash\necho Hello\n", "Init")
+        self._commit_file("script_mc.sh", "#!/bin/bash\necho Hello\n", "Init")
         script_path_str = str(self._path("script_mc.sh"))
         new_content = "#!/bin/bash\necho World\n"
         # Change content in WT

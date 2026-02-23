@@ -1,15 +1,6 @@
-import requests
-import re
-import csv
-import dateparser
-import datetime
-import time
-import yaml
-import json
 import os
-import shutil
-from typing import Callable, Generator, Any
-from collections import namedtuple, defaultdict
+from collections import defaultdict, namedtuple
+from collections.abc import Generator
 
 
 def digest(func, args, kwargs):
@@ -22,7 +13,7 @@ def digest(func, args, kwargs):
 
 
 def read_file(path):
-    with open(path, "r") as f:
+    with open(path) as f:
         return f.read()
 
 
@@ -90,7 +81,7 @@ class Context:
 
 
 def foo(i):
-    s = yield call(read_file, "test.txt")
+    yield call(read_file, "test.txt")
     print("foo", i)
     return i * i
 

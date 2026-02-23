@@ -1,14 +1,13 @@
-from typing import List, Generator, Callable
-
+import hashlib
 import os
 import shutil
+from collections.abc import Callable, Generator
 from pathlib import Path
-import fnmatch
+
 import jinja2
 import pathspec
-import hashlib
 
-from dev.messages import info, error
+from dev.messages import info
 
 ##################################################################################################
 # File Reading/Writing
@@ -42,7 +41,7 @@ def copy(from_: Path, to: Path) -> None:
             info(f"Overwriting {to} with {from_}")
             shutil.copyfile(from_, to)
         else:
-            assert False, "Not implemented"
+            raise AssertionError("Not implemented")
     else:
         if from_.is_file():
             info(f"Copying {from_} to {to}")
@@ -52,7 +51,7 @@ def copy(from_: Path, to: Path) -> None:
             shutil.copytree(from_, to)
 
 
-def list_files(path: Path) -> List[Path]:
+def list_files(path: Path) -> list[Path]:
     assert isinstance(path, Path), f"Expected Path, got {type(path)}"
     assert path.exists(), f"Directory {path} does not exist"
     assert path.is_dir(), f"Path {path} is not a directory"
@@ -62,7 +61,7 @@ def list_files(path: Path) -> List[Path]:
 def read_text_file(path: Path) -> str:
     assert isinstance(path, Path), f"Expected Path, got {type(path)}"
     assert path.exists(), f"File {path} does not exist"
-    with open(path, "rt", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -153,7 +152,7 @@ def walk_files(path: Path, predicate: Callable[[Path], bool] | None = None) -> G
 
 
 class FileSet:
-    def __init__(self, base_path: Path, positive: List[str], negative: List[str]):
+    def __init__(self, base_path: Path, positive: list[str], negative: list[str]):
         self.base_path = base_path
         self.positive = positive
         self.negative = negative
@@ -186,13 +185,13 @@ class FileSet:
         )
 
 
-def read_ignore_file(path: Path, extra_positive: List[str] | None = None) -> FileSet:
+def read_ignore_file(path: Path, extra_positive: list[str] | None = None) -> FileSet:
     assert isinstance(path, Path), f"Expected Path, got {type(path)}"
 
     if not path.exists():
         return FileSet(path.parent, [], [])
 
-    with open(path, "rt", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         ignore = f.readlines()
         ignore = [i.strip() for i in ignore]
         ignore = [i for i in ignore if not i.startswith("#")]

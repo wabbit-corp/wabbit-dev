@@ -1,6 +1,6 @@
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-import sys
 
 
 def test_commit_repo_changes_handles_added_files_without_a_path(monkeypatch) -> None:
@@ -9,8 +9,8 @@ def test_commit_repo_changes_handles_added_files_without_a_path(monkeypatch) -> 
     sys.path.insert(0, str(repo_root))
     sys.path.insert(0, str(workspace_root / "python-lang-mu"))
 
-    from dev.git_changes import ChangeType, FileDiff, FileType
     import dev.tasks.setup as setup_module
+    from dev.git_changes import ChangeType, FileDiff, FileType
 
     class DummyGit:
         def __init__(self) -> None:

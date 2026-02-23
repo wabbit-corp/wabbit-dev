@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
 
+import errno
 import os
-import sys
 import shutil
-import hashlib
-import errno, os, stat
-from collections import defaultdict
+import stat
+import sys
+from pathlib import Path
+
+import dev.io
+from dev.config import GradleProject, PythonProject, load_config
 
 DRY_RUN = False
 
 
 def delete_dir(path):
-    import errno, os, stat, shutil
+    import os
 
     if not os.path.exists(path):
         return
 
     if not os.path.isdir(path):
-        print("Not a directory: %s" % path)
+        print(f"Not a directory: {path}")
         return
 
     if DRY_RUN:
-        print("Deleting %s" % path)
+        print(f"Deleting {path}")
     else:
 
         def handleRemoveReadonly(func, path, exc):
@@ -35,10 +38,10 @@ def delete_dir(path):
 
         try:
             shutil.rmtree(path, ignore_errors=False, onerror=handleRemoveReadonly)
-        except OSError as e:
-            print("Please delete %s manually" % path)
+        except OSError:
+            print(f"Please delete {path} manually")
             return
-        print("Deleted %s" % path)
+        print(f"Deleted {path}")
 
 
 def clean_sbt_project(path):
@@ -158,10 +161,8 @@ def clean_node_project(path):
 
 
 def clean(paths):
-    ignore_subpaths = set()
-
     for path in paths:
-        for dirpath, dirnames, filenames in os.walk(path):
+        for dirpath, _dirnames, filenames in os.walk(path):
             if "build.sbt" in filenames:
                 clean_sbt_project(dirpath)
 
@@ -207,13 +208,7 @@ if __name__ == "__main__":
     if sys.argv[1:]:
         clean(sys.argv[1:])
     else:
-        print("Usage: %s <folder> [<folder>...]" % sys.argv[0])
-
-
-from pathlib import Path
-
-import dev.io
-from dev.config import load_config, GradleProject, PythonProject
+        print(f"Usage: {sys.argv[0]} <folder> [<folder>...]")
 
 
 def clean(project_name: str | None) -> None:

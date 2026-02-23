@@ -1,6 +1,6 @@
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 
 def _load_from_temp_root(tmp_path: Path, root_clj: str):

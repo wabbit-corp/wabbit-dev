@@ -1,8 +1,8 @@
 from dev.config import load_config
-from dev.messages import error, success
+from dev.messages import success
 
 
 def check_config() -> None:
-    config = load_config()
+    load_config()
     success("Config is valid")
     return

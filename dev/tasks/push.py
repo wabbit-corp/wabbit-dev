@@ -2,8 +2,8 @@ from pathlib import Path
 
 from git import Repo
 
-from dev.messages import error, success
 from dev.config import load_config
+from dev.messages import error, success
 
 
 def push(project_name: str) -> None:

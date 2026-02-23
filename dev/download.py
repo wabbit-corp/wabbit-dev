@@ -1,7 +1,8 @@
 import os
-import requests
 import time
+
 import dateparser
+import requests
 
 
 def save_uri(uri, path):
@@ -21,7 +22,7 @@ def save_uri(uri, path):
             if os.path.isdir(path + ".etag"):
                 print(f"{path + '.etag'} is a directory.")
             else:
-                with open(path + ".etag", "rt") as fin:
+                with open(path + ".etag") as fin:
                     old_etag = fin.read().strip()
                 print(f"Old ETag: {old_etag}")
 
@@ -65,7 +66,7 @@ def save_uri(uri, path):
             needs_download = False
 
         if head_etag is not None and head_etag != old_etag:
-            with open(path + ".etag", "wt+") as fout:
+            with open(path + ".etag", "w+") as fout:
                 fout.write(head_etag)
 
     if not needs_download:
@@ -75,7 +76,7 @@ def save_uri(uri, path):
     print(f"Downloading {uri} to {path}.")
     response = requests.get(uri)
     assert response.status_code == 200
-    with open(path, "wt+") as fout:
+    with open(path, "w+") as fout:
         fout.write(response.text)
 
     try:

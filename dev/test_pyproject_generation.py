@@ -1,9 +1,9 @@
 import os
-from pathlib import Path
 import shutil
 import sys
-from types import SimpleNamespace
 import tomllib
+from pathlib import Path
+from types import SimpleNamespace
 
 
 def _copy_tree(src: Path, dest: Path) -> None:
@@ -63,7 +63,7 @@ def test_setup_generates_pyproject_from_config(tmp_path: Path, monkeypatch) -> N
     sys.path.insert(0, str(repo_root))
     sys.path.insert(0, str(workspace_root / "python-lang-mu"))
 
-    from dev.tasks.setup import RepoSetupMode, setup, _derive_deptry_package_map
+    from dev.tasks.setup import RepoSetupMode, _derive_deptry_package_map, setup
 
     test_root = repo_root / "test" / "root.clj"
     test_private = repo_root / "test" / "root.private.clj"

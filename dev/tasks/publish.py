@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 Async-based Topological Gradle+JitPack Publish Flow with re-rendering logic.
@@ -8,46 +7,41 @@ Usage in dev.py:
     parser.add_parser('publish').set_defaults(func=lambda args: asyncio.run(publish_main(args.project)))
 """
 
-from typing import List, Dict, Tuple, Optional, Any
-
-import os
 import asyncio
+import os
 import textwrap
 import time
-from pathlib import Path
-from collections import defaultdict, deque
+
 import git
 
-from dev.caching import cache, NO_CACHE
+from dev.ai import suggest_version_number
+from dev.build_order import toposort_projects
+from dev.caching import NO_CACHE, cache
 from dev.config import (
-    load_config,
     GradleProject,
     Version,
+    load_config,
 )
-from dev.git_changes import compute_repo_diffs, ChangeType
-from dev.messages import info, warning, error, success, ask
-from dev.ai import suggest_commit_name, suggest_version_number
 from dev.jitpack import (
-    JitPackAPI,
     BuildStatus,
-    JitPackNotFoundError,
-    JitPackAuthError,
+    JitPackAPI,
     JitPackAPIError,
+    JitPackAuthError,
+    JitPackNotFoundError,
 )
+from dev.messages import ask, error, info, success, warning
 from dev.tasks.setup import (
-    setup_project,
-    commit_repo_changes,
-    create_repo_setup_context,
     RepoSetupContext,
     RepoSetupMode,
+    create_repo_setup_context,
+    setup_project,
 )
-from dev.build_order import toposort_projects
 
 
-def get_latest_version(repo) -> Tuple[Version | None, git.Commit | None]:
+def get_latest_version(repo) -> tuple[Version | None, git.Commit | None]:
     # print(repo)
     # List known tags.
-    versions: List[Tuple[Version, git.Commit]] = []
+    versions: list[tuple[Version, git.Commit]] = []
     # print(repo.tags)
     for tag in repo.tags:
         tag_name = tag.name
@@ -116,14 +110,12 @@ def set_project_version_in_root_clj(
     if not os.path.isfile(root_file):
         raise ValueError(f"No {root_file} found, cannot update version for {project_name}.")
 
-    with open(root_file, "r", encoding="utf-8") as f:
+    with open(root_file, encoding="utf-8") as f:
         lines = f.readlines()
 
     updated_lines = []
     in_target_gradle_block = False  # True if we are inside the (gradle "project_name" ...) form
     found_and_replaced = False
-    block_start_index = None  # The index of the line containing (gradle "project_name"
-
     project_types = ["gradle", "python", "data", "purescript", "premake"]
     import re
 
@@ -132,7 +124,7 @@ def set_project_version_in_root_clj(
 
     # We'll walk through lines, and once we detect `(gradle "project_name"`,
     # we know we are in that block until the matching `)` or until we see next (gradle ...
-    for i, line in enumerate(lines):
+    for _i, line in enumerate(lines):
         # Check if we hit a new gradle form. If we were in a block already,
         # end that block (even if not closed) to avoid messing up the next project.
         # if "(gradle \"" in line or "(python \"" in line or "(data \"" in line or "(purescript \"" in line:
@@ -145,7 +137,6 @@ def set_project_version_in_root_clj(
             # Now see if this is our target form
             if re_project_type.match(line):
                 in_target_gradle_block = True
-                block_start_index = i
 
         if in_target_gradle_block:
             # We are inside the block we want. Look for `:version "<something>"`
@@ -299,7 +290,7 @@ async def _check_jitpack_status_cached(
     artifact_id: str,
     version: str,
     expected_commit_sha: str,
-) -> Optional[BuildStatus]:
+) -> BuildStatus | None:
     """
     Checks JitPack for the status of a specific version/commit using get_versions.
     Returns the BuildStatus if found and commit matches, otherwise None.

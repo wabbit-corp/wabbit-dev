@@ -1,12 +1,12 @@
-import os
-import sqlite3
-import time
-import pickle
-import logging
-import inspect
 import asyncio
-import threading
 import atexit
+import inspect
+import logging
+import os
+import pickle
+import sqlite3
+import threading
+import time
 from functools import wraps
 from hashlib import md5
 
@@ -414,7 +414,7 @@ def cache(
         # Errors during instance creation will propagate here
         try:
             cashier = get_cashier_instance(path=path)
-        except Exception as e:
+        except Exception:
             logger.critical(
                 "Failed to obtain Cashier instance for %s used by %s. Caching disabled for this function.",
                 path,

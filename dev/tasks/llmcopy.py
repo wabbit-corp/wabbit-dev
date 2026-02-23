@@ -1,8 +1,9 @@
-from typing import List
-import io, os
+import io
 from pathlib import Path
-from dev.messages import error, success, info
+
 import pyperclip
+
+from dev.messages import info, success
 
 IGNORE_FILES = set(
     [
@@ -15,7 +16,7 @@ IGNORE_FILES = set(
 IGNORE_DIRS = set([".git", ".idea", "__pycache__"])
 
 
-def llmcopy(paths: List[str]) -> None:
+def llmcopy(paths: list[str]) -> None:
     added_paths = set()
     buf = io.StringIO()
 
@@ -36,7 +37,7 @@ def llmcopy(paths: List[str]) -> None:
             added_paths.add(p)
             info(f"Adding {p}")
             buf.write(f'<contents path="{p}">\n')
-            with open(p, "rt", encoding="utf-8") as f:
+            with open(p, encoding="utf-8") as f:
                 data = f.read()
                 buf.write(data)
                 if not data.endswith("\n"):

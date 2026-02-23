@@ -14,33 +14,20 @@
 """
 
 import re
-import math
-import os
-from pathlib import Path
-from typing import List, Set, Optional, Tuple, Pattern
 from bisect import bisect_right
-
-from mu.exec import ExecutionContext
+from re import Pattern
 
 # Import necessary components from your base framework
 # (Adjust the import path if necessary)
 from dev.checks.base import (
     FileCheck,
-    Issue,
-    IssueType,
-    Severity,
-    FileLocation,
-    IntRangeSet,
     FileContext,
-    IssueList,
-    E_GENERIC_READ_ERROR,
+    IssueType,
 )
 
 # Assuming get_expected_file_properties exists and helps identify text files
 # If not, we might need a simpler text file check.
 from dev.file_properties import (
-    get_expected_file_properties,
-    ExpectedFileProperties,
     CommentStyle,
     get_comment_style_for_file,
 )
@@ -50,12 +37,12 @@ from dev.file_properties import (
 # ----------------------------
 
 
-def _merge_spans(spans: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+def _merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
     """Merge overlapping/adjacent [start, end) spans."""
     if not spans:
         return []
     spans = sorted(spans)
-    merged: List[Tuple[int, int]] = []
+    merged: list[tuple[int, int]] = []
     cs, ce = spans[0]
     for s, e in spans[1:]:
         if s <= ce:  # overlap or adjacent
@@ -67,7 +54,7 @@ def _merge_spans(spans: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
     return merged
 
 
-def _compute_comment_spans(text: str, style: Optional[CommentStyle]) -> List[Tuple[int, int]]:
+def _compute_comment_spans(text: str, style: CommentStyle | None) -> list[tuple[int, int]]:
     """
     Quote-aware scan to compute comment spans for a given file based on CommentStyle.
     Produces [start, end) ranges in *absolute* indices over the file text.
@@ -79,12 +66,12 @@ def _compute_comment_spans(text: str, style: Optional[CommentStyle]) -> List[Tup
     if not style:
         return []
 
-    line_markers: Tuple[str, ...] = tuple(sorted(style.line_markers, key=len, reverse=True))
-    block_markers: Tuple[Tuple[str, str], ...] = tuple(
+    line_markers: tuple[str, ...] = tuple(sorted(style.line_markers, key=len, reverse=True))
+    block_markers: tuple[tuple[str, str], ...] = tuple(
         sorted(style.block_markers, key=lambda p: len(p[0]), reverse=True)
     )
 
-    spans: List[Tuple[int, int]] = []
+    spans: list[tuple[int, int]] = []
     n = len(text)
     i = 0
 
@@ -189,7 +176,7 @@ def _compute_comment_spans(text: str, style: Optional[CommentStyle]) -> List[Tup
     return _merge_spans(spans)
 
 
-def _position_in_spans_checker(spans: List[Tuple[int, int]]):
+def _position_in_spans_checker(spans: list[tuple[int, int]]):
     """
     Return a predicate pos -> bool that is O(log N) using bisect, assuming merged non-overlapping spans.
     """
@@ -392,7 +379,7 @@ class HardcodedUrlCheck(FileCheck):
     def __init__(
         self,
         url_regex: Pattern[str] = DEFAULT_URL_REGEX,
-        allowed_domains: Optional[Set[str]] = None,
+        allowed_domains: set[str] | None = None,
     ):
         self.url_regex = url_regex
         self.allowed_domains = allowed_domains if allowed_domains else set()
@@ -411,7 +398,7 @@ class HardcodedUrlCheck(FileCheck):
             }
         )
 
-    def _get_domain(self, url_string: str) -> Optional[str]:
+    def _get_domain(self, url_string: str) -> str | None:
         try:
             # Simplified domain extraction
             protocol_end = url_string.find("://")
@@ -507,8 +494,8 @@ class HardcodedInternalHostnameIpCheck(FileCheck):
         ip_regex: Pattern[str] = PRIVATE_IP_REGEX,
         hostname_regex: Pattern[str] = INTERNAL_HOSTNAME_REGEX,
         url_regex: Pattern[str] = DEFAULT_URL_REGEX,
-        allowed_ips: Optional[Set[str]] = None,
-        allowed_hostnames: Optional[Set[str]] = None,
+        allowed_ips: set[str] | None = None,
+        allowed_hostnames: set[str] | None = None,
     ):
         self.ip_regex = ip_regex
         self.hostname_regex = hostname_regex

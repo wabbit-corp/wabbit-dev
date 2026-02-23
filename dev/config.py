@@ -1,24 +1,22 @@
-from typing import Any, Dict, List, Optional, Tuple, Union
-from abc import ABC, abstractmethod
 import dataclasses
+import os
+import re
+from abc import ABC, abstractmethod
+from collections import OrderedDict
 from dataclasses import dataclass
 from enum import Enum
-from collections import OrderedDict
-
-import re
-
-import os
 from pathlib import Path
+from typing import Any, Union
 
-from dev.maven import MavenCoordinate, is_valid_maven_coordinate
-from dev.checks.base import CoarseFileScope, CoarseProjectType
-
-from mu.types import SAtom, SStr, SDoc
-from mu.parser import sexpr
 from mu.exec import Quoted
+from mu.parser import sexpr
 from mu.typed import MuDecodeError, decode_expr
-from dev.base import Module
+from mu.types import SAtom, SDoc, SStr
+
 import dev.config_typed as config_typed
+from dev.base import Module
+from dev.checks.base import CoarseFileScope, CoarseProjectType
+from dev.maven import MavenCoordinate, is_valid_maven_coordinate
 
 ################################################################################
 # Ownership Type
@@ -109,7 +107,7 @@ class Version:
 class Feature:
     __feature_name__: str
 
-    def implied(self) -> List["Feature"]:
+    def implied(self) -> list["Feature"]:
         return []
 
 
@@ -126,15 +124,15 @@ class Scala(Feature):
 @dataclass
 class Jvm(Feature):
     __feature_name__ = "jvm"
-    jarName: Optional[str] = None
+    jarName: str | None = None
 
 
 @dataclass
 class ShadowJar(Feature):
     __feature_name__ = "shadow-jar"
-    jarName: Optional[str] = None
+    jarName: str | None = None
 
-    def implied(self) -> List[Feature]:
+    def implied(self) -> list[Feature]:
         return [Jvm()]
 
 
@@ -142,7 +140,7 @@ class ShadowJar(Feature):
 class JvmKotlinLibrary(Feature):
     __feature_name__ = "jvm-kotlin-library"
 
-    def implied(self) -> List[Feature]:
+    def implied(self) -> list[Feature]:
         return [Kotlin(), Jvm()]
 
 
@@ -150,7 +148,7 @@ class JvmKotlinLibrary(Feature):
 class JvmScalaLibrary(Feature):
     __feature_name__ = "jvm-scala-library"
 
-    def implied(self) -> List[Feature]:
+    def implied(self) -> list[Feature]:
         return [Scala(), Jvm()]
 
 
@@ -190,9 +188,9 @@ def _normalize_jar_names(
 class JvmKotlinApplication(Feature):
     __feature_name__ = "jvm-kotlin-application"
     main: str
-    jarName: Optional[str] = None
-    shadedJarName: Optional[str] = None
-    unshadedJarName: Optional[str] = None
+    jarName: str | None = None
+    shadedJarName: str | None = None
+    unshadedJarName: str | None = None
 
     def __post_init__(self):
         self.jarName, self.shadedJarName, self.unshadedJarName = _normalize_jar_names(
@@ -201,7 +199,7 @@ class JvmKotlinApplication(Feature):
             unshaded=self.unshadedJarName,
         )
 
-    def implied(self) -> List[Feature]:
+    def implied(self) -> list[Feature]:
         return [
             Kotlin(),
             Jvm(jarName=self.unshadedJarName),
@@ -216,7 +214,7 @@ class PaperPlugin(Feature):
     name: str
     apiVersion: str
 
-    def implied(self) -> List[Feature]:
+    def implied(self) -> list[Feature]:
         return [
             Kotlin(),
             Jvm(jarName=f"{self.name}-unshaded.jar"),
@@ -228,9 +226,9 @@ class PaperPlugin(Feature):
 class JvmKotlinAgent(Feature):
     __feature_name__ = "jvm-kotlin-agent"
     main: str
-    jarName: Optional[str] = None
-    shadedJarName: Optional[str] = None
-    unshadedJarName: Optional[str] = None
+    jarName: str | None = None
+    shadedJarName: str | None = None
+    unshadedJarName: str | None = None
 
     def __post_init__(self):
         self.jarName, self.shadedJarName, self.unshadedJarName = _normalize_jar_names(
@@ -239,7 +237,7 @@ class JvmKotlinAgent(Feature):
             unshaded=self.unshadedJarName,
         )
 
-    def implied(self) -> List[Feature]:
+    def implied(self) -> list[Feature]:
         return [
             Kotlin(),
             Jvm(jarName=self.unshadedJarName),
@@ -252,7 +250,7 @@ class IntellijPlugin(Feature):
     __feature_name__ = "intellij-plugin"
     pluginName: str
 
-    def implied(self) -> List[Feature]:
+    def implied(self) -> list[Feature]:
         return [Kotlin(), Jvm()]
 
 
@@ -260,23 +258,23 @@ class IntellijPlugin(Feature):
 class KotlinSerialization(Feature):
     __feature_name__ = "kotlin-serialization"
 
-    def implied(self) -> List[Feature]:
+    def implied(self) -> list[Feature]:
         return [Kotlin()]
 
 
 @dataclass
 class PythonDeptry(Feature):
     __feature_name__ = "python-deptry"
-    package_map: Dict[str, str] = dataclasses.field(default_factory=dict)
-    per_rule_ignores: Dict[str, List[str]] = dataclasses.field(default_factory=dict)
+    package_map: dict[str, str] = dataclasses.field(default_factory=dict)
+    per_rule_ignores: dict[str, list[str]] = dataclasses.field(default_factory=dict)
     auto_package_map: bool = False
 
 
 @dataclass
 class PythonImportLinter(Feature):
     __feature_name__ = "python-importlinter"
-    root_packages: List[str] = dataclasses.field(default_factory=list)
-    layers: List[str] = dataclasses.field(default_factory=list)
+    root_packages: list[str] = dataclasses.field(default_factory=list)
+    layers: list[str] = dataclasses.field(default_factory=list)
 
 
 def _merge_feature(existing: Feature, incoming: Feature) -> Feature:
@@ -284,7 +282,7 @@ def _merge_feature(existing: Feature, incoming: Feature) -> Feature:
         raise TypeError(f"Cannot merge features with different types: {type(existing)} vs {type(incoming)}")
 
     if dataclasses.is_dataclass(existing):
-        merged_kwargs: Dict[str, Any] = {}
+        merged_kwargs: dict[str, Any] = {}
         for field in dataclasses.fields(existing):
             existing_value = getattr(existing, field.name)
             incoming_value = getattr(incoming, field.name)
@@ -304,9 +302,9 @@ def _merge_feature(existing: Feature, incoming: Feature) -> Feature:
     return existing
 
 
-def resolve_features(features: List[Feature]) -> Dict[str, Feature]:
-    resolved_features: Dict[str, Feature] = {}
-    queue: List[Feature] = []
+def resolve_features(features: list[Feature]) -> dict[str, Feature]:
+    resolved_features: dict[str, Feature] = {}
+    queue: list[Feature] = []
     for feature in features:
         feature_name = type(feature).__feature_name__
         existing = resolved_features.get(feature_name)
@@ -389,7 +387,7 @@ class Dependency:
                 return path.name
             case DependencyTarget.Project(project):
                 return project
-            case DependencyTarget.Maven(maven_repo, artifact):
+            case DependencyTarget.Maven(_maven_repo, artifact):
                 return artifact
 
     @property
@@ -426,7 +424,7 @@ class Dependency:
             case DependencyTarget.Project(project):
                 return f'{modifier}(project(":{project}"))'
 
-            case DependencyTarget.Maven(maven_repo, artifact):
+            case DependencyTarget.Maven(_maven_repo, artifact):
                 # FIXME: repo is not used
                 return f'{modifier}("{artifact}")'
 
@@ -470,20 +468,20 @@ class Project(ABC):
     path: Path
     name: str
     description: str | None
-    authors: List[str]
+    authors: list[str]
     quarantine: bool
     publish: bool
     github_repo: str | None
     ownership: OwnershipType
-    resolved_dependencies: List[Dependency]
+    resolved_dependencies: list[Dependency]
 
     @abstractmethod
-    def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
+    def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         raise NotImplementedError(f"get_file_scope not implemented for {type(self)}")
 
     @property
     @abstractmethod
-    def coarse_project_type(self) -> Optional[CoarseProjectType]:
+    def coarse_project_type(self) -> CoarseProjectType | None:
         raise NotImplementedError(f"coarse_project_type not implemented for {type(self)}")
 
 
@@ -520,28 +518,28 @@ class PythonProject(Project):
     name: str
     version: Version | None
     description: str | None
-    authors: List[str]
+    authors: list[str]
     license: str | None
     github_repo: str | None
     requires_python: str | None
-    dependencies: List[str]
-    dev_dependencies: List[str]
-    scripts: List[str]
-    raw_features: List[Feature]
-    resolved_features: Dict[str, Feature]
+    dependencies: list[str]
+    dev_dependencies: list[str]
+    scripts: list[str]
+    raw_features: list[Feature]
+    resolved_features: dict[str, Feature]
     line_length: int | None
     target_version: str | None
-    source_sets: List[PythonSourceSet]
-    test_paths: List[str]
-    ruff_per_file_ignores: Dict[str, List[str]]
-    deptry_package_map: Dict[str, str]
-    deptry_per_rule_ignores: Dict[str, List[str]]
+    source_sets: list[PythonSourceSet]
+    test_paths: list[str]
+    ruff_per_file_ignores: dict[str, list[str]]
+    deptry_package_map: dict[str, str]
+    deptry_per_rule_ignores: dict[str, list[str]]
     deptry_auto_map: bool
-    importlinter_root_packages: List[str]
-    importlinter_layers: List[str]
-    importlinter_contracts: List[Dict[str, Any]]
-    coverage_source: List[str]
-    coverage_omit: List[str]
+    importlinter_root_packages: list[str]
+    importlinter_layers: list[str]
+    importlinter_contracts: list[dict[str, Any]]
+    coverage_source: list[str]
+    coverage_omit: list[str]
     coverage_fail_under: int | None
     coverage_precision: int | None
     coverage_branch: bool | None
@@ -556,20 +554,18 @@ class PythonProject(Project):
     # raw_dependencies: List[str]
     # resolved_python_dependencies: List[PythonDependency]
 
-    resolved_dependencies: List[Dependency] = dataclasses.field(default_factory=list)
+    resolved_dependencies: list[Dependency] = dataclasses.field(default_factory=list)
     # (We keep a list of `Dependency` too if you want to unify anything across projects,
     #  but typically a pure Python project won't rely on Gradle dependencies.)
 
-    def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
+    def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
             raise ValueError(f"Path {path} is not contained in project path {self.path}")
-
-        rel_path = path.relative_to(self.path)
         return None
 
     @property
-    def coarse_project_type(self) -> Optional[CoarseProjectType]:
+    def coarse_project_type(self) -> CoarseProjectType | None:
         return None
 
 
@@ -578,25 +574,23 @@ class PurescriptProject(Project):
     path: Path
     name: str
     description: str | None
-    authors: List[str]
+    authors: list[str]
     quarantine: bool
     publish: bool
     license: str | None
     github_repo: str | None
     ownership: OwnershipType
     version: Version | None
-    resolved_dependencies: List[Dependency]
+    resolved_dependencies: list[Dependency]
 
-    def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
+    def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
             raise ValueError(f"Path {path} is not contained in project path {self.path}")
-
-        rel_path = path.relative_to(self.path)
         return None
 
     @property
-    def coarse_project_type(self) -> Optional[CoarseProjectType]:
+    def coarse_project_type(self) -> CoarseProjectType | None:
         return None
 
 
@@ -605,25 +599,23 @@ class PremakeProject(Project):
     path: Path
     name: str
     description: str | None
-    authors: List[str]
+    authors: list[str]
     quarantine: bool
     publish: bool
     license: str | None
     github_repo: str | None
     ownership: OwnershipType
     version: Version | None
-    resolved_dependencies: List[Dependency]
+    resolved_dependencies: list[Dependency]
 
-    def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
+    def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
             raise ValueError(f"Path {path} is not contained in project path {self.path}")
-
-        rel_path = path.relative_to(self.path)
         return None
 
     @property
-    def coarse_project_type(self) -> Optional[CoarseProjectType]:
+    def coarse_project_type(self) -> CoarseProjectType | None:
         return None
 
 
@@ -632,25 +624,23 @@ class DataProject(Project):
     path: Path
     name: str
     description: str | None
-    authors: List[str]
+    authors: list[str]
     quarantine: bool
     publish: bool
     license: str | None
     github_repo: str | None
     ownership: OwnershipType
     version: Version | None
-    resolved_dependencies: List[Dependency]
+    resolved_dependencies: list[Dependency]
 
-    def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
+    def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
             raise ValueError(f"Path {path} is not contained in project path {self.path}")
-
-        rel_path = path.relative_to(self.path)
         return None
 
     @property
-    def coarse_project_type(self) -> Optional[CoarseProjectType]:
+    def coarse_project_type(self) -> CoarseProjectType | None:
         return CoarseProjectType.DATA
 
 
@@ -661,19 +651,19 @@ class GradleProject(Project):
     name: str
     version: Version | None
     description: str | None
-    authors: List[str]
+    authors: list[str]
     license: str | None
     quarantine: bool
     publish: bool
     github_repo: str | None
     ownership: OwnershipType
 
-    raw_dependencies: List[str | Dependency | List[Dependency]]
-    raw_features: List[Feature]
+    raw_dependencies: list[str | Dependency | list[Dependency]]
+    raw_features: list[Feature]
 
-    resolved_dependencies: List[Dependency]
-    resolved_maven_repositories: List[MavenRepositoryDefinition]
-    resolved_features: Dict[str, Feature]
+    resolved_dependencies: list[Dependency]
+    resolved_maven_repositories: list[MavenRepositoryDefinition]
+    resolved_features: dict[str, Feature]
 
     @property
     def artifact_name(self) -> str:
@@ -684,10 +674,10 @@ class GradleProject(Project):
         return f"{self.group_name}:{self.name}:{self.version}"
 
     @property
-    def coarse_project_type(self) -> Optional[CoarseProjectType]:
+    def coarse_project_type(self) -> CoarseProjectType | None:
         return None
 
-    def get_coarse_file_scope(self, path: Path) -> Optional[CoarseFileScope]:
+    def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
         if not path.is_relative_to(self.path):
             raise ValueError(f"Path {path} is not contained in project path {self.path}")
@@ -759,15 +749,15 @@ class Config:
     repositories: OrderedDict[str, MavenRepositoryDefinition] = dataclasses.field(default_factory=OrderedDict)
     plugins: OrderedDict[str, KotlinPluginDefinition] = dataclasses.field(default_factory=OrderedDict)
     libraries: OrderedDict[str, MavenLibraryDefinition] = dataclasses.field(default_factory=OrderedDict)
-    library_groups: OrderedDict[str, List[str | Dependency | List[Dependency]]] = dataclasses.field(
+    library_groups: OrderedDict[str, list[str | Dependency | list[Dependency]]] = dataclasses.field(
         default_factory=OrderedDict
     )
     defined_projects: OrderedDict[str, Project] = dataclasses.field(default_factory=OrderedDict)
 
-    disabled_checks: List[Tuple[str, str]] = dataclasses.field(default_factory=list)
-    ignored_findings: List[Tuple[str, str, str]] = dataclasses.field(default_factory=list)
+    disabled_checks: list[tuple[str, str]] = dataclasses.field(default_factory=list)
+    ignored_findings: list[tuple[str, str, str]] = dataclasses.field(default_factory=list)
 
-    modules: Dict[str, Module] = dataclasses.field(default_factory=dict)
+    modules: dict[str, Module] = dataclasses.field(default_factory=dict)
     python_defaults: PythonDefaults = dataclasses.field(default_factory=PythonDefaults)
     jvm_version: int = 21
 
@@ -783,9 +773,9 @@ class Config:
 
 
 def load_config() -> Config:
-    with open(CONFIG_FILE, "rt", encoding="utf-8") as f:
+    with open(CONFIG_FILE, encoding="utf-8") as f:
         root = sexpr(f.read(), no_spans=False)
-    with open(CONFIG_PRIVATE_FILE, "rt", encoding="utf-8") as f:
+    with open(CONFIG_PRIVATE_FILE, encoding="utf-8") as f:
         root_private = sexpr(f.read(), no_spans=False)
 
     config = Config(raw=root)
@@ -831,11 +821,11 @@ def load_config() -> Config:
         raise ValueError(f"{field_name} must be an int or numeric string")
 
     def _parse_python_source_sets(
-        raw_sets: List[Any] | None,
-    ) -> List[PythonSourceSet]:
+        raw_sets: list[Any] | None,
+    ) -> list[PythonSourceSet]:
         if not raw_sets:
             return []
-        parsed: List[PythonSourceSet] = []
+        parsed: list[PythonSourceSet] = []
         for item in raw_sets:
             if isinstance(item, str):
                 parsed.append(PythonSourceSet(path=item, kind="main"))
@@ -928,7 +918,7 @@ def load_config() -> Config:
     def parse_gradle_dependency(
         dep: str | Dependency | config_typed.DepCall | list[Dependency],
         modifier: str | None = None,
-    ) -> List[Dependency]:
+    ) -> list[Dependency]:
         if isinstance(dep, config_typed.DepCall):
             effective_modifier = dep.modifier if dep.modifier is not None else modifier
             return parse_gradle_dependency(dep.name, effective_modifier)
@@ -1186,7 +1176,7 @@ def load_config() -> Config:
 
             importlinter_feature = resolved_features.get("python-importlinter")
             importlinter_root_packages = command.importlinter_root_packages or []
-            importlinter_layers: List[str] = []
+            importlinter_layers: list[str] = []
             if isinstance(importlinter_feature, PythonImportLinter):
                 if importlinter_feature.root_packages:
                     importlinter_root_packages = importlinter_feature.root_packages
@@ -1324,7 +1314,7 @@ def load_config() -> Config:
                 else:
                     raise TypeError(f"Unknown gradle dependency value: {item}")
 
-            maven_repositories: List[MavenRepositoryDefinition] = []
+            maven_repositories: list[MavenRepositoryDefinition] = []
             for dep in resolved_dependencies:
                 if isinstance(dep.target, MavenDependencyTarget) and dep.target.maven_repo:
                     maven_repo = config.repositories[dep.target.maven_repo]

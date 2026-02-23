@@ -27,24 +27,15 @@
       in the project's README and metadata files.
 """
 
-import re
-import os
-import platform
-import unicodedata
 from pathlib import Path
-from typing import List, Set, Optional, Dict, Pattern, Any, Tuple, Union
+from typing import Any
 
 # Import necessary components from your base framework
 # (Adjust the import path if necessary)
 from dev.checks.base import (
-    ProjectCheck,
     Issue,
     IssueType,
-    Severity,
-    FileLocation,
-    IntRangeSet,
-    FileContext,
-    IssueList,
+    ProjectCheck,
 )
 
 E_MISSING_README = IssueType("E_MISSING_README", "Missing README file")
@@ -67,7 +58,7 @@ class GenericProjectStructureCheck(ProjectCheck):
     A check for project files, ensuring they are in the correct format and location.
     """
 
-    def check(self, path: Path, project: Any) -> List[Issue]:
+    def check(self, path: Path, project: Any) -> list[Issue]:
         issues = []
 
         readme_path = path / "README.md"
@@ -75,7 +66,7 @@ class GenericProjectStructureCheck(ProjectCheck):
         if not readme_path.exists():
             issues.append(E_MISSING_README.at(path))
         else:
-            with open(readme_path, "r") as f:
+            with open(readme_path) as f:
                 readme_content = f.read()
 
                 if '<img src=".banner.png"/>' not in readme_content:

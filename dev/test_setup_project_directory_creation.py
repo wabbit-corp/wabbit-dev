@@ -1,6 +1,6 @@
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-import sys
 
 
 def _make_python_project(path: Path):
@@ -52,8 +52,8 @@ def test_setup_project_creates_directory_before_project_setup(tmp_path: Path, mo
     sys.path.insert(0, str(repo_root))
     sys.path.insert(0, str(workspace_root / "python-lang-mu"))
 
-    from dev.config import PythonProject
     import dev.tasks.setup as setup_module
+    from dev.config import PythonProject
 
     project = _make_python_project(tmp_path / "missing" / "pkg")
     called = False

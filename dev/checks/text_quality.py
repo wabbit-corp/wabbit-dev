@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """
 * [x] Check for UTF-8 Encoding: Ensure that all files are valid UTF-8 encoded. This is crucial for
       cross-platform compatibility and to avoid issues with text processing. Ensuring all text is
@@ -26,25 +24,18 @@
       be `.gitignore`d), setting a threshold can catch potential issues in manually edited files.
 """
 
-from dev.checks.base import (
-    FileCheck,
-    Issue,
-    Severity,
-    IssueType,
-    FileContext,
-    CoarseFileScope,
-    IssueList,
-    CoarseProjectType,
-)
-from dataclasses import dataclass, field  # Added field
-from typing import List, Optional, Dict, Any
 import enum
-
-from pathlib import Path
 import re
 import unicodedata  # Needed for Unicode checks
+from pathlib import Path
 
-from dev.file_properties import ExpectedFileProperties, get_expected_file_properties
+from dev.checks.base import (
+    CoarseFileScope,
+    CoarseProjectType,
+    FileCheck,
+    FileContext,
+    IssueType,
+)
 
 CHUNK_BYTE_SIZE = 1024 * 1024  # 1 MB
 
@@ -55,7 +46,7 @@ class LineEnding(enum.Enum):
     CR = b"\r"
 
 
-def get_line_ending_counts(file: Path) -> Dict[LineEnding, int]:
+def get_line_ending_counts(file: Path) -> dict[LineEnding, int]:
     crlf_count = 0
     lf_count = 0
     cr_count = 0
@@ -126,7 +117,7 @@ def get_line_ending_counts(file: Path) -> Dict[LineEnding, int]:
     }
 
 
-def get_line_ending(file: Path) -> Optional[LineEnding]:
+def get_line_ending(file: Path) -> LineEnding | None:
     counts = get_line_ending_counts(file)
     crlf_count = counts[LineEnding.CRLF]
     lf_count = counts[LineEnding.LF]
@@ -211,7 +202,7 @@ def fix_mixed_spaces_tabs(file: Path, tab_width: int = 4, prefer_tabs: bool = Fa
         lines = f.readlines()
 
     changed = False
-    out: List[str] = []
+    out: list[str] = []
 
     for line in lines:
         raw = line.rstrip("\r\n")  # normalize endings; we'll re-append `nl`
@@ -324,13 +315,13 @@ class TextQualityCheck(FileCheck):
         # Decoding and String-based checks
         ###################################################################
 
-        text: Optional[str] = None
+        text: str | None = None
         detected_encoding = "utf-8"  # Assume UTF-8 initially
 
         if not is_invalid_encoding:
             try:
                 text = content_bytes.decode("utf-8")
-            except UnicodeDecodeError as e:
+            except UnicodeDecodeError:
                 # Try to detect common alternatives if UTF-8 fails
                 try:
                     # Attempt Latin-1 (common fallback)
@@ -404,10 +395,7 @@ class TextQualityCheck(FileCheck):
                 # Character-level checks within the line
                 control_chars = set()
                 invisible_chars = set()
-                homoglyphs = set()
-                for j, char in enumerate(line):
-                    col_nr = j + 1
-                    char_ord = ord(char)
+                for char in line:
                     category = unicodedata.category(char)  # Get Unicode category (e.g., 'Lu', 'Ll', 'Cc', 'Cf', 'Zs')
 
                     # Check for Unexpected Control Characters

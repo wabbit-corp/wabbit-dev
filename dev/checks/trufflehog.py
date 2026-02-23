@@ -4,38 +4,27 @@
       Implemented by checking that there are no high-entropy strings that look like secrets.
 """
 
-import re
 import math
-import os
-from pathlib import Path
-from typing import List, Set, Optional, Tuple, Pattern
-
-from mu.exec import ExecutionContext
+import re
+from re import Pattern
 
 # Import necessary components from your base framework
 # (Adjust the import path if necessary)
 from dev.checks.base import (
     FileCheck,
-    Issue,
-    IssueType,
-    Severity,
-    FileLocation,
-    IntRangeSet,
     FileContext,
-    IssueList,
-    E_GENERIC_READ_ERROR,
+    IssueType,
 )
 
 # Assuming get_expected_file_properties exists and helps identify text files
 # If not, we might need a simpler text file check.
-from dev.file_properties import get_expected_file_properties, ExpectedFileProperties
 
 # --- Constants ---
 
 # Character sets for entropy calculation
 BASE64_CHARS: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
 HEX_CHARS: str = "1234567890abcdefABCDEF"
-DEFAULT_NON_SECRET_SEQUENCES: Set[str] = {
+DEFAULT_NON_SECRET_SEQUENCES: set[str] = {
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     "abcdefghijklmnopqrstuvwxyz",
     "0123456789",
@@ -78,7 +67,7 @@ class HighEntropyStringCheck(FileCheck):
         url_regex: re.Pattern = DEFAULT_URL_REGEX,
         base64_chars: str = BASE64_CHARS,
         hex_chars: str = HEX_CHARS,
-        non_secret_sequences: Set[str] = DEFAULT_NON_SECRET_SEQUENCES,
+        non_secret_sequences: set[str] = DEFAULT_NON_SECRET_SEQUENCES,
     ):
         """
         Initializes the check with configurable parameters.
@@ -128,7 +117,7 @@ class HighEntropyStringCheck(FileCheck):
                 entropy -= p_x * math.log(p_x, 2)  # log base 2 for Shannon entropy
         return entropy
 
-    def _check_overlap(self, secret_start: int, secret_end: int, url_spans: List[Tuple[int, int]]) -> bool:
+    def _check_overlap(self, secret_start: int, secret_end: int, url_spans: list[tuple[int, int]]) -> bool:
         """Checks if the secret span overlaps with any of the URL spans."""
         for url_start, url_end in url_spans:
             # Check for any overlap:
@@ -146,8 +135,6 @@ class HighEntropyStringCheck(FileCheck):
         text = ctx.read_text(E_HIGH_ENTROPY_STRING)
 
         for line_number, line in enumerate(text.splitlines()):
-            original_line = line.strip()
-
             # 1. Find all URL spans in the current line
             url_spans = [(m.start(), m.end()) for m in self.url_regex.finditer(line)]
 

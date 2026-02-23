@@ -1,14 +1,14 @@
-from typing import List, Tuple, Union as TypingUnion, ClassVar
+from typing import ClassVar
 
 
 class IntRangeSet:
     # Invariant: A list of sorted tuples (start, end) where start <= end,
     # and for any two adjacent ranges (s1, e1), (s2, e2), we have e1 < s2 - 1.
-    ranges: List[Tuple[int, int]]
+    ranges: list[tuple[int, int]]
 
     empty: ClassVar["IntRangeSet"]  # type: ignore
 
-    def __init__(self, values: List[TypingUnion[int, Tuple[int, int]]]):
+    def __init__(self, values: list[int | tuple[int, int]]):
         """
         Initializes an IntRangeSet from a list of integers or (start, end) tuples.
         The ranges are automatically sorted, merged, and validated.
@@ -30,7 +30,7 @@ class IntRangeSet:
         # Sort ranges primarily by start, secondarily by end for merging logic
         processed_ranges.sort()
 
-        merged_ranges: List[Tuple[int, int]] = []
+        merged_ranges: list[tuple[int, int]] = []
         for start, end in processed_ranges:
             if not merged_ranges:
                 merged_ranges.append((start, end))
@@ -52,7 +52,7 @@ class IntRangeSet:
         Returns a new IntRangeSet that is the union of this and another IntRangeSet.
         This method directly merges the ranges, preserving the invariant.
         """
-        merged_ranges: List[Tuple[int, int]] = []
+        merged_ranges: list[tuple[int, int]] = []
         i = 0  # Pointer for self.ranges
         j = 0  # Pointer for other.ranges
 
@@ -103,7 +103,7 @@ class IntRangeSet:
 
     def intersection(self, other: "IntRangeSet") -> "IntRangeSet":
         """Return a new ``IntRangeSet`` with values present in both sets."""
-        result: List[Tuple[int, int]] = []
+        result: list[tuple[int, int]] = []
         i = 0
         j = 0
 

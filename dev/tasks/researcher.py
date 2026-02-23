@@ -1,27 +1,22 @@
-from typing import List, Any, Union, Dict
-from dataclasses import dataclass
-
-import asyncio, httpx
-from httpx import AsyncClient
-
-import requests
-import semanticscholar.Paper
-import json, yaml
-import os, sys, asyncio, time
-import logging
 import argparse
-import urllib.parse
+import asyncio
+import json
+import logging
 import re
+import time
+import urllib.parse
+from dataclasses import dataclass
 from textwrap import dedent, indent
+from typing import Any
 
-import openai
 import arxiv
 import crossref.restful
+import httpx
+import openai
 import semanticscholar
+import semanticscholar.Paper
+import yaml
 from bs4 import BeautifulSoup
-from enum import Enum
-
-from sentence_transformers import SentenceTransformer, util
 
 JSON = Any
 # type JSON = Union[str, int, float, bool, None, Dict[str, JSON], List[JSON]]
@@ -52,7 +47,7 @@ class WebSource(Source):
     title: str
     url: str
     description: str
-    snippets: List[str]
+    snippets: list[str]
 
 
 @dataclass
@@ -69,7 +64,7 @@ class ArxivSource(Source):
         return self.raw.summary
 
     @property
-    def snippets(self) -> List[str]:
+    def snippets(self) -> list[str]:
         return []
 
     @property
@@ -88,9 +83,9 @@ class CrossRefSource(Source):
 
     @property
     def title(self) -> str:
-        l = self.raw.get("title", [])
-        if len(l) > 0:
-            return l[0]
+        titles = self.raw.get("title", [])
+        if len(titles) > 0:
+            return titles[0]
         return "No Title"
 
     @property
@@ -98,7 +93,7 @@ class CrossRefSource(Source):
         return self.raw.get("abstract", None)
 
     @property
-    def snippets(self) -> List[str]:
+    def snippets(self) -> list[str]:
         return []
 
     @property
@@ -121,7 +116,7 @@ class SemanticScholarSource(Source):
         return self.raw.abstract
 
     @property
-    def snippets(self) -> List[str]:
+    def snippets(self) -> list[str]:
         return []
 
     @property
@@ -145,8 +140,8 @@ class Query:
         return Query(query=data["query"], relevance=data["relevance"])
 
 
-def deduplicate_queries(queries: List[Query]) -> List[Query]:
-    m: Dict[str, int] = {}
+def deduplicate_queries(queries: list[Query]) -> list[Query]:
+    m: dict[str, int] = {}
     for q in queries:
         qk = q.query.lower()
         if qk in m:
@@ -156,7 +151,7 @@ def deduplicate_queries(queries: List[Query]) -> List[Query]:
     return list(Query(query=k, relevance=v) for k, v in m.items())
 
 
-async def get_search_queries(client: openai.AsyncClient, model: str, query: str, n_times: int = 3) -> List[Query]:
+async def get_search_queries(client: openai.AsyncClient, model: str, query: str, n_times: int = 3) -> list[Query]:
     prompt = dedent("""
     I am researching '{query}' and I want to search for papers related to this topic.
     Please provide me queries that I can use to search for papers.
@@ -173,7 +168,7 @@ async def get_search_queries(client: openai.AsyncClient, model: str, query: str,
     ```
     """).replace("{query}", query)
 
-    queries: List[Query] = []
+    queries: list[Query] = []
 
     # for _ in range(n_times):
     async def run():
@@ -197,7 +192,7 @@ async def get_search_queries(client: openai.AsyncClient, model: str, query: str,
     return sorted(queries, key=lambda x: x.relevance, reverse=True)
 
 
-async def get_arxiv_search_queries(client: openai.AsyncClient, model: str, query: str, n_times: int = 3) -> List[Query]:
+async def get_arxiv_search_queries(client: openai.AsyncClient, model: str, query: str, n_times: int = 3) -> list[Query]:
     prompt = dedent("""
     I am researching '{query}' (Research Topic) and I want to search for papers related to this topic.
 
@@ -215,7 +210,7 @@ async def get_arxiv_search_queries(client: openai.AsyncClient, model: str, query
     ```
     """).replace("{query}", query)
 
-    queries: List[Query] = []
+    queries: list[Query] = []
 
     # for _ in range(n_times):
     async def run():
@@ -279,7 +274,7 @@ async def fetch_url(http_client: httpx.AsyncClient, url: str, scraperbee_key: st
                     "wait": "3000",
                 },
             )
-            LAST_REQ = time.time()
+            LAST_SCRAPERBEE_REQ = time.time()
             break
         except Exception as e:
             logging.error(f"Failed to fetch URL: {url}, Error: {e}, {type(e)}")
@@ -320,7 +315,7 @@ class ResultSource:
 
 @dataclass
 class Result:
-    sources: List[ResultSource]
+    sources: list[ResultSource]
     final_summary: str
 
 
@@ -423,7 +418,7 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
         )
         crossref_works = crossref.restful.Works(etiquette=crossref_etiquette)
 
-        ALL_SOURCES: Dict[str, Source] = {}
+        ALL_SOURCES: dict[str, Source] = {}
 
         def next_source_id(prefix):
             index = 1
@@ -481,7 +476,7 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
         ]
         for q in long_queries:
             results = await brave_search(http_client, q.query, config.brave_key)
-            with open("brave_search.json", "wt+") as f:
+            with open("brave_search.json", "w+") as f:
                 print(json.dumps(results, indent=2), file=f)
             for result in results.get("web", {}).get("results", []):
                 if any(x in result["url"] for x in NON_AUTHORITATIVE_SOURCES):
@@ -531,7 +526,7 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
         ALL_SOURCES_LIST = list(ALL_SOURCES.values())
         logger.info(f"Total Sources: {len(ALL_SOURCES_LIST)}")
 
-        async def process_batch(batch: List[Source]) -> JSON:
+        async def process_batch(batch: list[Source]) -> JSON:
             # logger.info(f"Estimating Relevance of Batch: {batch_start+1}-{batch_start+len(batch)}")
 
             def format_source(index: int, source: Source) -> str:
@@ -542,7 +537,7 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
                 if description is not None:
                     result += f"\n   Abstract/Description: {description}"
                 if len(snippets) > 0:
-                    result += f"\n   Snippets:\n"
+                    result += "\n   Snippets:\n"
                     for snippet in snippets:
                         result += f"\n      - {snippet}"
                 return result
@@ -629,7 +624,7 @@ async def research(config: ApiConfig, mode: ResearcherMode, query: str) -> None:
 
         SOURCE_SUMMARIES = {}
 
-        with open("source_summaries.json", "wt+") as f_summaries:
+        with open("source_summaries.json", "w+") as f_summaries:
 
             # for source_id, relevance in SOURCE_RELEVANCE.items():
             async def process_source(source_id, relevance):

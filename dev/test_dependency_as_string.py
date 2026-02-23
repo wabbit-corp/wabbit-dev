@@ -1,5 +1,5 @@
-from pathlib import Path, PureWindowsPath
 import sys
+from pathlib import Path, PureWindowsPath
 
 
 def _dependency_types():

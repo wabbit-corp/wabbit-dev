@@ -1,5 +1,6 @@
-from setuptools import setup, find_packages
 from pathlib import Path
+
+from setuptools import find_packages, setup
 
 # Read the requirements from requirements.txt
 reqs_path = Path(__file__).parent / "requirements.txt"

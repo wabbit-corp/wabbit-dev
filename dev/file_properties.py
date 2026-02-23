@@ -1,9 +1,8 @@
 from __future__ import annotations
-from typing import List, Tuple, Optional, Dict, Set, Iterable
+
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-import os
-import stat
 
 
 @dataclass(frozen=True, order=True)
@@ -25,7 +24,7 @@ class ExpectedFileProperties:
 # ============================================================
 # Properties by MIME Type (authoritative)
 # ============================================================
-PROPERTIES_BY_MIME: Dict[str, ExpectedFileProperties] = {}
+PROPERTIES_BY_MIME: dict[str, ExpectedFileProperties] = {}
 
 
 def _def_mime(mime: str, **kwargs) -> None:
@@ -343,8 +342,8 @@ _def_mime("application/x-source-map+json", is_code=True)
 # Mappings from names and extensions to possible MIME types.
 # Names are case-sensitive. Extensions are case-insensitive.
 # ============================================================
-NAME_TO_MIMES: Dict[str, Set[str]] = {}
-EXT_TO_MIMES: Dict[str, Set[str]] = {}
+NAME_TO_MIMES: dict[str, set[str]] = {}
+EXT_TO_MIMES: dict[str, set[str]] = {}
 
 
 def _reg_name(names: Iterable[str], *mimes: str) -> None:
@@ -798,7 +797,7 @@ def _lower_bound_properties(mime_types: Iterable[str]) -> ExpectedFileProperties
     )
 
 
-def infer_mime_types_from_extension(filepath: Path) -> Set[str]:
+def infer_mime_types_from_extension(filepath: Path) -> set[str]:
     """
     Infer candidate MIME types purely from the file extension (lowercased).
     This intentionally ignores the filename mapping (NAME_TO_MIMES) to keep
@@ -808,7 +807,7 @@ def infer_mime_types_from_extension(filepath: Path) -> Set[str]:
     return set(EXT_TO_MIMES.get(ext, set()))
 
 
-def infer_candidate_mime_types(filepath: Path) -> Set[str]:
+def infer_candidate_mime_types(filepath: Path) -> set[str]:
     """
     Infer candidate MIME types using filename (if known) otherwise extension.
     This is a more general helper than infer_mime_types_from_extension().
@@ -820,12 +819,12 @@ def infer_candidate_mime_types(filepath: Path) -> Set[str]:
     return set(EXT_TO_MIMES.get(ext, set()))
 
 
-def get_expected_file_properties(filepath: Path) -> Optional[ExpectedFileProperties]:
+def get_expected_file_properties(filepath: Path) -> ExpectedFileProperties | None:
     name = filepath.name
     ext = filepath.suffix.lower()  # Ensure extension is lower case for lookup
 
     # Prefer name-based MIME mapping (more specific); fall back to extension-based mapping.
-    candidate_mimes: Set[str] = set()
+    candidate_mimes: set[str] = set()
     if name in NAME_TO_MIMES:
         candidate_mimes.update(NAME_TO_MIMES[name])
     elif ext in EXT_TO_MIMES:
@@ -851,14 +850,14 @@ class CommentStyle:
     - block_markers: pairs of (start, end) for block comments (e.g. "/*", "*/")
     """
 
-    line_markers: Tuple[str, ...] = ()
-    block_markers: Tuple[Tuple[str, str], ...] = ()
+    line_markers: tuple[str, ...] = ()
+    block_markers: tuple[tuple[str, str], ...] = ()
 
 
-COMMENT_STYLES_BY_MIME: Dict[str, CommentStyle] = {}
+COMMENT_STYLES_BY_MIME: dict[str, CommentStyle] = {}
 
 
-def _def_comment(mime: str, line: Tuple[str, ...] = (), block: Tuple[Tuple[str, str], ...] = ()) -> None:
+def _def_comment(mime: str, line: tuple[str, ...] = (), block: tuple[tuple[str, str], ...] = ()) -> None:
     COMMENT_STYLES_BY_MIME[mime] = CommentStyle(line_markers=line, block_markers=block)
 
 
@@ -921,8 +920,8 @@ for _mime in (
 
 def _merge_comment_styles(styles: Iterable[CommentStyle]) -> CommentStyle:
     """Union the markers across styles; deduplicate while preserving a stable order."""
-    line_seen: Dict[str, None] = {}
-    block_seen: Dict[Tuple[str, str], None] = {}
+    line_seen: dict[str, None] = {}
+    block_seen: dict[tuple[str, str], None] = {}
     for s in styles:
         for m in s.line_markers:
             line_seen.setdefault(m, None)
@@ -934,7 +933,7 @@ def _merge_comment_styles(styles: Iterable[CommentStyle]) -> CommentStyle:
     )
 
 
-def get_comment_style_for_file(filepath: Path, *, prefer_extension: bool = True) -> Optional[CommentStyle]:
+def get_comment_style_for_file(filepath: Path, *, prefer_extension: bool = True) -> CommentStyle | None:
     """
     Return a CommentStyle for the given file.
     If multiple MIME candidates exist (e.g., ambiguous extension), we merge markers across them.

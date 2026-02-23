@@ -4,7 +4,6 @@
 
 import re
 from dataclasses import dataclass
-from typing import List, Set, Optional, Tuple, Pattern
 
 from mu.exec import ExecutionContext
 from mu.typed import mu_tag
@@ -14,8 +13,8 @@ from mu.typed import mu_tag
 from dev.base import TypedConfigCommandRegistration
 from dev.checks.base import (
     FileCheck,
-    IssueType,
     FileContext,
+    IssueType,
 )
 
 E_CENSORED_KEYWORD = IssueType(
@@ -34,7 +33,7 @@ class CensoredKeywords(FileCheck):
     error_on: set[str]
     error_on_regex: re.Pattern[str]
 
-    def __init__(self, error_on: Optional[Set[str]] = None):
+    def __init__(self, error_on: set[str] | None = None):
         if error_on is None:
             error_on = set()
         self.error_on = error_on

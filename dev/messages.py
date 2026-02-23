@@ -1,4 +1,4 @@
-from typing import TypeVar, Dict, overload, Any
+from typing import Any, overload
 
 ###############################################################################
 # Output prefixes
@@ -49,7 +49,7 @@ def success(*msg):
     _message(CHECKMARK, "[✓]", *msg)
 
 
-YN: Dict[str, bool] = {"Y": True, "N": False}
+YN: dict[str, bool] = {"Y": True, "N": False}
 
 
 @overload
@@ -61,10 +61,10 @@ def ask(*msg, result_type: str) -> str: ...
 
 
 @overload
-def ask[T](*msg, result_type: Dict[str, T]) -> T: ...
+def ask[T](*msg, result_type: dict[str, T]) -> T: ...
 
 
-def ask(*msg, result_type: Dict[str, Any] | str | None = None) -> Any:
+def ask(*msg, result_type: dict[str, Any] | str | None = None) -> Any:
     _message(QUESTIONMARK, "[?]", *msg)
 
     if result_type is None:

@@ -25,23 +25,18 @@
       represent security risks.
 """
 
-import re
 import os
-import platform
-import unicodedata
+import re
 from pathlib import Path
-from typing import List, Set, Optional, Dict, Pattern
+from re import Pattern
 
 # Import necessary components from your base framework
 # (Adjust the import path if necessary)
 from dev.checks.base import (
-    FileCheck,
     DirectoryCheck,
-    Issue,
-    IssueType,
-    Severity,
+    FileCheck,
     FileContext,
-    IssueList,
+    IssueType,
 )
 
 # Reasonable max filename length, adjust as needed
@@ -69,7 +64,7 @@ class FilenameLengthCheck(FileCheck):
 
 # Common sensitive filename patterns (lowercase for case-insensitive matching)
 # Using simple substring checks for broader matching
-DEFAULT_SENSITIVE_FILENAME_PATTERNS: Set[str] = {
+DEFAULT_SENSITIVE_FILENAME_PATTERNS: set[str] = {
     "private_key",
     "privatekey",
     "id_rsa",
@@ -104,7 +99,7 @@ E_SENSITIVE_FILENAME = IssueType(
 class SensitiveFilenameCheck(FileCheck):
     """Checks filenames against a list of patterns suggesting sensitive content."""
 
-    def __init__(self, sensitive_patterns: Set[str] = DEFAULT_SENSITIVE_FILENAME_PATTERNS):
+    def __init__(self, sensitive_patterns: set[str] = DEFAULT_SENSITIVE_FILENAME_PATTERNS):
         self.sensitive_patterns_lower = {p.lower() for p in sensitive_patterns}
 
     def check(self, ctx: FileContext):
@@ -127,7 +122,7 @@ class SensitiveFilenameCheck(FileCheck):
 
 
 # Windows reserved filenames (case-insensitive, without extension)
-WINDOWS_RESERVED_NAMES: Set[str] = {
+WINDOWS_RESERVED_NAMES: set[str] = {
     "CON",
     "PRN",
     "AUX",
@@ -154,7 +149,7 @@ WINDOWS_RESERVED_NAMES: Set[str] = {
 
 # Characters often problematic in shells or cross-platform environments
 # Excludes common path separators / and \ which are handled by Path objects
-DEFAULT_PROBLEMATIC_FILENAME_CHARS: Set[str] = set("*?:[]$&;|<>!`\"'()")
+DEFAULT_PROBLEMATIC_FILENAME_CHARS: set[str] = set("*?:[]$&;|<>!`\"'()")
 
 E_PROBLEMATIC_FILENAME_CHARS = IssueType(
     "E_PROBLEMATIC_FILENAME_CHARS", "Filename contains problematic characters: {chars}."
@@ -174,7 +169,7 @@ class FilenamePropertiesCheck(FileCheck):
 
     def __init__(
         self,
-        problematic_chars: Set[str] = DEFAULT_PROBLEMATIC_FILENAME_CHARS,
+        problematic_chars: set[str] = DEFAULT_PROBLEMATIC_FILENAME_CHARS,
         check_non_ascii: bool = True,  # Flag non-ASCII by default
         check_reserved: bool = True,  # Check reserved names by default
         check_leading_trailing: bool = True,  # Check leading/trailing by default
@@ -215,7 +210,7 @@ class FilenamePropertiesCheck(FileCheck):
             ctx.add_issue(E_RESERVED_FILENAME)
 
 
-DEFAULT_CONVENTIONS: Dict[str, Dict[str, Pattern | str]] = {
+DEFAULT_CONVENTIONS: dict[str, dict[str, Pattern | str]] = {
     ".py": {"pattern": re.compile(r"^[a-z_]+$"), "description": "snake_case"},
     ".java": {
         "pattern": re.compile(r"^[A-Z][a-zA-Z0-9]*$"),
@@ -236,7 +231,7 @@ class NamingConventionCheck(FileCheck):
     NOTE: This is a basic structure and requires significant configuration.
     """
 
-    def __init__(self, conventions: Optional[Dict[str, Dict[str, Pattern]]] = None):
+    def __init__(self, conventions: dict[str, dict[str, Pattern]] | None = None):
         """
         Args:
             conventions: A dictionary mapping file extensions (e.g., '.py')
@@ -340,7 +335,7 @@ class CaseConflictCheck(DirectoryCheck):
         if not ctx.path.is_dir():
             return []  # Should not happen if called correctly, but check anyway
 
-        filenames_lower_map: Dict[str, List[str]] = {}
+        filenames_lower_map: dict[str, list[str]] = {}
         for item in ctx.path.iterdir():
             # Optional: Only check files, or check both files and dirs? Checking both seems safer.
             # if item.is_file():
@@ -350,7 +345,7 @@ class CaseConflictCheck(DirectoryCheck):
                 filenames_lower_map[name_lower] = []
             filenames_lower_map[name_lower].append(name)
 
-        for name_lower, original_names in filenames_lower_map.items():
+        for _name_lower, original_names in filenames_lower_map.items():
             if len(original_names) > 1:
                 # Check if the names are actually different (e.g., "file.txt" and "File.txt")
                 # If all names in the list are identical, it's not a case conflict (e.g., multiple links pointing to same target named identically)

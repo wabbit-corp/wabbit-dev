@@ -1,7 +1,9 @@
-from typing import Any, List, Optional, Tuple
 import re
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
+
+from dev.caching import cache
 
 ##################################################################################################
 # Maven Coordinates
@@ -103,9 +105,9 @@ class MavenVersionCoordinate:
             case VersionAxis.MILESTONE:
                 return f"M{self.version}"
             case _:
-                assert False, f"Unknown version axis: {self.axis}"
+                raise AssertionError(f"Unknown version axis: {self.axis}")
 
-    def num_repr(self) -> Tuple[int, int | str]:
+    def num_repr(self) -> tuple[int, int | str]:
         match self.axis:
             case VersionAxis.ALPHA:
                 return (1, self.version)
@@ -126,7 +128,7 @@ class MavenVersionCoordinate:
             case VersionAxis.UNKNOWN:
                 return (99, self.version)
             case _:
-                assert False, f"Unknown version axis: {self.axis}"
+                raise AssertionError(f"Unknown version axis: {self.axis}")
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, MavenVersionCoordinate):
@@ -139,7 +141,7 @@ class MavenVersionCoordinate:
 
 @dataclass
 class MavenVersion:
-    components: List[MavenVersionCoordinate]
+    components: list[MavenVersionCoordinate]
 
     @property
     def major(self) -> int:
@@ -175,7 +177,7 @@ class MavenVersion:
         version_str = ".".join(str(c) for c in self.components)
         return version_str
 
-    def _version_tuple(self) -> Tuple:
+    def _version_tuple(self) -> tuple:
         return tuple(self.components)
 
     def __lt__(self, other: "MavenVersion") -> bool:
@@ -240,7 +242,7 @@ def is_valid_maven_coordinate(coordinate: str) -> bool:
 class MavenMetadata:
     latest: str
     release: str | None
-    versions: List[str]
+    versions: list[str]
     last_updated: str
 
     @classmethod
@@ -258,9 +260,6 @@ class MavenMetadata:
             versions=[v.text for v in root.findall("versioning/versions/version")],
             last_updated=root.find("versioning/lastUpdated").text,
         )
-
-
-from dev.caching import cache
 
 
 @cache(path=".dev.cache.db")

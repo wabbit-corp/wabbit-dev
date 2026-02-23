@@ -1,6 +1,6 @@
-from pathlib import Path
-import sys
 import asyncio
+import sys
+from pathlib import Path
 
 
 def _publish_module():

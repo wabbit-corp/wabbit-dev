@@ -5,13 +5,13 @@
 import re
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import List, Dict, Set, Optional, Any
 from pathlib import Path
+from typing import Any
 
 import pathspec
 
 # Import necessary components from your new system
-from dev.checks.base import ProjectCheck, Issue, IssueType, FileLocation, IntRangeSet, IssueList
+from dev.checks.base import FileLocation, IntRangeSet, Issue, IssueList, IssueType, ProjectCheck
 
 # Assuming get_expected_file_properties exists and helps identify text files
 # If not, we might need a simpler text file check.
@@ -83,7 +83,7 @@ SOURCE_FILE_EXTENSIONS = frozenset(
 
 # Consider standard ignore patterns if your framework supports them (e.g., .gitignore)
 # For simplicity, replicating basic ignore logic if needed.
-DEFAULT_IGNORE_DIRS: Set[str] = {
+DEFAULT_IGNORE_DIRS: set[str] = {
     ".git",
     ".gradle",
     ".idea",
@@ -91,7 +91,7 @@ DEFAULT_IGNORE_DIRS: Set[str] = {
     "target",
     "node_modules",
 }
-DEFAULT_IGNORE_FILES: Set[str] = {".DS_Store", "Thumbs.db", "desktop.ini"}
+DEFAULT_IGNORE_FILES: set[str] = {".DS_Store", "Thumbs.db", "desktop.ini"}
 
 # --- Issue Types ---
 
@@ -103,9 +103,9 @@ E_DUPLICATE_IDENTIFIER = IssueType("E_DUPLICATE_IDENTIFIER", "Duplicate identifi
 @dataclass(frozen=True)
 class IgnoreContext:
     root: Path
-    ignore: List[str] = field(default_factory=list)
+    ignore: list[str] = field(default_factory=list)
 
-    def with_ignore(self, ignore: List[str]) -> "IgnoreContext":
+    def with_ignore(self, ignore: list[str]) -> "IgnoreContext":
         return IgnoreContext(
             root=self.root,
             ignore=self.ignore + ignore,
@@ -122,7 +122,7 @@ class IgnoreContext:
         )
 
 
-def read_ignore_patterns(path: Path) -> List[str]:
+def read_ignore_patterns(path: Path) -> list[str]:
     with path.open("rt", encoding="utf-8", errors="replace") as f:
         return [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
 
@@ -135,8 +135,8 @@ class UniqueIdentifiersCheck(ProjectCheck):
 
     def __init__(
         self,
-        ignore_dirs: Optional[Set[str]] = None,
-        ignore_files: Optional[Set[str]] = None,
+        ignore_dirs: set[str] | None = None,
+        ignore_files: set[str] | None = None,
     ):
         """
         Initializes the check.
@@ -174,7 +174,7 @@ class UniqueIdentifiersCheck(ProjectCheck):
             return False
         return ignore_ctx.spec.match_file(str(rel_path))
 
-    def check(self, path: Path, project: Any) -> List[Issue]:
+    def check(self, path: Path, project: Any) -> list[Issue]:
         """
         Scans the project at the given path for duplicate identifiers.
 
@@ -188,8 +188,8 @@ class UniqueIdentifiersCheck(ProjectCheck):
             # Or raise ValueError? Returning empty list seems reasonable.
             return []
 
-        seen_ulids: Dict[str, FileLocation] = {}
-        seen_uuids: Dict[str, FileLocation] = {}
+        seen_ulids: dict[str, FileLocation] = {}
+        seen_uuids: dict[str, FileLocation] = {}
         issues = IssueList()  # Use IssueList for potential merging later if needed
 
         def scan_file(file_path: Path, ignore_ctx: IgnoreContext | None) -> None:

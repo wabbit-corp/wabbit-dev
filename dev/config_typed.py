@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Generic, Sequence, TypeVar, Union
-import typing
 import re
+import typing
+from collections.abc import Sequence
+from dataclasses import dataclass
+from functools import reduce
+from typing import Any
 
 from mu.typed import MuDecodeContext, MuDecodeError, MuDeserialize, mu_tag
 from mu.types import SAtom, SExpr, SStr
 
-T = TypeVar("T")
-
 
 @dataclass(frozen=True)
-class Const(Generic[T]):
+class Const[T]:
     value: T
 
 
@@ -21,7 +21,7 @@ class VarName:
     name: str
 
 
-Value = Const[T] | VarName
+type Value[T] = Const[T] | VarName
 
 
 @dataclass(frozen=True)
@@ -490,7 +490,7 @@ def make_top_level_target(extra_command_types: Sequence[type[Any]]) -> Any:
         raise ValueError("No command types provided")
     if len(command_types) == 1:
         return command_types[0]
-    return Union[command_types]
+    return reduce(lambda acc, item: acc | item, command_types[1:], command_types[0])
 
 
 __all__ = [

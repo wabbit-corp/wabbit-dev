@@ -7,11 +7,11 @@ Based on https://stackoverflow.com/a/36113168/300783
 Modified for Python3 with some small code improvements.
 """
 
+import codecs
+import hashlib
 import os
 import sys
-import hashlib
 from collections import defaultdict, namedtuple
-import codecs
 
 # reopen stdout with utf-8 support
 sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
@@ -70,7 +70,7 @@ def check_for_duplicates(paths, exclude_filters, include_filters, min_size, no_d
 
                 processed += 1
                 if processed % 1000 == 0:
-                    print("Processed %d files" % processed)
+                    print(f"Processed {processed} files")
 
                 full_path = os.path.join(dirpath, filename)
                 try:

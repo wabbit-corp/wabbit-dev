@@ -1,17 +1,15 @@
-from typing import List
-
-import openai
-import anthropic
 import hashlib
 import json
-import os
-from pathlib import Path
-import textwrap
 import logging
+import os
 import re
+import textwrap
+from pathlib import Path
+
+import openai
 
 from dev.caching import cache
-from dev.io import read_text_file, read_ignore_file, walk_files
+from dev.io import read_ignore_file, read_text_file, walk_files
 
 # Keep this prompt aligned with AGENTS.md > Commit Message Policy.
 SUGGEST_COMMIT_PROMPT = textwrap.dedent("""
@@ -158,7 +156,7 @@ Respond with a JSON object like:
 
 
 @cache(path=".dev.cache.db", ttl=7 * 24 * 3600)
-def suggest_version_number(commits: List[str], last_version: str, /, api_key: str) -> tuple[str, str, List[str]]:
+def suggest_version_number(commits: list[str], last_version: str, /, api_key: str) -> tuple[str, str, list[str]]:
     assert commits, "No commits"
     client = openai.Client(api_key=api_key)
 
@@ -245,7 +243,7 @@ def suggest_version_number(commits: List[str], last_version: str, /, api_key: st
 
 
 def answer_about_file(
-    paths: List[Path],
+    paths: list[Path],
     question: str,
     /,
     api_key: str | None = None,
@@ -335,7 +333,7 @@ def agent_call(
         },
     ]
 
-    def list_files(root: Path) -> List[str]:
+    def list_files(root: Path) -> list[str]:
         if not root.is_dir():
             return []
         ignore = read_ignore_file(
@@ -358,7 +356,7 @@ def agent_call(
 
     known_files = list_files(root)
 
-    def answer(paths: List[str], question: str) -> str:
+    def answer(paths: list[str], question: str) -> str:
         paths = [path for path in paths if path]
         if not paths:
             return {"error": "No file were provided"}

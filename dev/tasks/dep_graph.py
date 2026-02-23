@@ -1,19 +1,17 @@
-from typing import List, Optional, Dict, Set
 from dataclasses import dataclass
 
 from graphviz import Digraph
 
 from dev.config import load_config
-from dev.messages import error, info, success
-from dev.config import GradleProject
+from dev.messages import error, info
 
 
 def get_project_dependencies(
     *,
-    focus_project_name: Optional[str] = None,
+    focus_project_name: str | None = None,
     include_artifacts: bool = False,
     output_filename: str = "dependency_graph",
-    graph_title: Optional[str] = None,
+    graph_title: str | None = None,
 ) -> None:
     config = load_config()
 
@@ -44,8 +42,8 @@ def get_project_dependencies(
         source: str
         target: str
 
-    nodes: Dict[str, Node] = {}
-    edges: Set[Edge] = set()
+    nodes: dict[str, Node] = {}
+    edges: set[Edge] = set()
 
     def sanitize_id(artifact: str) -> str:
         id = artifact
@@ -70,7 +68,7 @@ def get_project_dependencies(
                 nodes[dep.name] = Node(id=sanitize_id(dep.name), label=dep.name, type="artifact")
 
     if focus_project_name is None:
-        for project_name, project in config.defined_projects.items():
+        for project_name, _project in config.defined_projects.items():
             add_dependencies(project_name)
     else:
         add_dependencies(focus_project_name)
@@ -104,7 +102,7 @@ def get_project_dependencies(
 
     # Save the graph
     try:
-        graph_file = f"dependencies"
+        graph_file = "dependencies"
         dot.render(graph_file, format="svg", cleanup=True)
         info(f"Dependency graph saved as {graph_file}.svg")
     except Exception as e:

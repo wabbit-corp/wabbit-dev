@@ -1,27 +1,28 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import List, Dict
-from pathlib import Path
-import pathspec
-from functools import cached_property
-from argparse import ArgumentParser
 
-from dev.checks.base import (
-    RepoCheck,
-    FileCheck,
-    DirectoryCheck,
-    ProjectCheck,
-    Issue,
-    IssueType,
-    Severity,
-    FileContext,
-    IssueList,
-    CheckFailedWithReportedIssues,
-    ScopedReadSuppressions,
-    ScopedFindingIgnoreRule,
-)
+from argparse import ArgumentParser
+from dataclasses import dataclass, field
+from functools import cached_property
+from pathlib import Path
+
+import pathspec
+
 from dev.base import Module
-from dev.config import load_config, Config, Project
+from dev.checks.base import (
+    CheckFailedWithReportedIssues,
+    DirectoryCheck,
+    FileCheck,
+    FileContext,
+    Issue,
+    IssueList,
+    IssueType,
+    ProjectCheck,
+    RepoCheck,
+    ScopedFindingIgnoreRule,
+    ScopedReadSuppressions,
+    Severity,
+)
+from dev.config import Project, load_config
 from dev.messages import error, info, warning
 
 E_GITIGNORE_WITHOUT_REPO = IssueType(
@@ -32,7 +33,7 @@ E_GITIGNORE_WITHOUT_REPO = IssueType(
 
 def check_main(
     project_or_dir_or_file: str,
-    enabled_checks: List[str] | None = None,
+    enabled_checks: list[str] | None = None,
     fix: bool = False,
 ) -> int:
     """
@@ -44,12 +45,12 @@ def check_main(
     if config is None:
         warning("No config file found. Some checks may not have sufficient context to run.")
 
-    projects_by_path: Dict[Path, Project] = {}
+    projects_by_path: dict[Path, Project] = {}
     if config is not None:
         for project in config.defined_projects.values():
             projects_by_path[project.path.resolve()] = project
 
-    root_paths: List[Path] = []
+    root_paths: list[Path] = []
     if project_or_dir_or_file.startswith(":"):  # Definitely a project
         if config is None:
             raise ValueError("No config file found. Cannot resolve project paths.")
@@ -73,15 +74,15 @@ def check_main(
 
     # Gather checks
     from dev.checks.base import (
+        _KNOWN_TYPES,
         Check,
-        RepoCheck,
-        FileCheck,
         DirectoryCheck,
+        FileCheck,
         ProjectCheck,
+        RepoCheck,
     )
-    from dev.checks.base import _KNOWN_TYPES
 
-    all_checks: Dict[str, Check] = {}
+    all_checks: dict[str, Check] = {}
     modules: dict[str, Module] = {}
     if config is not None:
         modules = config.modules
@@ -117,7 +118,7 @@ def check_main(
     disabled_checks: dict[str, pathspec.PathSpec] = {}
     ignored_findings: list[tuple[str, pathspec.PathSpec, str]] = []
     if config is not None:
-        patterns_by_error_name: Dict[str, List[str]] = {}
+        patterns_by_error_name: dict[str, list[str]] = {}
         for error_name, pattern in config.disabled_checks:
             assert isinstance(error_name, str), f"Expected string, got {type(error_name)}"
             assert isinstance(pattern, str), f"Expected string, got {type(pattern)}"
@@ -216,7 +217,7 @@ def check_main(
 
     has_errors = False
 
-    def report(issue: Issue | IssueList | List) -> None:
+    def report(issue: Issue | IssueList | list) -> None:
         nonlocal has_errors
         if isinstance(issue, IssueList) or isinstance(issue, list):
             for i in issue:
@@ -228,7 +229,7 @@ def check_main(
 
         msg = ""
 
-        msg += "[{issue_type}] ".format(issue_type=issue.issue_type.id)
+        msg += f"[{issue.issue_type.id}] "
         msg += "(fixable) " if issue.fix else ""
 
         if issue.location is not None:
@@ -261,9 +262,9 @@ def check_main(
     @dataclass(frozen=True)
     class RepoContext:
         root: Path
-        ignore: List[str] = field(default_factory=list)
+        ignore: list[str] = field(default_factory=list)
 
-        def with_ignore(self, ignore: List[str]) -> RepoContext:
+        def with_ignore(self, ignore: list[str]) -> RepoContext:
             return RepoContext(
                 root=self.root,
                 ignore=self.ignore + ignore,
@@ -282,7 +283,7 @@ def check_main(
                 self.ignore,
             )
 
-    def read_ignore_patterns(path: Path) -> List[str]:
+    def read_ignore_patterns(path: Path) -> list[str]:
         """
         Reads a gitignore-style ignore file and returns active patterns.
         """
@@ -362,7 +363,7 @@ def check_main(
                 ctx = FileContext(path=path, check_name=check.__class__.__name__)
                 try:
                     check.check(ctx=ctx)
-                except CheckFailedWithReportedIssues as e:
+                except CheckFailedWithReportedIssues:
                     pass  # Issues already reported in context
                 accumulated_issues.extend(ctx.issues)
             report(accumulated_issues)
@@ -398,14 +399,14 @@ def check_main(
                 )
                 try:
                     check.check(ctx=ctx)
-                except CheckFailedWithReportedIssues as e:
+                except CheckFailedWithReportedIssues:
                     pass  # Issues already reported in context
                 accumulated_issues.extend(ctx.issues)
 
             for issue in accumulated_issues:
                 report([issue])
                 if issue.fix and fix and is_check_disabled(issue) is False:
-                    info(f"Fixing")
+                    info("Fixing")
                     issue.fix()
 
     for path in root_paths:

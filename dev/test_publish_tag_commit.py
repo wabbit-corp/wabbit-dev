@@ -1,6 +1,6 @@
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-import sys
 
 
 def _resolve_tag_commit_fn():

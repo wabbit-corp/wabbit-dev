@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
-import os, sys, re, subprocess
 import argparse
 import enum
 import math
+import os
+import re
+import sys
 
 
 class VersionComparison(enum.Enum):
@@ -109,9 +111,9 @@ def find_installed_jvms_win32():
         key_name = winreg.EnumKey(root_key, i)
 
         try:
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\JavaSoft\JDK\\{}".format(key_name))
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\JavaSoft\JDK\\{key_name}")
             value, regtype = winreg.QueryValueEx(key, "JavaHome")
-        except WindowsError:
+        except OSError:
             continue
 
         has_java = os.path.exists(os.path.join(value, "bin", "java.exe"))
@@ -176,7 +178,7 @@ def find_installed_jvms_win32():
                         has_java = os.path.exists(os.path.join(java_home, "bin", "java.exe"))
                         has_javaw = os.path.exists(os.path.join(java_home, "bin", "javaw.exe"))
                         if has_java and has_javaw:
-                            print("Found Java installation in common location: {}".format(java_home))
+                            print(f"Found Java installation in common location: {java_home}")
                             FOUND_JVMS.add(os.path.abspath(java_home))
                     else:
                         for version_dir in os.listdir(java_home):
@@ -214,7 +216,7 @@ def find_installed_jvms_win32():
 def get_jvm_version(java_home):
     # Step 6: find out the versions
     if not os.path.exists(os.path.join(jvm_home, "release")):
-        print("No release file found in {}".format(jvm_home))
+        print(f"No release file found in {jvm_home}")
         return None
 
     with open(os.path.join(jvm_home, "release")) as f:
@@ -245,7 +247,7 @@ def parse_query(query):
     query = query.split(" ")
     query_version = query.pop(0)
 
-    assert re.match(r"^\d+(\.\d+)*\+?$", query_version), "Invalid version: {}".format(query_version)
+    assert re.match(r"^\d+(\.\d+)*\+?$", query_version), f"Invalid version: {query_version}"
 
     if "+" in query_version:
         query_version = query_version[:-1]
