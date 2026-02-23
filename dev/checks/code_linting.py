@@ -9,48 +9,8 @@ from typing import Sequence, Optional
 import re
 import subprocess
 
-from dev.checks.base import FileCheck, IssueType, IssueList, FileContext
-from dev.messages import info, error
-
-
-E_BLACK_MISSING = IssueType(
-    "E_BLACK_MISSING", "The 'black' formatter is not installed."
-)
-E_PYTHON_NOT_FORMATTED = IssueType(
-    "E_PYTHON_NOT_FORMATTED", "Python file is not formatted with black."
-)
-
-
-class PythonFormattingCheck(FileCheck):
-    """Check Python source files with ``black``."""
-
-    def check(self, ctx: FileContext):
-        if ctx.path.suffix != ".py" or not ctx.path.is_file():
-            return
-
-        try:
-            result = subprocess.run(
-                ["black", "--check", "--quiet", str(ctx.path)],
-                capture_output=True,
-                text=True,
-            )
-
-            def fix():
-                try:
-                    subprocess.run(
-                        ["black", str(ctx.path)],
-                        capture_output=True,
-                        text=True,
-                    )
-                except Exception as e:
-                    error(f"Failed to format {ctx.path}: {e}")
-
-            if result.returncode != 0:
-                ctx.add_issue(E_PYTHON_NOT_FORMATTED, fix=fix)
-        except FileNotFoundError:
-            ctx.add_issue(E_BLACK_MISSING)
-
-        return ctx.issues
+from dev.checks.base import FileCheck, IssueType, FileContext
+from dev.messages import error
 
 
 E_KTLINT_MISSING = IssueType(

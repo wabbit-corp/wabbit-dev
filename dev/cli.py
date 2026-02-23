@@ -63,7 +63,7 @@ class Commands:
     # test_parser = subparsers.add_parser('test')
 
 
-async def async_main() -> None:
+async def async_main() -> int:
     if sys.platform.lower() == "win32":
         os.system("color")
         os.system("chcp 65001 > nul")
@@ -149,7 +149,7 @@ async def async_main() -> None:
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
-        return
+        return 0
 
     # enable DEBUG logging
     # logging.getLogger().setLevel(logging.DEBUG)
@@ -250,7 +250,7 @@ async def async_main() -> None:
             if not checks:
                 checks = None
             fix = args.fix
-            check_main(project_or_dir_or_file, checks, fix)
+            return check_main(project_or_dir_or_file, checks, fix)
 
         case "trufflehog":
             from dev.tasks.check import trufflehog
@@ -315,6 +315,8 @@ async def async_main() -> None:
         case _:
             raise ValueError(f"Unknown command: {args.command}")
 
+    return 0
+
 
 def main() -> None:
-    asyncio.run(async_main())
+    raise SystemExit(asyncio.run(async_main()))
