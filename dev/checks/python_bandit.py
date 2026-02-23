@@ -12,3 +12,6 @@ class PythonBanditCheck(RepoCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         return run_bandit(path, project)
+
+
+__all__ = ["PythonBanditCheck"]

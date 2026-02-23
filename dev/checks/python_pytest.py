@@ -12,3 +12,6 @@ class PythonPytestCheck(RepoCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         return run_pytest(path, project)
+
+
+__all__ = ["PythonPytestCheck"]

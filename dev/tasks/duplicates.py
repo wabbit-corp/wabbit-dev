@@ -12,9 +12,13 @@ import hashlib
 import os
 import sys
 from collections import defaultdict, namedtuple
+from collections.abc import Iterator
+from typing import BinaryIO
 
 # reopen stdout with utf-8 support
-sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
+stdout_buffer = getattr(sys.stdout, "buffer", None)
+if stdout_buffer is not None:
+    sys.stdout = codecs.getwriter("utf-8")(stdout_buffer)
 
 
 IGNORE_DIRS = {".git", ".svn", ".hg", ".idea", ".vscode", "__pycache__"}
@@ -23,14 +27,15 @@ IGNORE_FILES = {"Thumbs.db", "desktop.ini", ".DS_Store"}
 FileGroup = namedtuple("FileGroup", "total_size total_count files")
 
 
-def is_ignored_dir(path):
+def is_ignored_dir(path: str) -> bool:
     # check every path component, account for windows/unix path separators
     for component in os.path.normpath(path).split(os.path.sep):
         if component in IGNORE_DIRS:
             return True
+    return False
 
 
-def chunk_reader(fobj, chunk_size=1024):
+def chunk_reader(fobj: BinaryIO, chunk_size: int = 1024) -> Iterator[bytes]:
     """Generator that reads a file in chunks of bytes"""
     while True:
         chunk = fobj.read(chunk_size)
@@ -39,8 +44,8 @@ def chunk_reader(fobj, chunk_size=1024):
         yield chunk
 
 
-def get_hash(filename, first_chunk_only=False, hash_algo=hashlib.sha1):
-    hashobj = hash_algo()
+def get_hash(filename: str, first_chunk_only: bool = False) -> bytes:
+    hashobj = hashlib.sha256()
     with open(filename, "rb") as f:
         if first_chunk_only:
             hashobj.update(f.read(1024))
@@ -50,10 +55,16 @@ def get_hash(filename, first_chunk_only=False, hash_algo=hashlib.sha1):
     return hashobj.digest()
 
 
-def check_for_duplicates(paths, _exclude_filters, _include_filters, _min_size, _no_default_excludes):
-    files_by_size = defaultdict(list)
-    files_by_small_hash = defaultdict(list)
-    files_by_full_hash = defaultdict(list)
+def check_for_duplicates(
+    paths: list[str],
+    _exclude_filters: list[str],
+    _include_filters: list[str],
+    _min_size: int,
+    _no_default_excludes: bool,
+) -> None:
+    files_by_size: defaultdict[int, list[str]] = defaultdict(list)
+    files_by_small_hash: defaultdict[tuple[int, bytes], list[str]] = defaultdict(list)
+    files_by_full_hash: defaultdict[bytes, list[str]] = defaultdict(list)
 
     processed = 0
 

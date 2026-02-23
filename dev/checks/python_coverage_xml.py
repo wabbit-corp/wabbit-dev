@@ -12,3 +12,6 @@ class PythonCoverageXmlCheck(RepoCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         return run_coverage_xml(path, project)
+
+
+__all__ = ["PythonCoverageXmlCheck"]

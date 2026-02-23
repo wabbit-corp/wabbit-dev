@@ -1,7 +1,7 @@
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
 from dev.caching import cache
 
@@ -84,7 +84,7 @@ class MavenVersionCoordinate:
 
         return MavenVersionCoordinate(axis=VersionAxis.UNKNOWN, version=s)
 
-    def __str__(self):
+    def __str__(self) -> str:
         match self.axis:
             case VersionAxis.NUMBER:
                 return str(self.version)
@@ -130,7 +130,7 @@ class MavenVersionCoordinate:
             case _:
                 raise AssertionError(f"Unknown version axis: {self.axis}")
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, MavenVersionCoordinate):
             return False
         return self.num_repr() == other.num_repr()
@@ -173,11 +173,11 @@ class MavenVersion:
 
         return cls(components=components)
 
-    def __str__(self):
+    def __str__(self) -> str:
         version_str = ".".join(str(c) for c in self.components)
         return version_str
 
-    def _version_tuple(self) -> tuple:
+    def _version_tuple(self) -> tuple[MavenVersionCoordinate, ...]:
         return tuple(self.components)
 
     def __lt__(self, other: "MavenVersion") -> bool:
@@ -192,7 +192,9 @@ class MavenVersion:
                 return False
         return False
 
-    def __eq__(self, other: "MavenVersion") -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, MavenVersion):
+            return False
         v1 = self._version_tuple()
         v2 = other._version_tuple()
         for i in range(max(len(v1), len(v2))):
@@ -219,7 +221,7 @@ class MavenCoordinate:
     artifact_id: str
     version: str
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.group_id}:{self.artifact_id}:{self.version}"
 
     @classmethod
@@ -240,7 +242,7 @@ def is_valid_maven_coordinate(coordinate: str) -> bool:
 
 @dataclass
 class MavenMetadata:
-    latest: str
+    latest: str | None
     release: str | None
     versions: list[str]
     last_updated: str
@@ -253,26 +255,36 @@ class MavenMetadata:
 
         latest_tag = root.find("versioning/latest")
         release_tag = root.find("versioning/release")
+        versions = [v.text for v in root.findall("versioning/versions/version") if v.text is not None]
+        last_updated_tag = root.find("versioning/lastUpdated")
+        last_updated = (
+            last_updated_tag.text if last_updated_tag is not None and last_updated_tag.text is not None else ""
+        )
 
         return MavenMetadata(
             latest=latest_tag.text if latest_tag is not None else None,
             release=release_tag.text if release_tag is not None else None,
-            versions=[v.text for v in root.findall("versioning/versions/version")],
-            last_updated=root.find("versioning/lastUpdated").text,
+            versions=versions,
+            last_updated=last_updated,
         )
 
 
-@cache(path=".dev.cache.db")
-def fetch_raw_metadata(repo_base_url: str, group_id: str, artifact_id: str) -> str:
+def _fetch_raw_metadata_impl(repo_base_url: str, group_id: str, artifact_id: str) -> str:
     import requests
 
     url = f"{repo_base_url}{group_id.replace('.', '/')}/{artifact_id}/maven-metadata.xml"
     response = requests.get(url)
     response.raise_for_status()
-    return response.text
+    text = response.text
+    if not isinstance(text, str):
+        raise TypeError(f"Expected str response text, got {type(text)}")
+    return text
 
 
-@cache(path=".dev.cache.db")
-def fetch_metadata(repo_base_url: str, group_id: str, artifact_id: str) -> MavenMetadata:
+def _fetch_metadata_impl(repo_base_url: str, group_id: str, artifact_id: str) -> MavenMetadata:
     response = fetch_raw_metadata(repo_base_url, group_id, artifact_id)
     return MavenMetadata.parse(response)
+
+
+fetch_raw_metadata: Callable[[str, str, str], str] = cache(path=".dev.cache.db")(_fetch_raw_metadata_impl)
+fetch_metadata: Callable[[str, str, str], MavenMetadata] = cache(path=".dev.cache.db")(_fetch_metadata_impl)

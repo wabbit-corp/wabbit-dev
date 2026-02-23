@@ -26,7 +26,7 @@ EXECUTABLE_EXTENSIONS = {
 # --- Helper Functions ---
 
 
-def has_shebang(filepath):
+def has_shebang(filepath: str) -> bool:
     """
     Checks if a file starts with a shebang ('#!').
     Returns False if the file can't be read or is empty.
@@ -42,7 +42,7 @@ def has_shebang(filepath):
         return False
 
 
-def is_elf_exe_mach(filepath):
+def is_elf_exe_mach(filepath: str) -> str | None:
     """
     Checks if a file is an ELF, a Windows EXE, or a Mach-O (Darwin) executable
     by examining the first few bytes (the file "magic numbers").
@@ -92,7 +92,7 @@ def is_elf_exe_mach(filepath):
 # assert is_elf_exe_mach("trufflehog")
 
 
-def is_executable(filepath):
+def is_executable(filepath: str) -> bool:
     """
     Checks if the file has execute permission for user, group, or others.
     """
@@ -103,7 +103,7 @@ def is_executable(filepath):
         return False
 
 
-def remove_execute_permission(filepath):
+def remove_execute_permission(filepath: str) -> bool:
     """
     Removes execute permissions (user, group, other) from a file.
     Returns True on success, False on failure.
@@ -130,7 +130,7 @@ def remove_execute_permission(filepath):
         return False
 
 
-def find_and_process_files(root_dir, fix_files=False):
+def find_and_process_files(root_dir: str, fix_files: bool = False) -> tuple[list[str], int, int]:
     """
     Walks the directory tree, finds suspicious files, and optionally fixes them.
     Returns a list of files that were identified as suspicious.

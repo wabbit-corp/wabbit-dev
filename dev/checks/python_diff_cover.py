@@ -12,3 +12,6 @@ class PythonDiffCoverCheck(RepoCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         return run_diff_cover(path, project)
+
+
+__all__ = ["PythonDiffCoverCheck"]

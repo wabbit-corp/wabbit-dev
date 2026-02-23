@@ -12,3 +12,6 @@ class PythonVultureCheck(RepoCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         return run_vulture(path, project)
+
+
+__all__ = ["PythonVultureCheck"]

@@ -12,3 +12,6 @@ class PythonDeptryCheck(RepoCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         return run_deptry(path, project)
+
+
+__all__ = ["PythonDeptryCheck"]

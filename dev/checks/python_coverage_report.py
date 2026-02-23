@@ -12,3 +12,6 @@ class PythonCoverageReportCheck(RepoCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         return run_coverage_report(path, project)
+
+
+__all__ = ["PythonCoverageReportCheck"]

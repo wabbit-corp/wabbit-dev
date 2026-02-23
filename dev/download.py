@@ -5,7 +5,7 @@ import dateparser
 import requests
 
 
-def save_uri(uri, path):
+def save_uri(uri: str, path: str) -> None:
     needs_download = True
 
     if os.path.exists(path):
@@ -90,3 +90,6 @@ def save_uri(uri, path):
 
     if last_modified is not None:
         os.utime(path, (last_modified, last_modified))
+
+
+__all__ = ["save_uri"]

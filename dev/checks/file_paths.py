@@ -54,11 +54,11 @@ class FilenameLengthCheck(FileCheck):
     def __init__(self, max_length: int = DEFAULT_MAX_FILENAME_LENGTH):
         self.max_length = max_length
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         filename = ctx.path.name
         actual_length = len(filename)
         if actual_length <= self.max_length:
-            return []
+            return
         ctx.add_issue(E_FILENAME_TOO_LONG, max_length=self.max_length, actual_length=actual_length)
 
 
@@ -102,7 +102,7 @@ class SensitiveFilenameCheck(FileCheck):
     def __init__(self, sensitive_patterns: set[str] = DEFAULT_SENSITIVE_FILENAME_PATTERNS):
         self.sensitive_patterns_lower = {p.lower() for p in sensitive_patterns}
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         filename_lower = ctx.path.name.lower()
 
         # Check for exact matches first (e.g., ".env")
@@ -188,7 +188,7 @@ class FilenamePropertiesCheck(FileCheck):
             else None
         )
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         filename = ctx.path.name
 
         # 1. Check for problematic characters
@@ -210,7 +210,7 @@ class FilenamePropertiesCheck(FileCheck):
             ctx.add_issue(E_RESERVED_FILENAME)
 
 
-DEFAULT_CONVENTIONS: dict[str, dict[str, Pattern | str]] = {
+DEFAULT_CONVENTIONS: dict[str, dict[str, Pattern[str] | str]] = {
     ".py": {"pattern": re.compile(r"^[a-z_]+$"), "description": "snake_case"},
     ".java": {
         "pattern": re.compile(r"^[A-Z][a-zA-Z0-9]*$"),
@@ -231,7 +231,7 @@ class NamingConventionCheck(FileCheck):
     NOTE: This is a basic structure and requires significant configuration.
     """
 
-    def __init__(self, conventions: dict[str, dict[str, Pattern]] | None = None):
+    def __init__(self, conventions: dict[str, dict[str, Pattern[str] | str]] | None = None):
         """
         Args:
             conventions: A dictionary mapping file extensions (e.g., '.py')
@@ -244,18 +244,18 @@ class NamingConventionCheck(FileCheck):
         """
         self.conventions = conventions if conventions else {}
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         filename_stem = ctx.path.stem  # Filename without extension
         extension = ctx.path.suffix.lower()
 
         if not self.conventions or extension not in self.conventions:
-            return []  # No convention defined for this file type
+            return  # No convention defined for this file type
 
         rule = self.conventions[extension]
         pattern = rule.get("pattern")
         description = rule.get("description", "expected format")
 
-        if pattern and not pattern.match(filename_stem):
+        if isinstance(pattern, re.Pattern) and not pattern.match(filename_stem):
             ctx.add_issue(
                 E_FILE_NAMING_CONVENTION,
                 file_type=f"'{extension}' files",
@@ -284,9 +284,9 @@ class SymlinkTargetCheck(FileCheck):
         self.check_absolute = check_absolute
         self.check_broken = check_broken
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if not ctx.path.is_symlink():
-            return []
+            return
 
         target_path_str = os.readlink(str(ctx.path))  # Read link target as string
         target_path = Path(target_path_str)  # Convert to Path
@@ -331,9 +331,9 @@ class CaseConflictCheck(DirectoryCheck):
     Checks for files within the same directory whose names differ only by case.
     """
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if not ctx.path.is_dir():
-            return []  # Should not happen if called correctly, but check anyway
+            return  # Should not happen if called correctly, but check anyway
 
         filenames_lower_map: dict[str, list[str]] = {}
         for item in ctx.path.iterdir():
@@ -357,3 +357,24 @@ class CaseConflictCheck(DirectoryCheck):
                         directory=ctx.path.name,  # Or relative path if context available
                         conflicting_files=", ".join(sorted(original_names)),
                     )
+
+
+__all__ = [
+    "E_FILENAME_TOO_LONG",
+    "FilenameLengthCheck",
+    "E_SENSITIVE_FILENAME",
+    "SensitiveFilenameCheck",
+    "E_PROBLEMATIC_FILENAME_CHARS",
+    "E_NON_ASCII_FILENAME",
+    "E_RESERVED_FILENAME",
+    "FilenamePropertiesCheck",
+    "DEFAULT_CONVENTIONS",
+    "E_FILE_NAMING_CONVENTION",
+    "NamingConventionCheck",
+    "E_SYMLINK_POINTS_ABSOLUTE",
+    "E_SYMLINK_BROKEN",
+    "E_SYMLINK",
+    "SymlinkTargetCheck",
+    "E_CASE_CONFLICTING_FILENAME",
+    "CaseConflictCheck",
+]

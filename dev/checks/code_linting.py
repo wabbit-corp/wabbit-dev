@@ -19,7 +19,7 @@ E_KOTLIN_NOT_FORMATTED = IssueType("E_KOTLIN_NOT_FORMATTED", "Kotlin file is not
 class KotlinFormattingCheck(FileCheck):
     """Check Kotlin source files with ``ktfmt``."""
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if ctx.path.suffix != ".kt" or not ctx.path.is_file():
             return
 
@@ -38,7 +38,7 @@ class KotlinFormattingCheck(FileCheck):
                 text=True,
             )
 
-            def fix():
+            def fix() -> None:
                 try:
                     subprocess.run(
                         cmd + [str(ctx.path)],
@@ -117,7 +117,7 @@ E_CPP_NOT_FORMATTED = IssueType("E_CPP_NOT_FORMATTED", "C/C++ file is not format
 class CppFormattingCheck(FileCheck):
     """Check C/C++ source files with ``clang-format``."""
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if ctx.path.suffix not in {".c", ".cpp", ".cc", ".h", ".hpp"} or not ctx.path.is_file():
             return
 
@@ -128,7 +128,7 @@ class CppFormattingCheck(FileCheck):
                 text=True,
             )
 
-            def fix():
+            def fix() -> None:
                 try:
                     # -i edits files in-place
                     subprocess.run(
@@ -144,8 +144,6 @@ class CppFormattingCheck(FileCheck):
         except FileNotFoundError:
             ctx.add_issue(E_CLANG_FORMAT_MISSING)
 
-        return ctx.issues
-
 
 E_PURSTIDY_MISSING = IssueType("E_PURSTIDY_MISSING", "The 'purs-tidy' formatter is not installed.")
 E_PURESCRIPT_NOT_FORMATTED = IssueType("E_PURESCRIPT_NOT_FORMATTED", "Purescript file is not formatted with purs-tidy.")
@@ -154,7 +152,7 @@ E_PURESCRIPT_NOT_FORMATTED = IssueType("E_PURESCRIPT_NOT_FORMATTED", "Purescript
 class PurescriptFormattingCheck(FileCheck):
     """Check Purescript files with ``purs-tidy``."""
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if ctx.path.suffix != ".purs" or not ctx.path.is_file():
             return
 
@@ -166,7 +164,7 @@ class PurescriptFormattingCheck(FileCheck):
                 text=True,
             )
 
-            def fix():
+            def fix() -> None:
                 try:
                     # Format in place
                     subprocess.run(
@@ -182,8 +180,6 @@ class PurescriptFormattingCheck(FileCheck):
         except FileNotFoundError:
             ctx.add_issue(E_PURSTIDY_MISSING)
 
-        return ctx.issues
-
 
 E_CSHARPIER_MISSING = IssueType("E_CSHARPIER_MISSING", "The 'csharpier' formatter is not installed.")
 E_CS_NOT_FORMATTED = IssueType("E_CS_NOT_FORMATTED", "C# file is not formatted with csharpier.")
@@ -192,10 +188,10 @@ E_CS_NOT_FORMATTED = IssueType("E_CS_NOT_FORMATTED", "C# file is not formatted w
 class CSharpFormattingCheck(FileCheck):
     """Check C# files with ``csharpier``."""
 
-    def _run(self, args: Sequence[str]) -> subprocess.CompletedProcess:
+    def _run(self, args: Sequence[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(args, capture_output=True, text=True)
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if ctx.path.suffix not in {".cs"} or not ctx.path.is_file():
             return
 
@@ -226,7 +222,7 @@ class CSharpFormattingCheck(FileCheck):
                     # ignore here; handled below if needed
                     pass
 
-            def fix():
+            def fix() -> None:
                 try:
                     if selected == "legacy":
                         # Legacy CLI formats in-place by default
@@ -252,4 +248,19 @@ class CSharpFormattingCheck(FileCheck):
             # Neither `dotnet` nor legacy `csharpier` found
             ctx.add_issue(E_CSHARPIER_MISSING)
 
-        return ctx.issues
+
+__all__ = [
+    "E_KTLINT_MISSING",
+    "E_KTFMT_MISSING",
+    "E_KOTLIN_NOT_FORMATTED",
+    "KotlinFormattingCheck",
+    "E_CLANG_FORMAT_MISSING",
+    "E_CPP_NOT_FORMATTED",
+    "CppFormattingCheck",
+    "E_PURSTIDY_MISSING",
+    "E_PURESCRIPT_NOT_FORMATTED",
+    "PurescriptFormattingCheck",
+    "E_CSHARPIER_MISSING",
+    "E_CS_NOT_FORMATTED",
+    "CSharpFormattingCheck",
+]

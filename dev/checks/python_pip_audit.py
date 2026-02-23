@@ -12,3 +12,6 @@ class PythonPipAuditCheck(RepoCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         return run_pip_audit(path, project)
+
+
+__all__ = ["PythonPipAuditCheck"]

@@ -12,3 +12,6 @@ class PythonMypyCheck(RepoCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         return run_mypy(path, project)
+
+
+__all__ = ["PythonMypyCheck"]

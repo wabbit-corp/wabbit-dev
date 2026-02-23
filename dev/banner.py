@@ -1,7 +1,9 @@
+from pathlib import Path
+
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 
 
-def get_text_dimensions(font, text):
+def get_text_dimensions(font: ImageFont.ImageFont, text: str) -> tuple[int, int]:
     """
     Measure text size using the old getmask-based approach,
     which works in older PIL/Pillow versions.
@@ -12,7 +14,7 @@ def get_text_dimensions(font, text):
     return mask.size  # returns (width, height)
 
 
-def prepare_icon(icon_path, target_size, corner_radius_factor=0.15):
+def prepare_icon(icon_path: str | Path, target_size: int, corner_radius_factor: float = 0.15) -> Image.Image:
     """
     Open the icon image, resize it to fit within target_size while maintaining aspect ratio,
     and round its corners, preserving original alpha within the rounded shape.
@@ -21,8 +23,8 @@ def prepare_icon(icon_path, target_size, corner_radius_factor=0.15):
     :param corner_radius_factor: Factor of the smaller dimension of the resized icon to use for corner radius.
     :return: Processed icon as an RGBA PIL Image.
     """
-    icon = Image.open(icon_path)
-    icon = icon.convert("RGBA")  # Ensure icon has an alpha channel
+    icon_source = Image.open(icon_path)
+    icon = icon_source.convert("RGBA")  # Ensure icon has an alpha channel
 
     original_width, original_height = icon.size
     aspect_ratio = original_width / original_height
@@ -81,19 +83,19 @@ def prepare_icon(icon_path, target_size, corner_radius_factor=0.15):
 
 
 def create_banner(
-    image_path,
-    main_text,
+    image_path: str | Path,
+    main_text: str,
     subtitle_text: str | None = "",
-    background_color="black",  # Default background for the banner itself
-    font_path="CooperHewitt-Light.otf",  # Ensure this font is available
-    output_path="banner_output.png",
-    icon_target_size=300,  # Max dimension for the icon
-    font_size=50,
+    background_color: str | tuple[int, int, int] | tuple[int, int, int, int] = "black",  # Default banner background
+    font_path: str = "CooperHewitt-Light.otf",  # Ensure this font is available
+    output_path: str = "banner_output.png",
+    icon_target_size: int = 300,  # Max dimension for the icon
+    font_size: int = 50,
     subtitle_font_size: int | None = 30,
-    text_color="white",
-    padding=50,
-    space_between_img_text_factor=0.5,  # Factor of padding for space
-):
+    text_color: str = "white",
+    padding: int = 50,
+    space_between_img_text_factor: float = 0.5,  # Factor of padding for space
+) -> None:
     """
     Create a banner that places an image on the left (or right) side
     and text(s) next to it. By default, the banner background is black,
@@ -141,6 +143,7 @@ def create_banner(
     text_block_width = max(main_text_width, subtitle_text_width)
     text_block_height = main_text_height
     if subtitle_text and subtitle_font:  # Add subtitle height and a small gap
+        assert subtitle_font_size is not None
         text_block_height += int(subtitle_font_size * 0.2) + subtitle_text_height
 
     banner_width = padding + img_width + space_width + text_block_width + padding
@@ -154,7 +157,8 @@ def create_banner(
         else:
             try:
                 # For named colors, getrgb returns RGB. We add Alpha for RGBA.
-                final_banner_bg_color = ImageColor.getrgb(background_color) + (255,)
+                red, green, blue = ImageColor.getrgb(background_color)
+                final_banner_bg_color = (red, green, blue, 255)
             except ValueError:
                 print(f"Warning: Unknown background color string '{background_color}'. Defaulting to transparent.")
                 final_banner_bg_color = (0, 0, 0, 0)  # Fallback to transparent
@@ -191,6 +195,7 @@ def create_banner(
     if subtitle_text and subtitle_font:
         # subtitle_text_x = text_start_x + (text_block_width - subtitle_text_width) // 2 # Centered
         subtitle_text_x = text_start_x  # Left-aligned
+        assert subtitle_font_size is not None
         subtitle_text_y = (
             main_text_y + main_text_height + int(subtitle_font_size * 0.2)
         )  # Position below main text with a small gap

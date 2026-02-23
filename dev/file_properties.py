@@ -20,6 +20,10 @@ class ExpectedFileProperties:
         # Text includes plain text, structured config, and code
         return self.is_plain_text or self.is_configuration or self.is_code
 
+    @property
+    def is_sensitive(self) -> bool:
+        return self.is_security_sensitive
+
 
 # ============================================================
 # Properties by MIME Type (authoritative)
@@ -27,7 +31,7 @@ class ExpectedFileProperties:
 PROPERTIES_BY_MIME: dict[str, ExpectedFileProperties] = {}
 
 
-def _def_mime(mime: str, **kwargs) -> None:
+def _def_mime(mime: str, **kwargs: bool) -> None:
     # register a MIME with its expected properties
     PROPERTIES_BY_MIME[mime] = ExpectedFileProperties(**kwargs)
 
@@ -948,3 +952,13 @@ def get_comment_style_for_file(filepath: Path, *, prefer_extension: bool = True)
     if not styles:
         return None
     return _merge_comment_styles(styles)
+
+
+__all__ = [
+    "ExpectedFileProperties",
+    "CommentStyle",
+    "infer_mime_types_from_extension",
+    "infer_candidate_mime_types",
+    "get_expected_file_properties",
+    "get_comment_style_for_file",
+]

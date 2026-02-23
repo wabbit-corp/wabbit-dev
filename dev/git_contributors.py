@@ -39,19 +39,19 @@ def list_git_contributors(path: Path) -> dict[GitContributor, int]:
             output = subprocess.check_output(["git", "shortlog", "-sne", "--all"], text=True)
         except subprocess.CalledProcessError as e:
             print(f"Error: {e}")
-            return []
+            return {}
         except FileNotFoundError:
             print("Error: git command not found. Make sure git is installed.")
-            return []
+            return {}
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
-            return []
+            return {}
 
         # Split the output into lines
         lines = output.strip().split("\n")
 
         # Parse the lines to extract contributors
-        contributors = {}
+        contributors: dict[GitContributor, int] = {}
         for line in lines:
             # Match the line with regex
             match = re.match(r"^\s*(\d+)\s+(.+?)\s+<(.+?)>", line)
@@ -125,12 +125,12 @@ def get_git_user_email(path: Path) -> str | None:
         os.chdir(change_dir)
 
 
-def get_git_user() -> GitContributor | None:
+def get_git_user(path: Path) -> GitContributor | None:
     """
     Get the git user name and email from the git configuration.
     """
-    name = get_git_user_name()
-    email = get_git_user_email()
+    name = get_git_user_name(path)
+    email = get_git_user_email(path)
     if name and email:
         return GitContributor(name, email)
     return None
@@ -152,7 +152,7 @@ if __name__ == "__main__":
     # path = Path(args.path)
 
     config = load_config()
-    for project in config.defined_projects:
+    for project in config.defined_projects.values():
         path = project.path
 
         print(f"Checking {path}...")
@@ -172,3 +172,12 @@ if __name__ == "__main__":
             print(f"No contributors found in {path}.")
 
         print()
+
+
+__all__ = [
+    "GitContributor",
+    "list_git_contributors",
+    "get_git_user_name",
+    "get_git_user_email",
+    "get_git_user",
+]

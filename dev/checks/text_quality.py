@@ -57,7 +57,7 @@ def get_line_ending_counts(file: Path) -> dict[LineEnding, int]:
 
     state = STATE_OUTSIDE
 
-    def update(byte: int | bytes | None):
+    def update(byte: int | bytes | None) -> None:
         nonlocal crlf_count, lf_count, cr_count, state
 
         # Flush at EOF:
@@ -132,7 +132,7 @@ def get_line_ending(file: Path) -> LineEnding | None:
 
 
 def fix_no_newline(file: Path) -> None:
-    nl = get_line_ending(file)
+    nl = get_line_ending(file) or LineEnding.LF
     with file.open("rb") as f:
         content = f.read()
     if not content.endswith(nl.value):
@@ -155,7 +155,7 @@ def fix_line_endings(file: Path, target_ending: LineEnding) -> None:
 
 
 def fix_trailing_whitespace(file: Path) -> None:
-    nl = get_line_ending(file).value.decode("utf-8")
+    nl = (get_line_ending(file) or LineEnding.LF).value.decode("utf-8")
     with file.open("rt", encoding="utf-8") as f:
         lines = f.readlines()
     # Remove trailing whitespace from each line
@@ -173,9 +173,9 @@ def fix_mixed_spaces_tabs(file: Path, tab_width: int = 4, prefer_tabs: bool = Fa
     - If `prefer_tabs=True`, rewrites to tabs for full tab stops and spaces for the remainder.
     - Preserves the file's detected newline style via `get_line_ending`.
     """
-    nl = get_line_ending(file).value.decode("utf-8")
+    nl = (get_line_ending(file) or LineEnding.LF).value.decode("utf-8")
 
-    def split_leading_ws(s: str):
+    def split_leading_ws(s: str) -> tuple[str, str]:
         i = 0
         while i < len(s) and s[i] in (" ", "\t"):
             i += 1
@@ -245,7 +245,7 @@ class TextQualityCheck(FileCheck):
     whitespace issues, line length, special characters, and potential git conflicts.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Precompile conflict marker check for efficiency if needed, but startswith is usually fine
         self._git_conflict_markers = ("<<<<<<<", "=======", ">>>>>>>")
         # Define common invisible / formatting characters (add more if needed)
@@ -259,7 +259,7 @@ class TextQualityCheck(FileCheck):
             "\u180e",  # Mongolian Vowel Separator
         }
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if not ctx.path.is_file():
             return
         if ctx.path.is_symlink():
@@ -345,7 +345,7 @@ class TextQualityCheck(FileCheck):
         # String-based checks (after decoding)
         ###################################################################
 
-        if not content_bytes.endswith(b"\n") and (ctx.path.suffix not in (".json")):
+        if not content_bytes.endswith(b"\n") and (ctx.path.suffix not in (".json",)):
             ctx.add_issue(E_NO_NEWLINE, fix=(lambda: fix_no_newline(ctx.path)))
 
         if text is not None:
@@ -442,3 +442,20 @@ class TextQualityCheck(FileCheck):
                         invisible_chars=", ".join(repr(c) for c in invisible_chars),
                         line=line_nr,
                     )
+
+
+__all__ = [
+    "LineEnding",
+    "E_NO_NEWLINE",
+    "E_BOM_AT_START",
+    "E_LINE_ENDINGS",
+    "E_NOT_UTF8",
+    "E_GIT_CONFLICT_MARKER",
+    "E_LINE_TOO_LONG",
+    "E_TRAILING_WHITESPACE",
+    "E_MIXED_SPACES_TABS",
+    "E_UNICODE_HOMOGLYPH",
+    "E_UNICODE_INVISIBLE",
+    "E_UNEXPECTED_CONTROL_CHARACTER",
+    "TextQualityCheck",
+]

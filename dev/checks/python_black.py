@@ -12,3 +12,6 @@ class PythonBlackCheck(RepoCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         return run_black(path, project)
+
+
+__all__ = ["PythonBlackCheck"]

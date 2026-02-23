@@ -12,3 +12,6 @@ class PythonSemgrepCheck(RepoCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         return run_semgrep(path, project)
+
+
+__all__ = ["PythonSemgrepCheck"]

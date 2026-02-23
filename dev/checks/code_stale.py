@@ -77,3 +77,11 @@ class StaleCodeCheck(FileCheck):
                         ctx.add_issue(E_STALE_TODO, line=ln)
                 else:
                     ctx.add_issue(E_STALE_TODO, line=ln)
+
+
+__all__ = [
+    "StaleTodoAgeDaysCommand",
+    "E_DEBUG_CODE",
+    "E_STALE_TODO",
+    "StaleCodeCheck",
+]

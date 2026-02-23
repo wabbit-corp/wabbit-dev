@@ -77,3 +77,10 @@ class CensoredKeywords(FileCheck):
             for match in self.error_on_regex.finditer(line):
                 keyword_found = match.group(0)
                 ctx.add_issue(E_CENSORED_KEYWORD, line=line_number, keyword=keyword_found)
+
+
+__all__ = [
+    "CensoredWordsErrorOnCommand",
+    "E_CENSORED_KEYWORD",
+    "CensoredKeywords",
+]

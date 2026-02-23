@@ -5,6 +5,7 @@
 - Continue mypy debt reduction with stricter typing updates in CLI command builders, callback/scope module interfaces, message prompts, and trufflehog entropy helpers, plus typed `dep_updates` entrypoint signatures.
 - Reduce strict-mypy noise from untyped third-party packages by adding targeted `ignore_missing_imports` module overrides in `mypy.ini` for known untyped dependencies.
 - Fix additional low-risk check findings in utility code: remove variable shadowing in `push`, fix cloc result typing/path output handling, tighten `commit` OpenAI key validation, correct pathspec symbol imports in `io`, align `identifier_uniqueness` typing/imports, and type `intrangeset` containment/iteration methods.
+- Scope mypy strictness to prioritize production modules by excluding test files (`dev/test_*.py`, `test/`, `tests/`) from strict repo-wide mypy runs while keeping strict defaults for runtime code.
 - Resolve pip-audit security findings by upgrading vulnerable local tooling packages and removing unused `fastembed` dependency pins that forced an insecure `pillow<12` constraint on Python 3.13.
 - Fix remaining Ruff diagnostics repo-wide (unused locals, import ordering, assert/formatting updates, and typing modernizations), and add postponed annotations in `dev/checks/base.py` to avoid runtime type-expression errors during test collection.
 - Reformat Python sources and tests repository-wide with Black to eliminate `E_PYQA_BLACK` formatting failures.

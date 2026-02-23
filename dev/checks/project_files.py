@@ -28,7 +28,6 @@
 """
 
 from pathlib import Path
-from typing import Any
 
 # Import necessary components from your base framework
 # (Adjust the import path if necessary)
@@ -37,6 +36,7 @@ from dev.checks.base import (
     IssueType,
     ProjectCheck,
 )
+from dev.config import Project
 
 E_MISSING_README = IssueType("E_MISSING_README", "Missing README file")
 E_README_NO_BANNER = IssueType("E_README_NO_BANNER", "README file does not contain a project banner")
@@ -58,7 +58,7 @@ class GenericProjectStructureCheck(ProjectCheck):
     A check for project files, ensuring they are in the correct format and location.
     """
 
-    def check(self, path: Path, project: Any) -> list[Issue]:
+    def check(self, path: Path, project: Project | None) -> list[Issue]:
         issues = []
 
         readme_path = path / "README.md"
@@ -93,3 +93,19 @@ class GenericProjectStructureCheck(ProjectCheck):
             issues.append(E_MISSING_GITIGNORE.at(path))
 
         return issues
+
+
+__all__ = [
+    "E_MISSING_README",
+    "E_README_NO_BANNER",
+    "E_README_NO_BADGES",
+    "E_README_NO_INSTALL",
+    "E_README_NO_USAGE",
+    "E_README_NO_LICENSE",
+    "E_README_NO_CONTRIBUTING",
+    "E_MISSING_LICENSE",
+    "E_MISSING_CLA",
+    "E_MISSING_CLA_SIMPLE",
+    "E_MISSING_GITIGNORE",
+    "GenericProjectStructureCheck",
+]

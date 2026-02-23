@@ -12,3 +12,6 @@ class PythonPyrightCheck(RepoCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         return run_pyright(path, project)
+
+
+__all__ = ["PythonPyrightCheck"]

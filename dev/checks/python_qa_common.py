@@ -434,7 +434,6 @@ class PythonQaRepoState:
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     tool_results: dict[str, ToolRunResult] = field(default_factory=dict)
     pytest_rc: int | None = None
-    pytest_label: str | None = None
     coverage_xml_path: Path | None = None
 
 
@@ -2729,7 +2728,6 @@ def run_pytest(repo_root: Path, project: Project | None) -> list[Issue]:
             if state.pytest_config is not None:
                 args.extend(["-c", str(state.pytest_config)])
             result = _run_subprocess(state, label, args)
-            state.pytest_label = label
             state.pytest_rc = result.rc
             return result
 
@@ -2741,7 +2739,6 @@ def run_pytest(repo_root: Path, project: Project | None) -> list[Issue]:
         if state.pytest_config is not None:
             args.extend(["-c", str(state.pytest_config)])
         result = _run_subprocess(state, label, args)
-        state.pytest_label = label
         state.pytest_rc = result.rc
         return result
 

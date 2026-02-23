@@ -23,7 +23,7 @@ E_UNPINNED_DEPENDENCY = IssueType(
 class PythonRequirementsPinnedCheck(FileCheck):
     """Ensure entries in ``requirements.txt`` are version pinned."""
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if not ctx.path.is_file():
             return
         if ctx.path.name != "requirements.txt":
@@ -51,3 +51,9 @@ class PythonRequirementsPinnedCheck(FileCheck):
             #     spec = next(iter(req.specifier))
             #     if spec.operator != "==" and spec.operator != "===":
             #         issues.append(E_UNPINNED_DEPENDENCY.make(line=line).at(path, line=ln))
+
+
+__all__ = [
+    "E_UNPINNED_DEPENDENCY",
+    "PythonRequirementsPinnedCheck",
+]

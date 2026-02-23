@@ -12,3 +12,6 @@ class PythonRuffCheck(RepoCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         return run_ruff(path, project)
+
+
+__all__ = ["PythonRuffCheck"]
