@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Resolve pip-audit security findings by upgrading vulnerable local tooling packages and removing unused `fastembed` dependency pins that forced an insecure `pillow<12` constraint on Python 3.13.
 - Fix remaining Ruff diagnostics repo-wide (unused locals, import ordering, assert/formatting updates, and typing modernizations), and add postponed annotations in `dev/checks/base.py` to avoid runtime type-expression errors during test collection.
 - Reformat Python sources and tests repository-wide with Black to eliminate `E_PYQA_BLACK` formatting failures.
 - Add targeted false-positive suppression with `(checks/ignore-finding "<ISSUE_ID|*>" "<PATHSPEC>" "<VALUE>")` plus inline `# check:ignore` pragmas, including scoped-read masking and report-time fallback filtering.
