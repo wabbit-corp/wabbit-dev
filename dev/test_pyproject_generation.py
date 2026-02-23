@@ -5,6 +5,8 @@ import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 def _copy_tree(src: Path, dest: Path) -> None:
     ignore = shutil.ignore_patterns(
@@ -67,6 +69,8 @@ def test_setup_generates_pyproject_from_config(tmp_path: Path, monkeypatch) -> N
 
     test_root = repo_root / "test" / "root.clj"
     test_private = repo_root / "test" / "root.private.clj"
+    if not test_root.is_file() or not test_private.is_file():
+        pytest.skip("No repo-local root.clj/root.private.clj fixture available for setup generation test")
     temp_root = tmp_path
 
     shutil.copy(test_root, temp_root / "root.clj")

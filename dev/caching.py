@@ -8,7 +8,7 @@ import sqlite3
 import threading
 import time
 from functools import wraps
-from hashlib import md5
+from hashlib import sha256
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class Cashier:
     """
     (Docstring remains largely the same, focusing on storage and features)
     Cashier manages a local SQLite database for caching.
-    - We store: key (md5), fqn, val (pickled blob), insert_time.
+    - We store: key (sha256), fqn, val (pickled blob), insert_time.
     - We do not store an explicit expiration. Instead, we rely on:
         * a TTL check at retrieval (default_ttl in the decorator), and
         * periodic cleanup of records older than `max_age` for the specific FQN (if set),
@@ -363,7 +363,7 @@ def _build_cache_key(fqn, func_sig, args, kwargs, exclude_params):
         sorted_args = dict(sorted(arguments_for_key.items()))
         raw_key_data = (fqn, sorted_args)  # Tuple ensures order matters
         pickled_key_data = pickle.dumps(raw_key_data, protocol=4)
-        key_hash = md5(pickled_key_data).hexdigest()
+        key_hash = sha256(pickled_key_data).hexdigest()
         return key_hash
     except Exception as e:
         logger.error(

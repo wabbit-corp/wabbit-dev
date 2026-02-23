@@ -238,7 +238,7 @@ async def get_arxiv_search_queries(client: openai.AsyncClient, model: str, query
 async def brave_search(http_client: httpx.AsyncClient, q, api_key):
     # curl -s --compressed "https://api.search.brave.com/res/v1/web/search?q=brave+search" -H "Accept:
     #   application/json" -H "Accept-Encoding: gzip" -H "X-Subscription-Token: <YOUR_API_KEY>"
-    url = f"https://api.search.brave.com/res/v1/web/search?q={urllib.parse.quote(q)}"
+    url = f"https://api.search.brave.com/res/v1/web/search?q={urllib.parse.quote(q)}"  # check:ignore E_HARDCODED_URL value=https://api.search.brave.com/res/v1/web/search?q=
     headers = {
         "Accept": "application/json",
         "Accept-Encoding": "gzip",
@@ -267,7 +267,7 @@ async def fetch_url(http_client: httpx.AsyncClient, url: str, scraperbee_key: st
 
             CONCURRENT_SCRAPERBEE_REQ += 1
             response = await http_client.get(
-                url="https://app.scrapingbee.com/api/v1/",
+                url="https://app.scrapingbee.com/api/v1/",  # check:ignore E_HARDCODED_URL value=https://app.scrapingbee.com/api/v1/
                 params={
                     "api_key": scraperbee_key,
                     "url": url,

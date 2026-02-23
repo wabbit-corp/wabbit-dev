@@ -31,7 +31,7 @@ def delete_dir(path):
             excvalue = exc[1]
             # print(func, path, exc, excvalue.errno, errno.EACCES)
             if func in (os.rmdir, os.unlink, os.remove) and excvalue.errno == errno.EACCES:
-                os.chmod(path, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)  # 0777
+                os.chmod(path, stat.S_IRWXU)
                 func(path)
             else:
                 raise

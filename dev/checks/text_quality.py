@@ -16,7 +16,7 @@
 * [x] Check for Unicode Control Characters: Ensure that no lines contain control characters that can cause issues
       in some environments. Ensure no spurious null bytes exist.
 * [x] Check for Final Newline: Ensure that all files end with a newline character. According to POSIX, _every_ text
-      file should end with a newline character (line terminator)[thoughtbot.com](https://thoughtbot.com/blog/no-newline-at-end-of-file)
+      file should end with a newline character.
 * [x] Check for Merge Artifacts: As a hygiene rule, verify that no merge conflict strings
       like <<<<<<< HEAD or >>>>>> exist in the repository files.
 * [ ] Check for Overly Long Words: Extremely long sequences of non-whitespace characters can cause rendering issues

@@ -71,7 +71,8 @@ class GenericProjectStructureCheck(ProjectCheck):
 
                 if '<img src=".banner.png"/>' not in readme_content:
                     issues.append(E_README_NO_BANNER.at(readme_path))
-                if '<img src="https://img.shields.io' not in readme_content:
+                badges_marker = '<img src="https://img.shields.io'  # check:ignore E_HARDCODED_URL
+                if badges_marker not in readme_content:
                     issues.append(E_README_NO_BADGES.at(readme_path))
                 if "## 🚀 Installation" not in readme_content:
                     issues.append(E_README_NO_INSTALL.at(readme_path))

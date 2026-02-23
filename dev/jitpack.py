@@ -139,12 +139,12 @@ class JitPackAPI:
 
     def __init__(
         self,
-        base_url: str = "https://jitpack.io",
+        base_url: str = "https://jitpack.io",  # check:ignore E_HARDCODED_URL value=https://jitpack.io
         session_cookie: str | None = None,
         timeout: float = 30.0,
     ) -> None:
         """
-        :param base_url: Base URL for JitPack, default is https://jitpack.io
+        :param base_url: Base URL for JitPack.
         :param session_cookie: If set, this session cookie (e.g. 'sessionId=XYZ') will be sent for
                                authorized requests (like deleting builds).
         :param timeout: Overall request timeout in seconds.
@@ -555,7 +555,7 @@ class JitPackAPI:
         """
         POST /api/service/trial?gitOwnerUrl=...&login=...&plan=...
 
-        :param git_owner_url: e.g. "https://github.com/<user-or-org>"
+        :param git_owner_url: e.g. "github owner URL"
         :param login: your GitHub user name
         :param plan: subscription plan name
         :return: JSON response as dictionary

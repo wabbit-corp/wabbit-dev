@@ -120,7 +120,10 @@ def test_parse_pytest_text() -> None:
 
 
 def test_parse_pytest_junit(tmp_path: Path) -> None:
-    junit = """<testsuite tests="1" failures="1"><testcase classname="tests.test_mod" name="test_a" file="tests/test_mod.py" line="7"><failure message="boom">Traceback</failure></testcase></testsuite>"""
+    junit = (
+        '<testsuite tests="1" failures="1"><testcase classname="tests.test_mod" name="test_a" '
+        'file="tests/test_mod.py" line="7"><failure message="boom">Traceback</failure></testcase></testsuite>'
+    )
     log_path = tmp_path / "pytest.log"
     log_path.write_text("", encoding="utf-8")
     junit_path = log_path.with_suffix(".junit.xml")
@@ -134,7 +137,11 @@ def test_parse_pytest_junit(tmp_path: Path) -> None:
 
 
 def test_parse_pytest_junit_collection_failure_uses_detailed_text(tmp_path: Path) -> None:
-    junit = """<testsuite tests="1" errors="1"><testcase classname="tests.test_mod" name="test_collect"><error message="collection failure">ImportError while importing test module '/tmp/tests/test_mod.py'\nTraceback (most recent call last):\n...</error></testcase></testsuite>"""
+    junit = (
+        '<testsuite tests="1" errors="1"><testcase classname="tests.test_mod" name="test_collect">'
+        '<error message="collection failure">ImportError while importing test module '
+        "'/tmp/tests/test_mod.py'\\nTraceback (most recent call last):\\n...</error></testcase></testsuite>"
+    )
     log_path = tmp_path / "pytest.log"
     log_path.write_text("", encoding="utf-8")
     junit_path = log_path.with_suffix(".junit.xml")

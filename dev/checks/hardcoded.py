@@ -15,6 +15,7 @@
 
 import re
 from bisect import bisect_right
+from pathlib import Path
 from re import Pattern
 
 # Import necessary components from your base framework
@@ -31,6 +32,20 @@ from dev.file_properties import (
     CommentStyle,
     get_comment_style_for_file,
 )
+
+_THIS_FILE = Path(__file__).resolve()
+
+
+def _should_skip_hardcoded_scan(path: Path) -> bool:
+    if path.name.startswith("test_"):
+        return True
+    if "tests" in path.parts:
+        return True
+    try:
+        return path.resolve() == _THIS_FILE
+    except OSError:
+        return False
+
 
 # ----------------------------
 # Comment handling (core)
@@ -315,6 +330,8 @@ class HardcodedAbsolutePathCheck(FileCheck):
             return
         if not ctx.expected_properties.is_text:
             return
+        if _should_skip_hardcoded_scan(ctx.path):
+            return
         if ctx.path.suffix.lower() in {
             ".md",
             ".markdown",
@@ -429,6 +446,8 @@ class HardcodedUrlCheck(FileCheck):
             return
         if not ctx.expected_properties.is_text:
             return
+        if _should_skip_hardcoded_scan(ctx.path):
+            return
         if ctx.path.suffix.lower() in {
             ".md",
             ".markdown",
@@ -535,6 +554,8 @@ class HardcodedInternalHostnameIpCheck(FileCheck):
         if not ctx.path.is_file():
             return
         if not ctx.expected_properties.is_text:
+            return
+        if _should_skip_hardcoded_scan(ctx.path):
             return
 
         if ctx.path.suffix.lower() in {".md", ".markdown", ".txt"}:

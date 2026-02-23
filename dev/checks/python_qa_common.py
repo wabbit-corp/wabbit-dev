@@ -7,10 +7,11 @@ import shutil
 import subprocess
 import tempfile
 import threading
-import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from defusedxml import ElementTree as ET
 
 from dev.checks.base import Issue, IssueType, Severity
 from dev.config import Project, PythonProject
@@ -1083,19 +1084,28 @@ def parse_unittest_issues(log_text: str) -> Sequence[UnittestIssue | UnittestFai
     return issues
 
 
-def parse_deptry_issues(log_text: str) -> Sequence[DeptryIssue | DeptryFailure]:
+def parse_deptry_issues(log_text: str, log_path: Path | None = None) -> Sequence[DeptryIssue | DeptryFailure]:
     log_text = strip_ansi_escape_sequences(log_text)
     payload = extract_json_payload(log_text)
+    if payload is None and log_path is not None:
+        json_output = log_path.parent / "deptry.json"
+        if json_output.is_file():
+            try:
+                payload = json.loads(json_output.read_text(encoding="utf-8"))
+            except Exception:
+                payload = None
     if isinstance(payload, list):
         json_issues: list[DeptryIssue | DeptryFailure] = []
         for item in payload:
             if not isinstance(item, dict):
                 continue
-            code = get_str(item, "code")
-            message = get_str(item, "message") or ""
-            path = get_str(item, "path") or get_str(item, "file")
-            line_number = get_int(item, "line")
-            column_number = get_int(item, "column")
+            error_block = get_dict(item, "error") or {}
+            location_block = get_dict(item, "location") or {}
+            code = get_str(error_block, "code") or get_str(item, "code")
+            message = get_str(error_block, "message") or get_str(item, "message") or ""
+            path = get_str(location_block, "file") or get_str(item, "path") or get_str(item, "file")
+            line_number = get_int(location_block, "line") or get_int(item, "line")
+            column_number = get_int(location_block, "column") or get_int(item, "column")
             json_issues.append(
                 DeptryIssue(
                     code=code,
@@ -1687,7 +1697,7 @@ def parse_issues(label: str, log_path: Path, coverage_fail_under: int) -> Sequen
     if label == "unittest":
         return parse_unittest_issues(log_text)
     if label == "deptry":
-        return parse_deptry_issues(log_text)
+        return parse_deptry_issues(log_text, log_path)
     if label == "vulture":
         return parse_vulture_issues(log_text)
     if label == "semgrep":
@@ -2149,6 +2159,26 @@ def _read_coverage_fail_under_from_pyproject(pyproject_path: Path | None) -> int
     return None
 
 
+def _has_import_linter_contracts(pyproject_path: Path | None) -> bool:
+    if pyproject_path is None:
+        return False
+    try:
+        import tomllib
+
+        data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+
+    tool = data.get("tool")
+    if not isinstance(tool, dict):
+        return False
+    importlinter = tool.get("importlinter")
+    if not isinstance(importlinter, dict):
+        return False
+    contracts = importlinter.get("contracts")
+    return isinstance(contracts, list) and len(contracts) > 0
+
+
 def _new_state(repo_root: Path) -> PythonQaRepoState:
     env = os.environ.copy()
     venv = repo_root / ".venv"
@@ -2192,7 +2222,7 @@ def _new_state(repo_root: Path) -> PythonQaRepoState:
         use_json=env_flag("USE_JSON_OUTPUT", "1"),
         semgrep_config=env.get("SEMGREP_CONFIG", "p/python"),
         diff_cover_compare_branch=env.get("DIFF_COVER_COMPARE_BRANCH") or None,
-        exclude_csv=".venv,.git,__pycache__,.mypy_cache,.pytest_cache,data,datasets",
+        exclude_csv=".venv,.git,__pycache__,.mypy_cache,.pytest_cache,data,datasets,tmp-test",
         log_dir=Path(tempfile.mkdtemp(prefix="qa")),
     )
     return state
@@ -2437,6 +2467,11 @@ def run_import_linter(repo_root: Path, project: Project | None) -> list[Issue]:
     state = _get_state(repo_root)
 
     def _runner() -> ToolRunResult:
+        if state.import_linter_config is None or state.import_linter_config.parent != state.root:
+            return ToolRunResult(rc=0, issues=[])
+        if not _has_import_linter_contracts(state.import_linter_config):
+            return ToolRunResult(rc=0, issues=[])
+
         py_req = _require_python(state, "import-linter")
         if py_req is not None:
             return py_req
@@ -2481,7 +2516,7 @@ def run_mypy(repo_root: Path, project: Project | None) -> list[Issue]:
         if missing is not None:
             return missing
 
-        args = [str(tool)]
+        args = [str(tool), "--exclude", r"(^|/)tmp-test/"]
         if state.use_json:
             args.extend(["--output", "json"])
         _append_config_arg(args, "--config-file", state.mypy_config)
@@ -2571,6 +2606,7 @@ def run_pytest(repo_root: Path, project: Project | None) -> list[Issue]:
                 "--color=yes",
                 "--junitxml",
                 str(junit_path),
+                "--ignore=tmp-test",
             ]
             if state.pytest_config is not None:
                 args.extend(["-c", str(state.pytest_config)])
@@ -2581,7 +2617,7 @@ def run_pytest(repo_root: Path, project: Project | None) -> list[Issue]:
 
         label = "pytest"
         junit_path = state.log_dir / f"{_sanitize_label(label)}.junit.xml"
-        args = [str(pytest_bin), "--color=yes", "--junitxml", str(junit_path)]
+        args = [str(pytest_bin), "--color=yes", "--junitxml", str(junit_path), "--ignore=tmp-test"]
         if state.pytest_config is not None:
             args.extend(["-c", str(state.pytest_config)])
         result = _run_subprocess(state, label, args)
@@ -2696,7 +2732,14 @@ def run_unittest(repo_root: Path, project: Project | None) -> list[Issue]:
         py_req = _require_python(state, "unittest")
         if py_req is not None:
             return py_req
-        return _run_subprocess(state, "unittest", [str(state.python), "-m", "unittest"])
+        result = _run_subprocess(
+            state,
+            "unittest",
+            [str(state.python), "-m", "unittest", "discover", "-s", "dev"],
+        )
+        if result.rc == 5:
+            return ToolRunResult(rc=0, issues=[])
+        return result
 
     return _run_once(state, "unittest", _runner).issues
 
@@ -2720,7 +2763,8 @@ def run_deptry(repo_root: Path, project: Project | None) -> list[Issue]:
         if not has_dependency_metadata(state.root):
             return ToolRunResult(rc=0, issues=[])
 
-        args = [str(tool), "."]
+        json_output = state.log_dir / "deptry.json"
+        args = [str(tool), ".", "--extend-exclude", r"tmp-test/.*", "--json-output", str(json_output)]
         _append_config_arg(args, "--config", state.deptry_config)
         return _run_subprocess(state, "deptry", args)
 
@@ -2787,6 +2831,8 @@ def run_semgrep(repo_root: Path, project: Project | None) -> list[Issue]:
                 "data",
                 "--exclude",
                 "datasets",
+                "--exclude",
+                "tmp-test",
                 ".",
             ]
         )

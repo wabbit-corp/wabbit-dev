@@ -54,3 +54,11 @@
 - Throttle JitPack polling on not-found responses to avoid tight-loop API hammering.
 - Parse Python requirements with `packaging.Requirement` and render Poetry dependency tables correctly for extras, markers, and URL requirements.
 - Add timeout and request-exception handling for CoC download to avoid indefinite hangs during setup.
+- Reduce Python QA false positives and tool noise by skipping `tmp-test` paths across default excludes, mypy, pytest, unittest, semgrep, and deptry runs.
+- Improve deptry parsing resilience by consuming `--json-output` artifacts when stdout/stderr are empty and mapping JSON findings into detailed check issues.
+- Skip import-linter runs when no local contracts are defined for the target repo, avoiding spurious failures from fallback-only config files.
+- Improve unittest defaults by discovering tests under `dev/` and treating return code 5 (`no tests found`) as a non-failure state.
+- Fix hardcoded-string checker noise by skipping test-target files and checker self-references, and add targeted suppressions for known benign endpoint literals.
+- Harden security/static-analysis findings by replacing MD5 with SHA-256 cache key hashing, switching XML parsing to `defusedxml`, and tightening chmod fallback permissions to owner-only.
+- Stabilize test collection by rewriting `dev/test_maven.py` as deterministic pytest tests and renaming the generator helper in `dev/test_workflow.py` to avoid pytest yield-test collection errors.
+- Add runtime/test dependencies for the updated QA pipeline (`defusedxml`, `pytest-asyncio`, `coverage`) and align requirements manifests.

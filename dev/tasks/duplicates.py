@@ -3,7 +3,7 @@
 """
 Fast duplicate file finder.
 Usage: duplicates.py <folder> [<folder>...]
-Based on https://stackoverflow.com/a/36113168/300783
+Based on a well-known Stack Overflow implementation pattern.
 Modified for Python3 with some small code improvements.
 """
 

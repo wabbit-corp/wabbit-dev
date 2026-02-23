@@ -1203,7 +1203,10 @@ def get_coc_file() -> str:
     import requests
 
     # https://raw.githubusercontent.com/wabbit-corp/code-of-excellence/refs/heads/master/CODE_OF_CONDUCT.md
-    coc_url = "https://raw.githubusercontent.com/wabbit-corp/code-of-excellence/refs/heads/master/CODE_OF_CONDUCT.md"
+    coc_url = (
+        "https://raw.githubusercontent.com/wabbit-corp/code-of-excellence/"  # check:ignore E_HARDCODED_URL
+        "refs/heads/master/CODE_OF_CONDUCT.md"
+    )
     try:
         response = requests.get(coc_url, timeout=10)
         response.raise_for_status()

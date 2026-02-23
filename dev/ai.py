@@ -31,7 +31,9 @@ Finally, at the end of the commit message, explicitly include a line stating the
 
 **Important**:
 1. **Public/Runtime code vs. Test/Dev changes**:
-   - If the diff only changes test or dev dependencies (e.g., `testImplementation`, `devDependencies`, build config, docs, comments, etc.), assume **NONE** impact because it does not affect the public API.
+   - If the diff only changes test or dev dependencies (e.g., `testImplementation`,
+     `devDependencies`, build config, docs, comments, etc.), assume **NONE** impact
+     because it does not affect the public API.
    - If a library version is changed in runtime or compile scope from X.Y.Z to X'.Y'.Z', follow the standard rules:
      - If X' != X, it’s **MAJOR**.
      - Else if Y' != Y, it’s **MINOR**.

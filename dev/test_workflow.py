@@ -86,7 +86,7 @@ def foo(i):
     return i * i
 
 
-def test():
+def run_workflow_demo():
     for i in range(10):
         x = yield call(foo, i)
         print(x)
@@ -95,5 +95,5 @@ def test():
 
 if __name__ == "__main__":
     ctx = Context()
-    print(ctx.run(test))
-    print(ctx.run(test))
+    print(ctx.run(run_workflow_demo))
+    print(ctx.run(run_workflow_demo))

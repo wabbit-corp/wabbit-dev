@@ -1,7 +1,10 @@
 from dev.config import MavenRepositoryDefinition, load_config
 from dev.maven import MavenVersion, fetch_metadata
 
-MAVEN_CENTRAL = MavenRepositoryDefinition(name="Maven Central", url="https://repo1.maven.org/maven2/")
+MAVEN_CENTRAL = MavenRepositoryDefinition(
+    name="Maven Central",
+    url="https://repo1.maven.org/maven2/",  # check:ignore E_HARDCODED_URL value=https://repo1.maven.org/maven2/
+)
 
 
 def check_for_updates():
