@@ -64,7 +64,7 @@ class HighEntropyStringCheck(FileCheck):
         min_length: int = DEFAULT_MIN_SECRET_LENGTH,
         b64_entropy_threshold: float = DEFAULT_B64_ENTROPY_THRESHOLD,
         hex_entropy_threshold: float = DEFAULT_HEX_ENTROPY_THRESHOLD,
-        url_regex: re.Pattern = DEFAULT_URL_REGEX,
+        url_regex: Pattern[str] = DEFAULT_URL_REGEX,
         base64_chars: str = BASE64_CHARS,
         hex_chars: str = HEX_CHARS,
         non_secret_sequences: set[str] = DEFAULT_NON_SECRET_SEQUENCES,
@@ -105,7 +105,7 @@ class HighEntropyStringCheck(FileCheck):
         entropy: float = 0.0
         data_len = float(len(data))  # Use float for division
 
-        char_counts = {}
+        char_counts: dict[str, int] = {}
         for char in data:
             char_counts[char] = char_counts.get(char, 0) + 1
 
@@ -126,7 +126,7 @@ class HighEntropyStringCheck(FileCheck):
                 return True
         return False
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if not ctx.is_file:
             return
         if not ctx.expected_properties.is_text:

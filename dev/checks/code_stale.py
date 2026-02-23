@@ -12,10 +12,9 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from mu.exec import ExecutionContext
 from mu.typed import mu_tag
 
-from dev.base import TypedConfigCommandRegistration
+from dev.base import ScriptCommandContext, TypedConfigCommandRegistration
 from dev.checks.base import FileCheck, FileContext, IssueType
 
 E_DEBUG_CODE = IssueType("E_DEBUG_CODE", "Possible leftover debug statement.")
@@ -38,7 +37,7 @@ class StaleCodeCheck(FileCheck):
         #     r"(//\s*console\.log|#\s*print\(|//\s*System\.out\.println)", re.IGNORECASE
         # )
 
-    def register_script_commands(self, ctx: ExecutionContext) -> None:
+    def register_script_commands(self, ctx: ScriptCommandContext) -> None:
         def stale_code_todo_age_days(val: int) -> int:
             self.todo_age_days = val
             return self.todo_age_days
@@ -46,7 +45,8 @@ class StaleCodeCheck(FileCheck):
         ctx.register(name="checks/stale-todo/age-days", func=stale_code_todo_age_days)
 
     def register_typed_config_commands(self) -> list[TypedConfigCommandRegistration]:
-        def apply(command: StaleTodoAgeDaysCommand) -> None:
+        def apply(command: object) -> None:
+            assert isinstance(command, StaleTodoAgeDaysCommand), f"Unexpected command type: {type(command)}"
             self.todo_age_days = command.age_days
 
         return [
@@ -56,7 +56,7 @@ class StaleCodeCheck(FileCheck):
             )
         ]
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if not ctx.path.is_file():
             return
         if not ctx.expected_properties.is_text:

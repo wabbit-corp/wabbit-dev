@@ -6,6 +6,7 @@ from pathlib import Path
 
 import jinja2
 import pathspec
+from pathspec.patterns.gitwildmatch import GitWildMatchPattern
 
 from dev.messages import info
 
@@ -158,7 +159,7 @@ class FileSet:
         self.negative = negative
 
         self.path_spec = pathspec.PathSpec.from_lines(
-            pathspec.patterns.GitWildMatchPattern,
+            GitWildMatchPattern,
             list(positive) + ["!" + n for n in negative],
         )
 

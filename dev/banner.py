@@ -123,7 +123,7 @@ def create_banner(
     )
 
     # 2. Load the original PNG
-    img = prepare_icon(image_path, target_size=300)
+    img = prepare_icon(image_path, target_size=icon_target_size)
     img_width, img_height = img.size
 
     # 3. Compute text sizes

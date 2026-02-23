@@ -10,13 +10,13 @@ def push(project_name: str) -> None:
     if project_name == ".":
         # Push all projects
         config = load_config()
-        for name, project_name in config.defined_projects.items():
-            path = project_name.path
+        for name, project in config.defined_projects.items():
+            path = project.path
 
             if not path.exists():
                 error(f"Project {name} does not exist")
             else:
-                if project_name.github_repo is not None:
+                if project.github_repo is not None:
                     repo = Repo(path)
                     repo.git.push("origin", "master")
                     repo.git.push(tags=True)

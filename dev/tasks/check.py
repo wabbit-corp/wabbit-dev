@@ -33,6 +33,13 @@ E_GITIGNORE_WITHOUT_REPO = IssueType(
 )
 
 
+def trufflehog(
+    project_or_dir_or_file: str = ".",
+    fix: bool = False,
+) -> int:
+    return check_main(project_or_dir_or_file, ["HighEntropyStringCheck"], fix)
+
+
 def check_main(
     project_or_dir_or_file: str,
     enabled_checks: list[str] | None = None,
@@ -436,3 +443,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     raise SystemExit(check_main(args.project_or_dir_or_file, args.checks, args.fix))
+
+
+__all__ = [
+    "Module",
+    "E_GITIGNORE_WITHOUT_REPO",
+    "check_main",
+    "trufflehog",
+]

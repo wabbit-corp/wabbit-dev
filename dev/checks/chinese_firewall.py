@@ -5,12 +5,11 @@
 import re
 from dataclasses import dataclass
 
-from mu.exec import ExecutionContext
 from mu.typed import mu_tag
 
 # Import necessary components from your base framework
 # (Adjust the import path if necessary)
-from dev.base import TypedConfigCommandRegistration
+from dev.base import ScriptCommandContext, TypedConfigCommandRegistration
 from dev.checks.base import (
     FileCheck,
     FileContext,
@@ -47,7 +46,7 @@ class CensoredKeywords(FileCheck):
             pattern = r"\b(" + "|".join(re.escape(keyword) for keyword in self.error_on) + r")\b"
         self.error_on_regex = re.compile(pattern, re.IGNORECASE)
 
-    def register_script_commands(self, ctx: ExecutionContext) -> None:
+    def register_script_commands(self, ctx: ScriptCommandContext) -> None:
         def censored_words_error_on(val: set[str]) -> set[str]:
             self.error_on = val
             self._update_error_on_regex()
@@ -56,7 +55,8 @@ class CensoredKeywords(FileCheck):
         ctx.register(name="checks/censored-words/error-on", func=censored_words_error_on)
 
     def register_typed_config_commands(self) -> list[TypedConfigCommandRegistration]:
-        def apply(command: CensoredWordsErrorOnCommand) -> None:
+        def apply(command: object) -> None:
+            assert isinstance(command, CensoredWordsErrorOnCommand), f"Unexpected command type: {type(command)}"
             self.error_on = set(command.words)
             self._update_error_on_regex()
 
@@ -67,7 +67,7 @@ class CensoredKeywords(FileCheck):
             )
         ]
 
-    def check(self, ctx: FileContext):
+    def check(self, ctx: FileContext) -> None:
         if not ctx.path.is_file():
             return None
         if not ctx.expected_properties.is_text:

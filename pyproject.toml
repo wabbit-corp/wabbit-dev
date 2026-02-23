@@ -65,7 +65,7 @@ pillow = "PIL"
 pyinstaller = "PyInstaller"
 
 [tool.deptry]
-per_rule_ignores = { "DEP002" = ["defusedxml"], "DEP003" = ["mu"] }
+per_rule_ignores = { "DEP002" = ["defusedxml"], "DEP003" = ["mu"], "DEP004" = ["pytest", "pyinstaller", "PyInstaller"] }
 
 [tool.coverage.run]
 branch = true

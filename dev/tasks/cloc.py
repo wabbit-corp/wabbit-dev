@@ -20,29 +20,29 @@ def _run_cloc(path: Path) -> defaultdict[str, ClocStats]:
     import subprocess
 
     # Ignore __pycache__ and .venv directories
-    result = subprocess.run(
+    completed = subprocess.run(
         ["cloc", "--json", str(path), "--exclude-dir=__pycache__,.venv"],
         capture_output=True,
         text=True,
     )
-    if result.returncode != 0:
-        warning(f"cloc failed for path '{path}': {result.stderr}")
+    if completed.returncode != 0:
+        warning(f"cloc failed for path '{path}': {completed.stderr}")
         return defaultdict(lambda: ClocStats(0, 0, 0, 0))
 
     import json
 
-    data = json.loads(result.stdout)
-    result = defaultdict(lambda: ClocStats(0, 0, 0, 0))
+    data = json.loads(completed.stdout)
+    stats_by_lang: defaultdict[str, ClocStats] = defaultdict(lambda: ClocStats(0, 0, 0, 0))
     for lang, stats in data.items():
         if lang == "header":
             continue
-        result[lang] = ClocStats(
+        stats_by_lang[lang] = ClocStats(
             files=stats.get("nFiles", 0),
             blank=stats.get("blank", 0),
             comment=stats.get("comment", 0),
             code=stats.get("code", 0),
         )
-    return result
+    return stats_by_lang
 
 
 def cloc(

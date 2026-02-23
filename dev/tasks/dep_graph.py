@@ -102,7 +102,7 @@ def get_project_dependencies(
 
     # Save the graph
     try:
-        graph_file = "dependencies"
+        graph_file = output_filename
         dot.render(graph_file, format="svg", cleanup=True)
         info(f"Dependency graph saved as {graph_file}.svg")
     except Exception as e:

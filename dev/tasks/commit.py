@@ -26,6 +26,10 @@ def commit(project_name: str) -> None:
             return
         scope.defer(lambda: repo.close())
 
+        if config.openai_key is None:
+            error("OpenAI key is required to generate commit messages.")
+            return
+
         commit_repo_changes(
             project=project,
             repo=repo,

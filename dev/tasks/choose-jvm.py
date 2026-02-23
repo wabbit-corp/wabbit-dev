@@ -343,7 +343,7 @@ if __name__ == "__main__":
         score_ranks: Scores
 
     # query = '16+' # or '8 adopt' or '8+ adopt latest' or '8+ jetbrains earliest' or '8+ jetbrains latest' ...
-    if True:
+    if query:
         # for query in ['16+', '8 adopt', '8+ adopt latest', '8+ jetbrains earliest', '8+ jetbrains latest', '18+ adopt']:
         # print(repr(query), parse_query(query))
         version_range, version_order, version_keywords = parse_query(query)

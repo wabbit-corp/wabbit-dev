@@ -7,7 +7,7 @@ MAVEN_CENTRAL = MavenRepositoryDefinition(
 )
 
 
-def check_for_updates():
+def check_for_updates() -> None:
     config = load_config()
 
     for _, library in config.libraries.items():
@@ -33,7 +33,7 @@ def check_for_updates():
             # print(f"Failed to fetch metadata for {library.name}: {e}")
             continue
 
-        newer_versions = []
+        newer_versions: list[str] = []
         for version in metadata.versions:
             try:
                 available_version = MavenVersion.parse(version)

@@ -2,11 +2,13 @@ import abc
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any
-
-from mu.exec import ExecutionContext
+from typing import Protocol
 
 from dev.messages import error
+
+
+class ScriptCommandContext(Protocol):
+    def register(self, *, name: str, func: object) -> None: ...
 
 
 class Callback:
@@ -15,8 +17,8 @@ class Callback:
 
 @dataclass(frozen=True)
 class TypedConfigCommandRegistration:
-    command_type: type[Any]
-    apply: Callable[[Any], None]
+    command_type: type[object]
+    apply: Callable[[object], None]
 
 
 @dataclass
@@ -50,42 +52,34 @@ class Scope:
     def on_success(self, fn: Callable[[], None]) -> None:
         self.deferred.append(OnSuccessCallback(fn))
 
-    def __enter__(self):
+    def __enter__(self) -> "Scope":
         assert len(self.deferred) == 0
         return self
 
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
-        value: BaseException | None,
+        exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        for fn in self.deferred[::-1]:
-            match fn:
-                case OnExitCallback(fn):
-                    try:
-                        fn()
-                    except Exception as e:
-                        error(f"Error during deferred execution: {e}")
-                case OnFailureCallback(fn):
+        del traceback  # Unused by this scope implementation.
+        for callback in reversed(self.deferred):
+            try:
+                if isinstance(callback, OnExitCallback):
+                    callback.value()
+                elif isinstance(callback, OnFailureCallback):
+                    if exc_value is not None:
+                        callback.value(exc_value)
+                elif isinstance(callback, OnSuccessCallback):
                     if exc_type is None:
-                        continue
-                    try:
-                        fn(exc_type)
-                    except Exception as e:
-                        error(f"Error during deferred execution: {e}")
-                case OnSuccessCallback(fn):
-                    if exc_type is not None:
-                        continue
-                    try:
-                        fn()
-                    except Exception as e:
-                        error(f"Error during deferred execution: {e}")
+                        callback.value()
+            except Exception as e:
+                error(f"Error during deferred execution: {e}")
 
 
 class Module:
 
-    def register_script_commands(self, ctx: ExecutionContext) -> None:
+    def register_script_commands(self, ctx: ScriptCommandContext) -> None:
         pass
 
     def register_typed_config_commands(self) -> list[TypedConfigCommandRegistration]:

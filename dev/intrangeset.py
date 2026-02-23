@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import ClassVar
 
 
@@ -6,7 +7,7 @@ class IntRangeSet:
     # and for any two adjacent ranges (s1, e1), (s2, e2), we have e1 < s2 - 1.
     ranges: list[tuple[int, int]]
 
-    empty: ClassVar["IntRangeSet"]  # type: ignore
+    empty: ClassVar["IntRangeSet"]
 
     def __init__(self, values: list[int | tuple[int, int]]):
         """
@@ -130,7 +131,7 @@ class IntRangeSet:
             return NotImplemented
         return self.intersection(other)
 
-    def __contains__(self, value: int) -> bool:
+    def __contains__(self, value: object) -> bool:
         """Checks if an integer value is contained within any of the ranges."""
         if not isinstance(value, int):
             return False
@@ -148,7 +149,7 @@ class IntRangeSet:
                 low = mid + 1
         return False
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[int]:
         """Iterates over all individual integers contained in the ranges."""
         for start, end in self.ranges:
             # range() is efficient for this

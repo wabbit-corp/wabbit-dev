@@ -1,4 +1,5 @@
-from typing import Any, TypeVar, overload
+from collections.abc import Mapping
+from typing import TypeVar, overload
 
 T = TypeVar("T")
 
@@ -66,7 +67,7 @@ def ask(*msg: object, result_type: str) -> str: ...
 def ask[T](*msg: object, result_type: dict[str, T]) -> T: ...
 
 
-def ask(*msg: object, result_type: dict[str, Any] | str | None = None) -> Any:
+def ask(*msg: object, result_type: Mapping[str, object] | str | None = None) -> object:
     _message(QUESTIONMARK, "[?]", *msg)
 
     if result_type is None:

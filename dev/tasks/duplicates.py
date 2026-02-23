@@ -50,7 +50,7 @@ def get_hash(filename, first_chunk_only=False, hash_algo=hashlib.sha1):
     return hashobj.digest()
 
 
-def check_for_duplicates(paths, exclude_filters, include_filters, min_size, no_default_excludes):
+def check_for_duplicates(paths, _exclude_filters, _include_filters, _min_size, _no_default_excludes):
     files_by_size = defaultdict(list)
     files_by_small_hash = defaultdict(list)
     files_by_full_hash = defaultdict(list)

@@ -6,16 +6,17 @@ import re
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
-from typing import Any
 
 import pathspec
 
 # Import necessary components from your new system
-from dev.checks.base import FileLocation, IntRangeSet, Issue, IssueList, IssueType, ProjectCheck
+from dev.checks.base import FileLocation, Issue, IssueList, IssueType, ProjectCheck
+from dev.config import Project
 
 # Assuming get_expected_file_properties exists and helps identify text files
 # If not, we might need a simpler text file check.
 from dev.file_properties import get_expected_file_properties
+from dev.intrangeset import IntRangeSet
 
 # Assuming a walk_files utility exists or we implement one
 # from dev.io import walk_files # If you have this utility
@@ -174,7 +175,7 @@ class UniqueIdentifiersCheck(ProjectCheck):
             return False
         return ignore_ctx.spec.match_file(str(rel_path))
 
-    def check(self, path: Path, project: Any) -> list[Issue]:
+    def check(self, path: Path, project: Project | None) -> list[Issue]:
         """
         Scans the project at the given path for duplicate identifiers.
 

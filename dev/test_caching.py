@@ -676,7 +676,8 @@ class TestCacheDecorator:
 # --- Global State / Factory Tests ---
 
 
-def test_get_cashier_instance_reuse(cache_path, clean_global_state):
+@pytest.mark.usefixtures("clean_global_state")
+def test_get_cashier_instance_reuse(cache_path):
     path_str = str(cache_path)
     instance1 = get_cashier_instance(path_str)
     instance2 = get_cashier_instance(path_str)
@@ -684,7 +685,8 @@ def test_get_cashier_instance_reuse(cache_path, clean_global_state):
     instance1.close()
 
 
-def test_get_cashier_instance_different_paths(tmp_path, clean_global_state):
+@pytest.mark.usefixtures("clean_global_state")
+def test_get_cashier_instance_different_paths(tmp_path):
     path1 = str(tmp_path / "cache1.db")
     path2 = str(tmp_path / "cache2.db")
     instance1 = get_cashier_instance(path1)

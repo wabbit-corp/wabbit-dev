@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from types import TracebackType
 
 ##################################################################################################
 # Main
@@ -17,8 +17,8 @@ type SubParser = argparse._SubParsersAction[argparse.ArgumentParser]
 class Commands:
     def __init__(self, parser: ArgParser) -> None:
         self.root_parser = parser
-        self.parsers = {}
-        self.subparsers = {}
+        self.parsers: dict[str, ArgParser] = {}
+        self.subparsers: dict[str, SubParser] = {}
 
     class Command:
         def __init__(self, commands: "Commands", name: str) -> None:
@@ -47,13 +47,18 @@ class Commands:
 
             self.parser = parsers[name]
 
-        def __enter__(self) -> "Commands.Command":
+        def __enter__(self) -> ArgParser:
             return self.parser
 
-        def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_value: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None:
             pass
 
-    def __call__(self, name: str) -> Any:
+    def __call__(self, name: str) -> "Commands.Command":
         return Commands.Command(self, name)
 
     # check_parser = subparsers.add_parser('check')
@@ -251,7 +256,7 @@ async def async_main() -> int:
         case "trufflehog":
             from dev.tasks.check import trufflehog
 
-            trufflehog()
+            return trufflehog()
 
         case "test":
             from dev.config import load_config

@@ -3019,6 +3019,7 @@ def reset_all_python_qa_state() -> None:
 
 
 __all__ = [
+    "subprocess",
     "run_ruff",
     "run_black",
     "run_import_linter",

@@ -162,7 +162,13 @@ class JitPackAPI:
         self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout))
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object | None,
+    ) -> None:
+        del exc_type, exc_val, exc_tb
         if self._session and not self._session.closed:
             await self._session.close()
 
