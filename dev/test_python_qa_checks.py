@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import dev.checks.python_qa_common as qa
+import dev.checks.python_vulture as vulture_check
 
 
 @pytest.fixture(autouse=True)
@@ -313,3 +314,35 @@ def test_run_subprocess_failure_with_empty_output_includes_command(
     issue_message = (result.issues[0].data or {}).get("message", "")
     assert "no output" in issue_message
     assert "--config pyproject.toml" in issue_message
+
+
+def test_vulture_check_disabled_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    called = False
+
+    def fake_run_vulture(path: Path, project: object | None) -> list[object]:
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.delenv("PYTHON_QA_ENABLE_VULTURE", raising=False)
+    monkeypatch.setattr(vulture_check, "run_vulture", fake_run_vulture)
+
+    issues = vulture_check.PythonVultureCheck().check(tmp_path, None)
+    assert issues == []
+    assert called is False
+
+
+def test_vulture_check_runs_when_enabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    called = False
+
+    def fake_run_vulture(path: Path, project: object | None) -> list[object]:
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setenv("PYTHON_QA_ENABLE_VULTURE", "1")
+    monkeypatch.setattr(vulture_check, "run_vulture", fake_run_vulture)
+
+    issues = vulture_check.PythonVultureCheck().check(tmp_path, None)
+    assert issues == []
+    assert called is True
