@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import TypeGuard, Union
 
 from mu.exec import Quoted
-from mu.parser import sexpr
-from mu.typed import MuDecodeError, decode_expr
-from mu.types import SAtom, SDoc, SStr
+from mu.parser import parse
+from mu.typed import DecodeError, decode
+from mu.types import AtomExpr, Document, StringExpr
 
 import dev.config_typed as config_typed
 from dev.base import Module
@@ -36,7 +36,7 @@ class OwnershipType(Enum):
 
 @dataclass
 class Version:
-    raw: Quoted[SStr] | None
+    raw: Quoted[StringExpr] | None
     major: int
     minor: int
     patch: int
@@ -55,7 +55,7 @@ class Version:
         return Version(None, self.major, self.minor, self.patch + 1, False)
 
     @classmethod
-    def parse_or_null(cls, version: Quoted[SStr] | str) -> Union["Version", None]:
+    def parse_or_null(cls, version: Quoted[StringExpr] | str) -> Union["Version", None]:
         value = version.value.value if isinstance(version, Quoted) else version
         match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(\+dev-SNAPSHOT)?", value.strip())
         if not match:
@@ -65,7 +65,7 @@ class Version:
         return cls(version, int(major), int(minor), int(patch), bool(is_dev))
 
     @classmethod
-    def parse(cls, version: Quoted[SStr] | str) -> "Version":
+    def parse(cls, version: Quoted[StringExpr] | str) -> "Version":
         result = cls.parse_or_null(version)
         assert result is not None, f"Invalid version: {version.value.value if isinstance(version, Quoted) else version}"
         return result
@@ -746,7 +746,7 @@ def _coerce_jvm_version(value: int | str, field_name: str = "jvm_version") -> in
 
 @dataclass
 class Config:
-    raw: SDoc
+    raw: Document
 
     openai_key: str | None = None
     github_token: str | None = None
@@ -785,9 +785,9 @@ class Config:
 
 def load_config() -> Config:
     with open(CONFIG_FILE, encoding="utf-8") as f:
-        root = sexpr(f.read(), no_spans=False)
+        root = parse(f.read(), no_spans=False)
     with open(CONFIG_PRIVATE_FILE, encoding="utf-8") as f:
-        root_private = sexpr(f.read(), no_spans=False)
+        root_private = parse(f.read(), no_spans=False)
 
     config = Config(raw=root)
 
@@ -807,7 +807,7 @@ def load_config() -> Config:
     defines: dict[str, object] = {}
 
     def _extract_expr_span(expr: object) -> object | None:
-        if isinstance(expr, (SAtom, SStr)):
+        if isinstance(expr, (AtomExpr, StringExpr)):
             span = expr.span
             if span is None:
                 return None
@@ -1375,18 +1375,18 @@ def load_config() -> Config:
             return
         raise ValueError(f"Unknown command type: {type(command)}")
 
-    def _decode_and_apply(doc: SDoc, source_name: str) -> None:
+    def _decode_and_apply(doc: Document, source_name: str) -> None:
         for index, expr in enumerate(doc.exprs):
             path = f"{source_name}[{index}]"
-            command = decode_expr(expr, top_level_target, path=path)
+            command = decode(expr, top_level_target, path=path)
             try:
                 _apply_command(command)
             except TypeError:
                 raise
-            except MuDecodeError:
+            except DecodeError:
                 raise
             except Exception as cause:
-                raise MuDecodeError(
+                raise DecodeError(
                     path=path,
                     expected=f"valid config command ({type(command).__name__})",
                     got=type(expr).__name__,

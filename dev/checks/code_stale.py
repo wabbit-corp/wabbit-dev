@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from mu.typed import mu_tag
+from mu.typed import tag
 
 from dev.base import ScriptCommandContext, TypedConfigCommandRegistration
 from dev.checks.base import FileCheck, FileContext, IssueType
@@ -21,7 +21,7 @@ E_DEBUG_CODE = IssueType("E_DEBUG_CODE", "Possible leftover debug statement.")
 E_STALE_TODO = IssueType("E_STALE_TODO", "Stale TODO/FIXME comment.")
 
 
-@mu_tag("checks/stale-todo/age-days")
+@tag("checks/stale-todo/age-days")
 @dataclass(frozen=True)
 class StaleTodoAgeDaysCommand:
     age_days: int

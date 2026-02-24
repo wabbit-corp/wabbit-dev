@@ -44,9 +44,9 @@ def test_maven_version_variable_is_resolved_from_define(tmp_path: Path) -> None:
 
 
 def test_undefined_maven_version_variable_fails_with_path_and_span(tmp_path: Path) -> None:
-    from mu.typed import MuDecodeError
+    from mu.typed import DecodeError
 
-    with pytest.raises(MuDecodeError) as exc:
+    with pytest.raises(DecodeError) as exc:
         _load_from_temp_root(
             tmp_path,
             "(" 'define-maven-library "ktor-client-core" ' '"io.ktor:ktor-client-core:${ktor-version}")\n',
@@ -58,9 +58,9 @@ def test_undefined_maven_version_variable_fails_with_path_and_span(tmp_path: Pat
 
 
 def test_forward_maven_version_variable_reference_is_rejected(tmp_path: Path) -> None:
-    from mu.typed import MuDecodeError
+    from mu.typed import DecodeError
 
-    with pytest.raises(MuDecodeError) as exc:
+    with pytest.raises(DecodeError) as exc:
         _load_from_temp_root(
             tmp_path,
             "\n".join(
@@ -116,9 +116,9 @@ def test_dep_call_in_gradle_dependencies_is_resolved(tmp_path: Path) -> None:
 
 
 def test_unknown_top_level_tag_fails_decode(tmp_path: Path) -> None:
-    from mu.typed import MuDecodeError
+    from mu.typed import DecodeError
 
-    with pytest.raises(MuDecodeError):
+    with pytest.raises(DecodeError):
         _load_from_temp_root(tmp_path, '(unknown-cmd "x")\n')
 
 
@@ -149,9 +149,9 @@ def test_checks_ignore_finding_is_loaded(tmp_path: Path) -> None:
 
 
 def test_checks_ignore_finding_rejects_invalid_issue_id(tmp_path: Path) -> None:
-    from mu.typed import MuDecodeError
+    from mu.typed import DecodeError
 
-    with pytest.raises(MuDecodeError):
+    with pytest.raises(DecodeError):
         _load_from_temp_root(
             tmp_path,
             '(checks/ignore-finding "bad_issue" "**/*.py" "10.0.0.0")\n',
@@ -159,9 +159,9 @@ def test_checks_ignore_finding_rejects_invalid_issue_id(tmp_path: Path) -> None:
 
 
 def test_checks_ignore_finding_rejects_missing_args(tmp_path: Path) -> None:
-    from mu.typed import MuDecodeError
+    from mu.typed import DecodeError
 
-    with pytest.raises(MuDecodeError):
+    with pytest.raises(DecodeError):
         _load_from_temp_root(
             tmp_path,
             '(checks/ignore-finding "E_HARDCODED_INTERNAL_HOSTNAME_IP" "**/*.py")\n',

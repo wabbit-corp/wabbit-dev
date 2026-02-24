@@ -5,7 +5,7 @@
 import re
 from dataclasses import dataclass
 
-from mu.typed import mu_tag
+from mu.typed import tag
 
 # Import necessary components from your base framework
 # (Adjust the import path if necessary)
@@ -22,7 +22,7 @@ E_CENSORED_KEYWORD = IssueType(
 )
 
 
-@mu_tag("checks/censored-words/error-on")
+@tag("checks/censored-words/error-on")
 @dataclass(frozen=True)
 class CensoredWordsErrorOnCommand:
     words: list[str]

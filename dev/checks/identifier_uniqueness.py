@@ -10,7 +10,15 @@ from pathlib import Path
 import pathspec
 
 # Import necessary components from your new system
-from dev.checks.base import FileLocation, Issue, IssueList, IssueType, ProjectCheck
+from dev.checks.base import (
+    FileLocation,
+    InlineFindingIgnoreRule,
+    Issue,
+    IssueList,
+    IssueType,
+    ProjectCheck,
+    parse_inline_finding_ignore_rules,
+)
 from dev.config import Project
 
 # Assuming get_expected_file_properties exists and helps identify text files
@@ -214,10 +222,33 @@ class UniqueIdentifiersCheck(ProjectCheck):
                     for line_nr_zero_based, line_text in enumerate(fin):
                         line_nr = line_nr_zero_based + 1
                         current_location = FileLocation(file_path, IntRangeSet([line_nr]))
+                        line_inline_ignores = parse_inline_finding_ignore_rules(line_text)
+
+                        suppress_all_duplicates = any(
+                            rule.value is None and rule.issue_id in ("*", E_DUPLICATE_IDENTIFIER.id)
+                            for rule in line_inline_ignores
+                        )
+                        if suppress_all_duplicates:
+                            continue
+
+                        def value_is_suppressed(
+                            identifier_value: str,
+                            rules: list[InlineFindingIgnoreRule] = line_inline_ignores,
+                        ) -> bool:
+                            for rule in rules:
+                                if rule.issue_id not in ("*", E_DUPLICATE_IDENTIFIER.id):
+                                    continue
+                                if rule.value is None:
+                                    return True
+                                if rule.value in identifier_value:
+                                    return True
+                            return False
 
                         # Find UUIDs
                         for match in self.uuid_pattern.finditer(line_text):
                             uuid_val = match.group(1)
+                            if value_is_suppressed(uuid_val):
+                                continue
                             if uuid_val in seen_uuids:
                                 first_loc = seen_uuids[uuid_val]
                                 issues.append(
@@ -232,6 +263,8 @@ class UniqueIdentifiersCheck(ProjectCheck):
                         # Find ULIDs
                         for match in self.ulid_pattern.finditer(line_text):
                             ulid_val = match.group(1)
+                            if value_is_suppressed(ulid_val):
+                                continue
                             if ulid_val in seen_ulids:
                                 first_loc = seen_ulids[ulid_val]
                                 issues.append(
