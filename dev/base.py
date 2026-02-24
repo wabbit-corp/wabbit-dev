@@ -6,6 +6,40 @@ from typing import Protocol
 
 from dev.messages import error
 
+CHECK_MODULE_IMPORTS: tuple[str, ...] = (
+    "dev.checks.chinese_firewall",
+    "dev.checks.code_linting",
+    "dev.checks.code_stale",
+    "dev.checks.dependencies",
+    "dev.checks.file_duplicates",
+    "dev.checks.file_headers",
+    "dev.checks.file_modes",
+    "dev.checks.file_paths",
+    "dev.checks.hardcoded",
+    "dev.checks.identifier_uniqueness",
+    "dev.checks.large_files",
+    "dev.checks.project_files",
+    "dev.checks.python_bandit",
+    "dev.checks.python_black",
+    "dev.checks.python_coverage_report",
+    "dev.checks.python_coverage_xml",
+    "dev.checks.python_deptry",
+    "dev.checks.python_diff_cover",
+    "dev.checks.python_import_linter",
+    "dev.checks.python_mypy",
+    "dev.checks.python_pip_audit",
+    "dev.checks.python_pyright",
+    "dev.checks.python_pytest",
+    "dev.checks.python_ruff",
+    "dev.checks.python_semgrep",
+    "dev.checks.python_unittest",
+    "dev.checks.python_vulture",
+    "dev.checks.repo_contributors",
+    "dev.checks.repo_properties",
+    "dev.checks.text_quality",
+    "dev.checks.trufflehog",
+)
+
 
 class ScriptCommandContext(Protocol):
     def register(self, *, name: str, func: object) -> None: ...
@@ -89,41 +123,35 @@ class Module:
     def load_modules() -> dict[str, "Module"]:
         import inspect
         from importlib import import_module
-        from pathlib import Path
-
-        dev_dir = Path(__file__).parent
-
-        packages = [("dev.checks", dev_dir / "checks")]
 
         # Get the file location of base.py to discover all checks
         modules: dict[str, Module] = {}
 
-        for package, package_dir in packages:
-            for path in package_dir.iterdir():
-                if path.is_file() and path.suffix == ".py":
-                    module = import_module(f"{package}.{path.stem}")
-                    for name, obj in vars(module).items():
-                        if isinstance(obj, type) and issubclass(obj, Module):
-                            if inspect.isabstract(obj):
-                                continue
+        # Keep this explicit so frozen builds do not depend on runtime filesystem scans.
+        for module_name in CHECK_MODULE_IMPORTS:
+            module = import_module(module_name)
+            for name, obj in vars(module).items():
+                if isinstance(obj, type) and issubclass(obj, Module):
+                    if inspect.isabstract(obj):
+                        continue
 
-                            # Check if it has an immediate abc.ABC parent
-                            skip = False
-                            for base in obj.__bases__:
-                                if base is Module:
-                                    continue
-                                if base is abc.ABC:
-                                    skip = True
-                                    break
-                            if skip:
-                                continue
+                    # Check if it has an immediate abc.ABC parent
+                    skip = False
+                    for base in obj.__bases__:
+                        if base is Module:
+                            continue
+                        if base is abc.ABC:
+                            skip = True
+                            break
+                    if skip:
+                        continue
 
-                            try:
-                                # print(f"Loading module: {name}")
-                                modules[name] = obj()  # assumes no-arg ctor
-                            except TypeError:
-                                # print(f"Skipping module (needs args): {name}")
-                                # skip or handle modules that need args
-                                pass
+                    try:
+                        # print(f"Loading module: {name}")
+                        modules[name] = obj()  # assumes no-arg ctor
+                    except TypeError:
+                        # print(f"Skipping module (needs args): {name}")
+                        # skip or handle modules that need args
+                        pass
 
         return modules

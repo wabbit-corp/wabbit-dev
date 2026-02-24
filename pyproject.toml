@@ -38,6 +38,7 @@ coverage = ">=7.10.7,<8.0.0"
 pyinstaller = ">=6.9.0,<7.0.0"
 
 [tool.poetry.scripts]
+dev = "dev.cli:main"
 wabbit-dev = "dev.cli:main"
 
 [tool.black]

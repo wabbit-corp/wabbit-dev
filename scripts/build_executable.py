@@ -22,6 +22,11 @@ def main() -> int:
         print(f"Entrypoint not found: {entrypoint}", file=sys.stderr)
         return 1
 
+    # Build from a stable module list used by runtime module loading.
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from dev.base import CHECK_MODULE_IMPORTS
+
     dist_dir = repo_root / "dist"
     work_dir = repo_root / "build" / "pyinstaller"
     spec_dir = repo_root / "build" / "pyinstaller-spec"
@@ -39,11 +44,11 @@ def main() -> int:
         "--specpath",
         str(spec_dir),
         "--collect-submodules",
-        "dev.checks",
-        "--collect-submodules",
         "dev.tasks",
-        str(entrypoint),
     ]
+    for module_name in CHECK_MODULE_IMPORTS:
+        args.extend(["--hidden-import", module_name])
+    args.append(str(entrypoint))
     pyinstaller_run(args)
     return 0
 

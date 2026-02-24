@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Expose a `dev` console-script entrypoint in packaging metadata so installing the project into any virtualenv provides a `dev` executable command.
+- Add `scripts/build_macos_installer.sh` to produce installable macOS `.pkg` + `.dmg` artifacts, with optional `productsign` and `notarytool`/stapler hooks for signed and notarized distribution.
+- Replace check module auto-discovery filesystem scans with explicit `dev.checks.*` imports so `./dist/wabbit-dev check ...` works in PyInstaller onefile builds.
 - Migrate config/check integration points to the latest `mu` typed/parsing APIs (`parse`, `decode`, `DecodeError`, `tag`, and renamed expression types), and update typed-config tests to assert the new exception type.
 - Make `UniqueIdentifiersCheck` honor inline `# check:ignore E_DUPLICATE_IDENTIFIER` line suppressions and add suppressions for intentional duplicate UUID literals in `dev/test_identifier_uniqueness.py`.
 - Disable the vulture QA stage by default to avoid high false-positive noise; it can be re-enabled explicitly with `PYTHON_QA_ENABLE_VULTURE=1`.

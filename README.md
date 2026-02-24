@@ -81,6 +81,13 @@ python dev.py dep/updates
 
 Consult `python dev.py --help` for the full list of commands and options.
 
+To install into any virtualenv with a `dev` command:
+
+```bash
+python -m pip install -e .
+dev --help
+```
+
 ## 📦 Packaging (single executable)
 
 Install dependencies, then build with PyInstaller:
@@ -92,6 +99,33 @@ python scripts/build_executable.py
 
 The binary is emitted under `dist/` (for example `dist/wabbit-dev` or
 `dist/wabbit-dev.exe`).
+
+## 🍎 macOS Installer (.pkg + .dmg)
+
+Build an installable macOS package (installs `/usr/local/bin/wabbit-dev`):
+
+```bash
+scripts/build_macos_installer.sh --version 0.1.0
+```
+
+Output artifacts:
+
+- `dist/wabbit-dev-<version>.pkg`
+- `dist/wabbit-dev-<version>.dmg`
+
+Optional signing/notarization hooks:
+
+- `INSTALLER_SIGN_IDENTITY` for `productsign`
+- `NOTARYTOOL_PROFILE` for `xcrun notarytool submit --keychain-profile`
+- or `NOTARYTOOL_APPLE_ID` + `NOTARYTOOL_PASSWORD` + `NOTARYTOOL_TEAM_ID`
+
+Example:
+
+```bash
+INSTALLER_SIGN_IDENTITY="Developer ID Installer: Example Corp (TEAMID1234)" \
+NOTARYTOOL_PROFILE="notary-profile" \
+scripts/build_macos_installer.sh --version 0.1.0
+```
 
 ## Repository Layout
 
