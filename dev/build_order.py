@@ -24,6 +24,8 @@ def build_dependency_graph(projects: dict[str, Project]) -> tuple[dict[str, list
         for dep in proj.resolved_dependencies:
             if dep.is_subproject:
                 dep_name = dep.name
+                if dep_name not in graph:
+                    raise ValueError(f"Project {name} depends on unknown project {dep_name}")
                 # Edge: dep_name -> name
                 graph[dep_name].append(name)
                 in_degs[name] += 1
@@ -39,6 +41,9 @@ def toposort_projects(projects: dict[str, Project], target_project: str | None =
     graph, in_degs = build_dependency_graph(projects)
 
     if target_project is not None:
+        if target_project not in projects:
+            raise ValueError(f"Unknown project: {target_project}")
+
         # BFS upward from target_project in reversed edges
         rev = defaultdict(list)
         for src, children in graph.items():
@@ -57,11 +62,10 @@ def toposort_projects(projects: dict[str, Project], target_project: str | None =
                     queue.append(p)
 
         # Filter
+        ordered_needed = [name for name in projects if name in needed]
         sub_graph: dict[str, list[str]] = {}
-        sub_in: dict[str, int] = {}
-        for p in needed:
-            sub_in[p] = 0
-        for p in needed:
+        sub_in: dict[str, int] = {name: 0 for name in ordered_needed}
+        for p in ordered_needed:
             valid_children = [c for c in graph.get(p, []) if c in needed]
             sub_graph[p] = valid_children
             for c in valid_children:
@@ -78,5 +82,8 @@ def toposort_projects(projects: dict[str, Project], target_project: str | None =
             in_degs[nxt] -= 1
             if in_degs[nxt] == 0:
                 queue.append(nxt)
+
+    if len(order) != len(in_degs):
+        raise ValueError("Cyclic project dependency detected")
 
     return order

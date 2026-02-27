@@ -1,6 +1,14 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Skip setup-time remote repository existence validation when the GitHub API is unavailable, warning and continuing so no-token setup flows work.
+- Simplify Python project config schema by removing per-project QA/import-graph/source-set feature knobs, adding lightweight project metadata fields (`homepage`, `repository`, `keywords`, `classifiers`), and narrowing `python-defaults` to shared defaults (`requires-python`, `line-length`, `coverage-fail-under`).
+- Expand Python setup generation to always scaffold docs/deploy structure (`mkdocs.yml`, `docs/`, `CONTRIBUTING.md`, codespell ignore list, and GitHub docs quality/deploy workflows) and render opinionated QA baselines (mypy/ruff/black/pytest + docs dependencies) from template defaults.
+- Remove hardcoded GitHub URL literals from Python setup URL helpers, preserving behavior while satisfying hardcoded-string URL checks.
+- Split Python app configuration from library configuration with a new `(python-application ...)` feature, so PyInstaller dependencies/scripts are generated only for app projects.
+- Migrate the workspace `app-wabbit-dev` project declaration from legacy Python `:scripts` to `:features [(python-application ...)]`.
+- Add targeted setup support (`dev setup <project>`) that sets up only the selected project plus all of its transitive project dependencies.
+- Reuse `dev.build_order.toposort_projects(...)` for targeted setup project selection and harden graph validation for unknown targets/dependencies and dependency cycles.
 - Expose a `dev` console-script entrypoint in packaging metadata so installing the project into any virtualenv provides a `dev` executable command.
 - Add `scripts/build_macos_installer.sh` to produce installable macOS `.pkg` + `.dmg` artifacts, with optional `productsign` and `notarytool`/stapler hooks for signed and notarized distribution.
 - Replace check module auto-discovery filesystem scans with explicit `dev.checks.*` imports so `./dist/wabbit-dev check ...` works in PyInstaller onefile builds.

@@ -513,13 +513,11 @@ class PythonDependency:
 
 
 @dataclass
-class PythonSourceSet:
+class PythonApplication:
+    script: str
+    entry: str
     path: str
-    kind: str
-
-    @property
-    def is_test(self) -> bool:
-        return self.kind == "test"
+    aliases: list[str] = dataclasses.field(default_factory=list)
 
 
 @dataclass
@@ -535,27 +533,11 @@ class PythonProject(Project):
     dependencies: list[str]
     dev_dependencies: list[str]
     scripts: list[str]
-    raw_features: list[Feature]
-    resolved_features: dict[str, Feature]
-    line_length: int | None
-    target_version: str | None
-    source_sets: list[PythonSourceSet]
-    test_paths: list[str]
-    ruff_per_file_ignores: dict[str, list[str]]
-    deptry_package_map: dict[str, str]
-    deptry_per_rule_ignores: dict[str, list[str]]
-    deptry_auto_map: bool
-    importlinter_root_packages: list[str]
-    importlinter_layers: list[str]
-    importlinter_contracts: list[dict[str, object]]
-    coverage_source: list[str]
-    coverage_omit: list[str]
-    coverage_fail_under: int | None
-    coverage_precision: int | None
-    coverage_branch: bool | None
-    coverage_show_missing: bool | None
-    coverage_skip_empty: bool | None
-    coverage_xml_output: str | None
+    application: PythonApplication | None
+    homepage: str | None
+    repository: str | None
+    keywords: list[str]
+    classifiers: list[str]
     quarantine: bool
     publish: bool
     ownership: OwnershipType
@@ -715,14 +697,9 @@ CONFIG_PRIVATE_FILE = "root.private.clj"
 
 @dataclass
 class PythonDefaults:
+    requires_python: str | None = None
     line_length: int | str | None = None
-    target_version: str | None = None
     coverage_fail_under: int | str | None = None
-    coverage_precision: int | str | None = None
-    coverage_branch: bool | None = None
-    coverage_show_missing: bool | None = None
-    coverage_skip_empty: bool | None = None
-    coverage_xml_output: str | None = None
 
 
 def _coerce_jvm_version(value: int | str, field_name: str = "jvm_version") -> int:
@@ -821,42 +798,6 @@ def load_config() -> Config:
             nested_token: object | None = getattr(value, "token", None)
             return nested_token if nested_token is not None else value
         return None
-
-    def _coerce_int(value: int | str | None, field_name: str) -> int | None:
-        if value is None:
-            return None
-        if isinstance(value, int):
-            return value
-        if isinstance(value, str) and re.fullmatch(r"-?\d+", value):
-            return int(value)
-        raise ValueError(f"{field_name} must be an int or numeric string")
-
-    def _parse_python_source_sets(
-        raw_sets: list[object] | None,
-    ) -> list[PythonSourceSet]:
-        if not raw_sets:
-            return []
-        parsed: list[PythonSourceSet] = []
-        for item in raw_sets:
-            if isinstance(item, str):
-                parsed.append(PythonSourceSet(path=item, kind="main"))
-                continue
-            if isinstance(item, dict):
-                path = item.get("path") or item.get("dir") or item.get("root")
-                if not path:
-                    raise ValueError("python source set missing path")
-                kind = item.get("kind") or item.get("type")
-                if kind is None and "test" in item:
-                    kind = "test" if item.get("test") else "main"
-                if kind is None:
-                    kind = "main"
-                kind = str(kind)
-                if kind not in {"main", "test"}:
-                    raise ValueError(f"Unknown python source set kind: {kind}")
-                parsed.append(PythonSourceSet(path=str(path), kind=kind))
-                continue
-            raise ValueError(f"Invalid python source set entry: {item}")
-        return parsed
 
     def _coerce_ownership(value: str | None) -> OwnershipType:
         if value is None:
@@ -1071,22 +1012,12 @@ def load_config() -> Config:
 
         if isinstance(command, config_typed.PythonDefaultsCommand):
             defaults = config.python_defaults
+            if command.requires_python is not None:
+                defaults.requires_python = command.requires_python
             if command.line_length is not None:
                 defaults.line_length = command.line_length
-            if command.target_version is not None:
-                defaults.target_version = command.target_version
             if command.coverage_fail_under is not None:
                 defaults.coverage_fail_under = command.coverage_fail_under
-            if command.coverage_precision is not None:
-                defaults.coverage_precision = command.coverage_precision
-            if command.coverage_branch is not None:
-                defaults.coverage_branch = command.coverage_branch
-            if command.coverage_show_missing is not None:
-                defaults.coverage_show_missing = command.coverage_show_missing
-            if command.coverage_skip_empty is not None:
-                defaults.coverage_skip_empty = command.coverage_skip_empty
-            if command.coverage_xml_output is not None:
-                defaults.coverage_xml_output = command.coverage_xml_output
             return
 
         if isinstance(command, config_typed.DefineMavenRepoCommand):
@@ -1146,56 +1077,52 @@ def load_config() -> Config:
             ownership = _coerce_ownership(command.ownership)
             path = Path(f"./{command.dir_name}")
             name = command.name or command.dir_name
-            raw_features = [_feature_from_command(item) for item in (command.features or [])]
-            resolved_features = resolve_features(raw_features)
-
             defaults = config.python_defaults
-            line_length = (
-                _coerce_int(command.line_length, "line-length")
-                if command.line_length is not None
-                else _coerce_int(defaults.line_length, "python-defaults.line-length")
-            )
-            coverage_fail_under = (
-                _coerce_int(command.coverage_fail_under, "coverage-fail-under")
-                if command.coverage_fail_under is not None
-                else _coerce_int(
-                    defaults.coverage_fail_under,
-                    "python-defaults.coverage-fail-under",
+            requires_python = command.requires_python or defaults.requires_python
+            legacy_scripts = command.scripts or []
+
+            if command.features and legacy_scripts:
+                raise ValueError(
+                    f"Python project {name} cannot set both :features (python-application) and legacy :scripts"
                 )
-            )
-            coverage_precision = (
-                _coerce_int(command.coverage_precision, "coverage-precision")
-                if command.coverage_precision is not None
-                else _coerce_int(
-                    defaults.coverage_precision,
-                    "python-defaults.coverage-precision",
+
+            application: PythonApplication | None = None
+            for feature in command.features or []:
+                if not isinstance(feature, config_typed.PythonApplicationCommand):
+                    raise TypeError(f"Unsupported python feature command: {type(feature)}")
+
+                if application is not None:
+                    raise ValueError(f"Python project {name} defines multiple python-application features")
+
+                script = feature.script.strip()
+                entry = feature.entry.strip()
+                script_path = feature.path.strip()
+                aliases = [alias.strip() for alias in (feature.aliases or []) if alias.strip()]
+
+                if not script:
+                    raise ValueError(f"Python project {name} has empty python-application.script")
+                if "=" in script:
+                    raise ValueError(
+                        f"Python project {name} python-application.script must be a command name, not script=entry"
+                    )
+                if not entry or ":" not in entry:
+                    raise ValueError(
+                        f"Python project {name} python-application.entry must use module:function form, got {entry!r}"
+                    )
+                if not script_path:
+                    raise ValueError(f"Python project {name} has empty python-application.path")
+
+                all_script_names = [script, *aliases]
+                if len(set(all_script_names)) != len(all_script_names):
+                    raise ValueError(f"Python project {name} python-application has duplicate script names")
+
+                application = PythonApplication(
+                    script=script,
+                    entry=entry,
+                    path=script_path,
+                    aliases=aliases,
                 )
-            )
 
-            deptry_feature = resolved_features.get("python-deptry")
-            deptry_package_map = command.deptry_package_map or {}
-            deptry_per_rule_ignores = command.deptry_per_rule_ignores or {}
-            deptry_auto_map = False
-            if isinstance(deptry_feature, PythonDeptry):
-                deptry_package_map = {
-                    **deptry_feature.package_map,
-                    **deptry_package_map,
-                }
-                deptry_per_rule_ignores = {
-                    **deptry_feature.per_rule_ignores,
-                    **deptry_per_rule_ignores,
-                }
-                deptry_auto_map = deptry_feature.auto_package_map
-
-            importlinter_feature = resolved_features.get("python-importlinter")
-            importlinter_root_packages = command.importlinter_root_packages or []
-            importlinter_layers: list[str] = []
-            if isinstance(importlinter_feature, PythonImportLinter):
-                if importlinter_feature.root_packages:
-                    importlinter_root_packages = importlinter_feature.root_packages
-                importlinter_layers = importlinter_feature.layers or []
-
-            parsed_source_sets = _parse_python_source_sets(command.source_sets)
             python_project = PythonProject(
                 path=path,
                 name=name,
@@ -1206,41 +1133,15 @@ def load_config() -> Config:
                 license=command.license,
                 github_repo=command.repo,
                 ownership=ownership,
-                requires_python=command.requires_python,
+                requires_python=requires_python,
                 dependencies=command.dependencies or [],
                 dev_dependencies=command.dev_dependencies or [],
-                scripts=command.scripts or [],
-                raw_features=raw_features,
-                resolved_features=resolved_features,
-                line_length=line_length,
-                target_version=command.target_version or defaults.target_version,
-                source_sets=parsed_source_sets,
-                test_paths=command.test_paths or [],
-                ruff_per_file_ignores=command.ruff_per_file_ignores or {},
-                deptry_package_map=deptry_package_map,
-                deptry_per_rule_ignores=deptry_per_rule_ignores,
-                deptry_auto_map=deptry_auto_map,
-                importlinter_root_packages=importlinter_root_packages,
-                importlinter_layers=importlinter_layers,
-                importlinter_contracts=command.importlinter_contracts or [],
-                coverage_source=command.coverage_source or [],
-                coverage_omit=command.coverage_omit or [],
-                coverage_fail_under=coverage_fail_under,
-                coverage_precision=coverage_precision,
-                coverage_branch=(
-                    command.coverage_branch if command.coverage_branch is not None else defaults.coverage_branch
-                ),
-                coverage_show_missing=(
-                    command.coverage_show_missing
-                    if command.coverage_show_missing is not None
-                    else defaults.coverage_show_missing
-                ),
-                coverage_skip_empty=(
-                    command.coverage_skip_empty
-                    if command.coverage_skip_empty is not None
-                    else defaults.coverage_skip_empty
-                ),
-                coverage_xml_output=(command.coverage_xml_output or defaults.coverage_xml_output),
+                scripts=legacy_scripts,
+                application=application,
+                homepage=command.homepage,
+                repository=command.repository,
+                keywords=command.keywords or [],
+                classifiers=command.classifiers or [],
                 version=Version.parse(command.version) if command.version else None,
                 resolved_dependencies=[],
             )

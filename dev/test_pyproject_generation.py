@@ -5,6 +5,7 @@ import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
+import jinja2
 import pytest
 
 
@@ -30,59 +31,130 @@ def _load_toml(path: Path) -> dict:
     return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
-def _read_requirements(path: Path) -> list[str]:
-    lines: list[str] = []
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        lines.append(line)
-    return lines
+def _make_python_project_for_render(path: Path, *, application: object | None = None):
+    from dev.config import OwnershipType, PythonProject
+
+    return PythonProject(
+        path=path,
+        name="demo",
+        version=None,
+        description="Demo",
+        authors=["Dev"],
+        license="AGPL",
+        github_repo="wabbit-corp/demo",
+        requires_python=">=3.10",
+        dependencies=[],
+        dev_dependencies=[],
+        scripts=[],
+        application=application,
+        homepage=None,
+        repository=None,
+        keywords=[],
+        classifiers=[],
+        quarantine=False,
+        publish=True,
+        ownership=OwnershipType.WABBIT,
+        resolved_dependencies=[],
+    )
 
 
-def _normalize_list(value: list[str]) -> list[str]:
-    return sorted(value)
+def _make_render_context() -> SimpleNamespace:
+    return SimpleNamespace(
+        config=SimpleNamespace(
+            python_defaults=SimpleNamespace(requires_python=None, line_length=None, coverage_fail_under=None)
+        ),
+        python_pyproject_template=jinja2.Template(
+            '[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n'
+            '[tool.poetry.dependencies]\npython = "{{ python_version }}"\n'
+            "{% if has_dev_dependencies %}[tool.poetry.group.dev.dependencies]\n{{ dev_dependencies_block }}\n{% endif %}\n"
+            "{% if has_scripts %}[tool.poetry.scripts]\n{{ scripts_block }}\n{% endif %}\n"
+            "{% if has_deptry_rule_ignores %}[tool.deptry]\nper_rule_ignores = {{ deptry_per_rule_ignores_inline }}\n{% endif %}\n"
+        ),
+    )
 
 
-def _normalize_map(value: dict[str, list[str]]) -> dict[str, list[str]]:
-    return {key: sorted(items) for key, items in value.items()}
-
-
-def _normalize_contracts(value: list[dict]) -> list[dict]:
-    return sorted(value, key=lambda item: item.get("id", ""))
-
-
-def _requirement_name(requirement: str) -> str:
-    for idx, ch in enumerate(requirement):
-        if ch in "<>!=~":
-            return requirement[:idx].strip()
-    return requirement.strip()
-
-
-def test_setup_generates_pyproject_from_config(tmp_path: Path, monkeypatch) -> None:
+def test_render_python_pyproject_excludes_pyinstaller_for_non_app(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     workspace_root = repo_root.parent
     sys.path.insert(0, str(repo_root))
     sys.path.insert(0, str(workspace_root / "python-lang-mu"))
 
-    from dev.tasks.setup import RepoSetupMode, _derive_deptry_package_map, setup
+    from dev.tasks.setup import render_python_pyproject
+
+    project_path = tmp_path / "demo"
+    project_path.mkdir(parents=True, exist_ok=True)
+    (project_path / "README.md").write_text("# demo\n", encoding="utf-8")
+    (project_path / "demo").mkdir(parents=True, exist_ok=True)
+    (project_path / "demo" / "__init__.py").write_text("", encoding="utf-8")
+
+    project = _make_python_project_for_render(project_path)
+    rendered = render_python_pyproject(_make_render_context(), project)
+
+    assert "pyinstaller" not in rendered
+    assert "[tool.poetry.scripts]" not in rendered
+
+
+def test_render_python_pyproject_includes_pyinstaller_for_python_application(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workspace_root = repo_root.parent
+    sys.path.insert(0, str(repo_root))
+    sys.path.insert(0, str(workspace_root / "python-lang-mu"))
+
+    from dev.config import PythonApplication
+    from dev.tasks.setup import render_python_pyproject
+
+    project_path = tmp_path / "demo"
+    project_path.mkdir(parents=True, exist_ok=True)
+    (project_path / "README.md").write_text("# demo\n", encoding="utf-8")
+    (project_path / "demo").mkdir(parents=True, exist_ok=True)
+    (project_path / "demo" / "__init__.py").write_text("", encoding="utf-8")
+
+    project = _make_python_project_for_render(
+        project_path,
+        application=PythonApplication(
+            script="demo-cli",
+            entry="demo.cli:main",
+            path="demo/cli.py",
+            aliases=["demo"],
+        ),
+    )
+    rendered = render_python_pyproject(_make_render_context(), project)
+
+    assert "pyinstaller" in rendered
+    assert 'demo-cli = "demo.cli:main"' in rendered
+    assert 'demo = "demo.cli:main"' in rendered
+
+
+def test_setup_generates_python_docs_and_quality_defaults(tmp_path: Path, monkeypatch) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workspace_root = repo_root.parent
+    sys.path.insert(0, str(repo_root))
+    sys.path.insert(0, str(workspace_root / "python-lang-mu"))
+
+    from dev.tasks.setup import RepoSetupMode, setup
 
     test_root = repo_root / "test" / "root.clj"
     test_private = repo_root / "test" / "root.private.clj"
     if not test_root.is_file() or not test_private.is_file():
         pytest.skip("No repo-local root.clj/root.private.clj fixture available for setup generation test")
-    temp_root = tmp_path
 
+    temp_root = tmp_path
     shutil.copy(test_root, temp_root / "root.clj")
     shutil.copy(test_private, temp_root / "root.private.clj")
-
     _copy_tree(workspace_root / "data-repo-template", temp_root / "data-repo-template")
 
     projects = [repo_root] + sorted(workspace_root.glob("python-*"))
     for src in projects:
         dest = temp_root / src.name
         _copy_tree(src, dest)
-        for filename in ("pyproject.toml", "requirements.txt", "requirements-dev.txt"):
+        for filename in (
+            "pyproject.toml",
+            "requirements.txt",
+            "requirements-dev.txt",
+            "mkdocs.yml",
+            "CONTRIBUTING.md",
+            ".codespell-ignore-words.txt",
+        ):
             target = dest / filename
             if target.exists():
                 target.unlink()
@@ -117,94 +189,31 @@ def test_setup_generates_pyproject_from_config(tmp_path: Path, monkeypatch) -> N
     finally:
         os.chdir(cwd)
 
-    for src in projects:
-        assert (temp_root / src.name / "pyproject.toml").exists()
+    generated_project = temp_root / "app-wabbit-dev"
+    generated_pyproject = _load_toml(generated_project / "pyproject.toml")
+    tool = generated_pyproject["tool"]
+    poetry = tool["poetry"]
 
-    generated_app = _load_toml(temp_root / "app-wabbit-dev" / "pyproject.toml")
-    existing_app = _load_toml(repo_root / "pyproject.toml")
+    assert poetry["repository"] == "https://github.com/wabbit-corp/wabbit-dev"
+    assert poetry["homepage"] == "https://github.com/wabbit-corp/wabbit-dev"
+    assert poetry["group"]["docs"]["dependencies"]["mkdocs"] == ">=1.6,<2.0"
+    assert poetry["group"]["docs"]["dependencies"]["mkdocs-material"] == ">=9.6,<9.7"
+    assert poetry["group"]["docs"]["dependencies"]["codespell"] == ">=2.3,<3.0"
+    assert "pytest" in poetry["group"]["dev"]["dependencies"]
+    assert "mypy" in poetry["group"]["dev"]["dependencies"]
+    assert "ruff" in poetry["group"]["dev"]["dependencies"]
+    assert "black" in poetry["group"]["dev"]["dependencies"]
 
-    assert generated_app["tool"]["poetry"]["name"] == existing_app["tool"]["poetry"]["name"]
-    assert generated_app["tool"]["poetry"]["version"] == existing_app["tool"]["poetry"]["version"]
-    assert generated_app["tool"]["poetry"]["license"] == existing_app["tool"]["poetry"]["license"]
+    assert "mypy" in tool
+    assert "ruff" in tool
+    assert "black" in tool
+    assert "pytest" in tool
 
-    gen_deps = dict(generated_app["tool"]["poetry"]["dependencies"])
-    gen_deps.pop("python", None)
-    existing_deps = dict(existing_app["tool"]["poetry"]["dependencies"])
-    existing_deps.pop("python", None)
-    assert gen_deps == existing_deps
-
-    gen_dev_deps = generated_app["tool"]["poetry"]["group"]["dev"]["dependencies"]
-    existing_dev_deps = existing_app["tool"]["poetry"]["group"]["dev"]["dependencies"]
-    assert gen_dev_deps == existing_dev_deps
-
-    assert _read_requirements(temp_root / "app-wabbit-dev" / "requirements.txt") == _read_requirements(
-        repo_root / "requirements.txt"
-    )
-    assert _read_requirements(temp_root / "app-wabbit-dev" / "requirements-dev.txt") == _read_requirements(
-        repo_root / "requirements-dev.txt"
-    )
-
-    generated_jeeves = _load_toml(temp_root / "python-jeeves" / "pyproject.toml")
-
-    expected_layers = ["interface", "service", "data"]
-    expected_test_paths = ["tests", "codi/api/tests"]
-    expected_main_sources = ["codi", "servant", "typed_json"]
-
-    assert generated_jeeves["tool"]["black"]["line-length"] == 120
-    assert generated_jeeves["tool"]["black"]["target-version"] == ["py310"]
-    assert generated_jeeves["tool"]["ruff"]["line-length"] == 120
-    assert generated_jeeves["tool"]["ruff"]["target-version"] == "py310"
-    assert generated_jeeves["tool"]["ruff"]["lint"]["select"] == ["F", "E", "W", "I", "B", "UP"]
-    assert generated_jeeves["tool"]["ruff"]["lint"]["ignore"] == ["E501"]
-
-    expected_ruff_ignores = {f"{path}/**/*.py": ["B"] for path in expected_test_paths}
-    assert _normalize_map(generated_jeeves["tool"]["ruff"]["lint"]["per-file-ignores"]) == _normalize_map(
-        expected_ruff_ignores
-    )
-    assert generated_jeeves["tool"]["pytest"]["ini_options"] == {"testpaths": expected_test_paths}
-
-    dep_names = [dep for dep in generated_jeeves["tool"]["poetry"]["dependencies"].keys() if dep != "python"]
-    auto_deptry_map = _derive_deptry_package_map(temp_root / "python-jeeves", dep_names)
-    explicit_deptry_map = {
-        "djangorestframework": "rest_framework",
-        "imbalanced-learn": "imblearn",
-        "scikit-learn": "sklearn",
-    }
-    expected_deptry_map = {**auto_deptry_map, **explicit_deptry_map}
-    assert generated_jeeves["tool"]["deptry"]["package_module_name_map"] == expected_deptry_map
-    assert generated_jeeves["tool"]["deptry"]["per_rule_ignores"] == {"DEP002": ["hypothesis"]}
-
-    assert generated_jeeves["tool"]["importlinter"]["root_packages"] == expected_main_sources
-    assert _normalize_contracts(generated_jeeves["tool"]["importlinter"]["contracts"]) == _normalize_contracts(
-        [
-            {
-                "id": "layering",
-                "name": "Layered architecture",
-                "type": "layers",
-                "layers": expected_layers,
-            }
-        ]
-    )
-
-    gen_coverage = generated_jeeves["tool"]["coverage"]
-    assert gen_coverage["report"]["fail_under"] == 80
-    assert gen_coverage["report"]["precision"] == 0
-    assert gen_coverage["report"]["show_missing"] is True
-    assert gen_coverage["report"]["skip_empty"] is True
-    assert gen_coverage["run"]["branch"] is True
-    assert gen_coverage["xml"]["output"] == "coverage.xml"
-    assert _normalize_list(gen_coverage["run"]["source"]) == _normalize_list(expected_main_sources)
-    expected_omit = sorted(
-        {
-            "tests/*",
-            ".venv/*",
-            "**/__pycache__/*",
-            "codi/api/tests/*",
-        }
-    )
-    assert _normalize_list(gen_coverage["run"]["omit"]) == _normalize_list(expected_omit)
-
-    gen_jeeves_deps = [dep for dep in generated_jeeves["tool"]["poetry"]["dependencies"].keys() if dep != "python"]
-    existing_jeeves = _load_toml(workspace_root / "python-jeeves" / "pyproject.toml")
-    existing_jeeves_dep_names = [_requirement_name(dep) for dep in existing_jeeves["project"]["dependencies"]]
-    assert _normalize_list(gen_jeeves_deps) == _normalize_list(existing_jeeves_dep_names)
+    assert (generated_project / "mkdocs.yml").is_file()
+    assert (generated_project / "docs" / "index.md").is_file()
+    assert (generated_project / "docs" / "installation.md").is_file()
+    assert (generated_project / "docs" / "development.md").is_file()
+    assert (generated_project / "CONTRIBUTING.md").is_file()
+    assert (generated_project / ".codespell-ignore-words.txt").is_file()
+    assert (generated_project / ".github" / "workflows" / "docs-quality.yml").is_file()
+    assert (generated_project / ".github" / "workflows" / "docs-deploy.yml").is_file()

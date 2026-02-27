@@ -219,14 +219,9 @@ class JvmDefaultsCommand:
 @tag("python-defaults")
 @dataclass(frozen=True)
 class PythonDefaultsCommand:
+    requires_python: str | None = None
     line_length: int | str | None = None
-    target_version: str | None = None
     coverage_fail_under: int | str | None = None
-    coverage_precision: int | str | None = None
-    coverage_branch: bool | None = None
-    coverage_show_missing: bool | None = None
-    coverage_skip_empty: bool | None = None
-    coverage_xml_output: str | None = None
 
 
 @tag("jvm-kotlin-library")
@@ -288,6 +283,18 @@ class PythonDeptryCommand:
 class PythonImportlinterCommand:
     root_packages: list[str] | None = None
     layers: list[str] | None = None
+
+
+@tag("python-application")
+@dataclass(frozen=True)
+class PythonApplicationCommand:
+    script: str
+    entry: str
+    path: str = "main.py"
+    aliases: list[str] | None = None
+
+
+PythonFeatureCommand = PythonApplicationCommand
 
 
 FeatureCommand = (
@@ -361,24 +368,11 @@ class PythonProjectCommand:
     dependencies: list[str] | None = None
     dev_dependencies: list[str] | None = None
     scripts: list[str] | None = None
-    features: list[FeatureCommand] | None = None
-    source_sets: list[object] | None = None
-    line_length: int | str | None = None
-    target_version: str | None = None
-    test_paths: list[str] | None = None
-    ruff_per_file_ignores: dict[str, list[str]] | None = None
-    deptry_package_map: dict[str, str] | None = None
-    deptry_per_rule_ignores: dict[str, list[str]] | None = None
-    importlinter_root_packages: list[str] | None = None
-    importlinter_contracts: list[dict[str, object]] | None = None
-    coverage_source: list[str] | None = None
-    coverage_omit: list[str] | None = None
-    coverage_fail_under: int | str | None = None
-    coverage_precision: int | str | None = None
-    coverage_branch: bool | None = None
-    coverage_show_missing: bool | None = None
-    coverage_skip_empty: bool | None = None
-    coverage_xml_output: str | None = None
+    features: list[PythonFeatureCommand] | None = None
+    homepage: str | None = None
+    repository: str | None = None
+    keywords: list[str] | None = None
+    classifiers: list[str] | None = None
     repo: str | None = None
     ownership: str | None = None
 
@@ -548,7 +542,9 @@ __all__ = [
     "PremakeProjectCommand",
     "PurescriptProjectCommand",
     "PythonDefaultsCommand",
+    "PythonApplicationCommand",
     "PythonDeptryCommand",
+    "PythonFeatureCommand",
     "PythonImportlinterCommand",
     "PythonProjectCommand",
     "Value",

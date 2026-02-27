@@ -166,3 +166,51 @@ def test_checks_ignore_finding_rejects_missing_args(tmp_path: Path) -> None:
             tmp_path,
             '(checks/ignore-finding "E_HARDCODED_INTERNAL_HOSTNAME_IP" "**/*.py")\n',
         )
+
+
+def test_python_application_feature_is_loaded(tmp_path: Path) -> None:
+    from dev.config import PythonProject
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                "("
+                'python "app-demo" '
+                ':version "0.1.0" '
+                ":features ["
+                '(python-application :script "demo" :entry "demo.cli:main" :path "demo/cli.py" :aliases ["d"])'
+                "]"
+                ")",
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["app-demo"]
+    assert isinstance(project, PythonProject)
+    assert project.application is not None
+    assert project.application.script == "demo"
+    assert project.application.entry == "demo.cli:main"
+    assert project.application.path == "demo/cli.py"
+    assert project.application.aliases == ["d"]
+
+
+def test_python_application_feature_conflicts_with_legacy_scripts(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        _load_from_temp_root(
+            tmp_path,
+            "\n".join(
+                [
+                    "("
+                    'python "app-demo" '
+                    ':version "0.1.0" '
+                    ':scripts ["demo=demo.cli:main"] '
+                    ":features ["
+                    '(python-application :script "demo" :entry "demo.cli:main" :path "demo/cli.py")'
+                    "]"
+                    ")",
+                    "",
+                ]
+            ),
+        )
