@@ -1,6 +1,31 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Eliminate the remaining `E_PYQA_PYRIGHT` backlog in `dev/config.py`, `dev/tasks/setup.py`, and supporting modules/tests (`cli`, `check`, `clean`, `cloc`, `setup_common`, `duplicates`, `text_quality`) while keeping strict mypy clean in parallel.
+- Add a public issue-type accessor in `dev/checks/base.py` and switch check-task validation to it, removing private `_KNOWN_TYPES` usage.
+- Expose public Python setup helper functions (`format_poetry_dependency`, `python_target_version`) and update tests to use them instead of private setup wrappers.
+- Continue strict type-check cleanup by reducing Pyright diagnostics across core modules (`dev/caching.py`, `dev/ai.py`, `dev/build_order.py`, `dev/checks/base.py`, `dev/checks/project_files.py`, `dev/jitpack.py`) and multiple utility tasks/checks (`dep_graph`, `setup_python`, `choose-jvm`, `maven`, `download`, `messages`, `llmcopy`, `file_modes`, `hardcoded`), including safer JSON-shape parsing for JitPack API responses.
+- Centralize JSON coercion helpers in `dev/json_utils.py` and reuse them in API/LLM parsing paths to reduce duplicated `_as_*` logic and keep strict typing consistent.
+- Add and enforce parallel mypy validation while fixing Pyright issues, and resolve mypy/Pyright compatibility in shared typed-config and workflow helper code.
+- Fix import-cycle reporting noise in `dev/checks/base.py` by keeping typed `Project` signatures and explicitly disabling Pyright import-cycle reporting for that module.
+- Split setup implementation by language: move Python-specific setup/rendering into `dev/tasks/setup_python.py` and Gradle/Kotlin setup into `dev/tasks/setup_kotlin.py`, with shared helpers in `dev/tasks/setup_common.py`.
+- Remove Python QA cross-repo config fallback so checks only read config files from the current repository.
+- Generate a local `pyrightconfig.json` during Python setup when missing, so pyright/basedpyright no longer rely on external defaults.
+- Improve Python QA failure diagnostics for negative return codes by reporting signal-based terminations (for example `SIGKILL`) instead of opaque numeric codes alone.
+- Move the paper-research workflow out of `app-wabbit-dev` into a dedicated `python-find-papers` project with its own CLI entrypoint (`find-papers`), and remove the in-repo `dev/tasks/researcher.py` implementation.
+- Regenerate `requirements-dev.txt` from the same universal Python QA/tooling baseline used for `pyproject.toml` (`pytest`, `mypy`, `ruff`, `black`, `coverage`, `build`, `twine`) and include `pyinstaller` automatically for `python-application` projects.
+- Switch shared cache DB usage from repo-local `.dev.cache.db` to user-scoped `~/.wabbit-dev/cache.db`, and normalize cache paths via `expanduser`/absolute resolution in the caching layer.
+- Expand the default Python gitignore template with `/tmp/`, `/tmp-*`, and `*.bak` in addition to cache/docs artifacts.
+- Move repository pytest modules from `dev/test_*.py` to `tests/test_*.py`, add a tests `conftest.py` to keep repo imports stable, and document the tests location in `AGENTS.md`.
+- Update `app-wabbit-dev` dependency declarations in `root.clj` to include required runtime libraries still used after the researcher split (`gitdb`, `packaging`, `pillow`, `pyperclip`, `dateparser`, `termcolor`, `defusedxml`, `pytest-asyncio`) and remove researcher-only dependencies from this project.
+- Add a new `python-find-papers` project declaration to workspace `root.clj` with focused research dependencies and a `python-application` entrypoint (`find_papers.cli:main`).
+- Key project selection/toposort on project directory identifiers (first argument in `root.clj`) instead of optional display/package names, keeping directory, project name, and repo URN semantics separate.
+- Make config parsing compatible with both `mu.parse(..., no_spans=...)` and newer `mu.parse(..., preserve_spans=...)` signatures so setup/check flows remain healthy across parser versions in `.venv`.
+- Make Python docs/workflow scaffolding conservative by generating only missing files (`mkdocs.yml`, docs pages, `CONTRIBUTING.md`, docs workflows) instead of rewriting existing repo-specific content.
+- Change `.codespell-ignore-words.txt` generation to merge template defaults additively, preserving project-specific words and appending only missing entries.
+- Preserve existing Python package metadata values (`description`, `authors`, `license`, `keywords`, `classifiers`) when config omits them, while still injecting universal dev/docs/check tooling blocks into regenerated `pyproject.toml`.
+- Expand the Python gitignore template baseline with `.mypy_cache/`, `.ruff_cache/`, and `site/` so regenerated Python project ignores match strict tooling and mkdocs build artifacts.
+- Add explicit `python-lang-mu` metadata (`:description`, `:authors`, `:keywords`, `:classifiers`) in workspace `root.clj` so generated packaging metadata remains fully declarative in config.
 - Skip setup-time remote repository existence validation when the GitHub API is unavailable, warning and continuing so no-token setup flows work.
 - Simplify Python project config schema by removing per-project QA/import-graph/source-set feature knobs, adding lightweight project metadata fields (`homepage`, `repository`, `keywords`, `classifiers`), and narrowing `python-defaults` to shared defaults (`requires-python`, `line-length`, `coverage-fail-under`).
 - Expand Python setup generation to always scaffold docs/deploy structure (`mkdocs.yml`, `docs/`, `CONTRIBUTING.md`, codespell ignore list, and GitHub docs quality/deploy workflows) and render opinionated QA baselines (mypy/ruff/black/pytest + docs dependencies) from template defaults.
@@ -32,9 +57,9 @@
 - Improve Python QA failure reporting for silent tool exits by surfacing the failed command when output is empty, and strip ANSI escape sequences before parsing so deptry text findings are recognized reliably.
 - Add `.checkignore` support for `dev.py check` traversal and `UniqueIdentifiersCheck`, including non-repo usage and `.checkignore`-after-`.gitignore` precedence for overrides.
 - Prevent `UniqueIdentifiersCheck` from crashing on non-UTF-8 source files by skipping known binary files and reading text with UTF-8 replacement.
-- Migrate Python QA checks from `python-jeeves/check.py` into per-tool `RepoCheck` modules under `dev/checks/` with shared parser/runtime helpers in `dev/checks/python_qa_common.py`.
+- Migrate Python QA checks into per-tool `RepoCheck` modules under `dev/checks/` with shared parser/runtime helpers in `dev/checks/python_qa_common.py`.
 - Run both pytest and unittest by default in the migrated Python QA pipeline, while preserving coverage/diff-cover prerequisite gating behavior.
-- Reuse Python QA config files with target-first precedence and fallback defaults from `/Users/wabbit/ws/datatron/python-jeeves/` for `pyproject.toml`, `mypy.ini`, and `pyrightconfig.json`.
+- Prefer target-repository Python QA config files (`pyproject.toml`, `mypy.ini`, `pyrightconfig.json`) for check execution.
 - Remove duplicate Python Black file-check reporting from `dev/checks/code_linting.py` in favor of the new repo-level Black QA check.
 - Make check execution deterministic by sorting checks by `order` then class name across repo/project/file/directory check types.
 - Return and propagate check command exit status so `python dev.py check ...` exits non-zero when error-severity findings are emitted.

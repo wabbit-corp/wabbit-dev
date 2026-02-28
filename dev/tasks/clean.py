@@ -30,24 +30,19 @@ def delete_dir(path: PathLikeStr) -> None:
     else:
 
         def handle_remove_readonly(
-            func: Callable[[str], object],
+            func: Callable[[str], None],
             failed_path: str,
-            exc: tuple[type[BaseException], BaseException, object],
+            exc: BaseException,
         ) -> None:
-            excvalue = exc[1]
             # print(func, path, exc, excvalue.errno, errno.EACCES)
-            if (
-                func in (os.rmdir, os.unlink, os.remove)
-                and isinstance(excvalue, OSError)
-                and excvalue.errno == errno.EACCES
-            ):
+            if func in (os.rmdir, os.unlink, os.remove) and isinstance(exc, OSError) and exc.errno == errno.EACCES:
                 os.chmod(failed_path, stat.S_IRWXU)
                 func(failed_path)
             else:
-                raise excvalue
+                raise exc
 
         try:
-            shutil.rmtree(target, ignore_errors=False, onerror=handle_remove_readonly)
+            shutil.rmtree(target, ignore_errors=False, onexc=handle_remove_readonly)
         except OSError:
             print(f"Please delete {target} manually")
             return

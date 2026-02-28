@@ -6,7 +6,6 @@ Final 'git_changes.py' that:
 """
 
 import difflib
-import io  # Added for BytesIO
 import logging
 import os
 import stat
@@ -14,17 +13,15 @@ import tempfile
 import unittest
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from typing import cast
 
 # is_git_dir is not directly available, using internal check logic if needed
 # Assume python 3.8+ for typing syntax if used implicitly before
 from pathlib import Path
 
-import gitdb  # Added for IStream
 from git import Blob, Diff, IndexFile, Repo, Tree
 from git.exc import GitCommandError, InvalidGitRepositoryError
 
-# IndexEntry is needed for type hints if used explicitly
-from git.index.typ import IndexEntry
 from git.objects.commit import Commit
 
 # Configure logging for debugging if needed
@@ -117,6 +114,10 @@ class FileDiff:
         # The _path_key is used internally for dictionary lookups
         self.path = self.new_path if self.new_path is not None else self.old_path
 
+    @property
+    def path_key(self) -> str | None:
+        return self._path_key
+
 
 # --- Helper Functions ---
 
@@ -158,19 +159,6 @@ def _get_blob_or_none(tree: Tree | None, path: str) -> Blob | None:
         return None
 
 
-# Safely get index entry or return None
-def _get_index_entry(index: IndexFile, path: str) -> IndexEntry | None:
-    """Safely retrieve an IndexEntry object (stage 0) from the index by path."""
-    try:
-        # Use posix path for index lookup
-        posix_path = Path(path).as_posix()
-        entry = index.entries.get((posix_path, 0))
-        return entry  # Returns IndexEntry object or None
-    except Exception as e:
-        logging.warning(f"Error accessing path '{path}' stage 0 in index: {e}")
-        return None
-
-
 # Get content and type from working tree file
 def _read_working_tree_file(repo: Repo, path: str) -> tuple[bytes | None, FileType, int | None]:
     """Reads content, classifies type, and gets mode from a working tree file."""
@@ -208,29 +196,6 @@ def _read_working_tree_file(repo: Repo, path: str) -> tuple[bytes | None, FileTy
         return None, FileType.UNKNOWN, None
 
 
-# Helper to calculate correct Git blob SHA for raw content bytes
-def _calculate_blob_sha(repo: Repo, content_bytes: bytes | None) -> str | None:
-    """Calculates the Git blob SHA for given bytes content using gitdb."""
-    if content_bytes is None:
-        # Cannot calculate SHA if content is None (e.g., symlink, directory, read error)
-        return None
-    try:
-        # Create an IStream (Input Stream) for the gitdb
-        # Blob.type is 'blob'
-        # len(content_bytes) is the size
-        # io.BytesIO(content_bytes) provides the stream interface
-        istream = gitdb.IStream(Blob.type, len(content_bytes), io.BytesIO(content_bytes))
-        # Store the stream in the object database and get the SHA
-        sha_value = repo.odb.store(istream).hexsha
-        if isinstance(sha_value, str):
-            return sha_value
-        # logging.debug(f"Calculated SHA {sha} for content: {content_bytes[:50]}...") # Debug SHA calc
-        return str(sha_value)
-    except Exception as e:
-        logging.error(f"Error calculating blob SHA for content: {e}")
-        return None
-
-
 # FIX: New helper using 'git hash-object' for WT files
 def _calculate_wt_sha_via_hash_object(repo: Repo, path: str) -> str | None:
     """Calculates WT file SHA using 'git hash-object'.
@@ -266,6 +231,34 @@ def _calculate_wt_sha_via_hash_object(repo: Repo, path: str) -> str | None:
         # Catch other potential exceptions
         logging.error(f"Unexpected error hashing {path} with hash-object: {e}")
         return None
+
+
+def _read_blob_bytes(blob: Blob | None) -> bytes | None:
+    if blob is None:
+        return None
+    try:
+        data = cast(object, blob.data_stream.read())
+    except Exception as e:
+        logging.warning(f"Error reading blob content for {blob.path}: {e}")
+        return None
+    if isinstance(data, bytes):
+        return data
+    if isinstance(data, bytearray):
+        return bytes(data)
+    return None
+
+
+def _read_object_bytes(repo: Repo, sha: str) -> bytes | None:
+    try:
+        data = cast(object, repo.odb.stream(bytes.fromhex(sha)).read())  # pyright: ignore[reportUnknownMemberType]
+    except Exception as e:
+        logging.error(f"Could not read object {sha}: {e}")
+        return None
+    if isinstance(data, bytes):
+        return data
+    if isinstance(data, bytearray):
+        return bytes(data)
+    return None
 
 
 # Generate unified diff text if applicable
@@ -373,10 +366,6 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
             logging.critical(f"Could not get empty tree! {final_e}")
             raise InvalidGitRepositoryError("Cannot determine baseline tree for comparison.") from final_e
 
-    if head_tree is None:
-        # This should theoretically not be reached due to error handling above
-        raise InvalidGitRepositoryError("Failed to determine head_tree.")
-
     # --- 1. Staged Changes (HEAD vs Index) ---
     try:
         # Diff HEAD tree against the index, detect renames (R=True)
@@ -390,8 +379,10 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
         staged_diff_list = []
 
     for diff in staged_diff_list:
-        a_blob: Blob | None = diff.a_blob  # State in HEAD
-        b_blob: Blob | None = diff.b_blob  # State in Index
+        a_blob_raw = diff.a_blob
+        b_blob_raw = diff.b_blob
+        a_blob = a_blob_raw if isinstance(a_blob_raw, Blob) else None  # State in HEAD
+        b_blob = b_blob_raw if isinstance(b_blob_raw, Blob) else None  # State in Index
         is_rename = diff.renamed_file
         is_delete = diff.deleted_file
         is_new = diff.new_file
@@ -431,8 +422,8 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
 
         # Classify content types
         # Read blob data only once here for classification
-        a_content = a_blob.data_stream.read() if a_blob else None
-        b_content = b_blob.data_stream.read() if b_blob else None
+        a_content = _read_blob_bytes(a_blob)
+        b_content = _read_blob_bytes(b_blob)
         old_type = _classify_data(a_content) if a_blob else FileType.EMPTY
         new_type = _classify_data(b_content) if b_blob else FileType.EMPTY  # Treat deleted as empty for type
 
@@ -556,7 +547,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
             # File has only unstaged changes (Index vs WT), wasn't changed HEAD vs Index
             # We need to determine the overall change type (HEAD vs WT)
             head_blob = _get_blob_or_none(head_tree, path_key)
-            head_content = head_blob.data_stream.read() if head_blob else None
+            head_content = _read_blob_bytes(head_blob)
             head_type = _classify_data(head_content)
             head_mode = head_blob.mode if head_blob else None
             head_sha = head_blob.hexsha if head_blob else None  # SHA from HEAD
@@ -637,7 +628,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
             # (e.g., if index.diff(None) reported an add for a file not in index)
             # Use _path_key for robust checking against existing diffs
             path_key_exists = any(
-                (fd._path_key == path)  # Check internal key first
+                (fd.path_key == path)  # Check internal key first
                 or (fd.new_path == path or fd.old_path == path)  # Fallback check
                 for fd in diffs_dict.values()
             )
@@ -651,7 +642,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
                     (
                         fd
                         for fd in diffs_dict.values()
-                        if fd._path_key == path or fd.new_path == path or fd.old_path == path
+                        if fd.path_key == path or fd.new_path == path or fd.old_path == path
                     ),
                     None,
                 )
@@ -698,7 +689,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
 
     # --- 4. Final Refinement (Partial Staging, Unified Diff, Final Type) ---
     final_diffs: list[FileDiff] = []
-    processed_keys = set()  # Handle potential duplicates from rename cases if logic slips
+    processed_keys: set[str] = set()  # Handle potential duplicates from rename cases if logic slips
 
     for path_key in list(diffs_dict.keys()):  # Iterate over copy of keys
         if path_key in processed_keys:
@@ -744,14 +735,11 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
             final_mode = file_diff.new_mode  # Mode from index
             # Read index blob content for diff generation
             if final_sha:
-                try:
-                    final_content = repo.odb.stream(bytes.fromhex(final_sha)).read()
-                    # Re-classify based on actual index content just to be safe
-                    final_type = _classify_data(final_content)
-                except Exception as e:
-                    logging.error(f"Could not read index blob {final_sha} for {current_path}: {e}")
-                    final_content = None
-                    final_type = FileType.UNKNOWN  # Mark as unknown if read fails
+                final_content = _read_object_bytes(repo, final_sha)
+                # Re-classify based on actual index content just to be safe
+                final_type = _classify_data(final_content)
+                if final_content is None:
+                    final_type = FileType.UNKNOWN
             else:  # e.g., staged delete
                 final_content = None
                 # If it was a staged delete, the final type is effectively gone/unknown
@@ -763,7 +751,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
         # Use old_path for HEAD comparison if available (e.g., for renames/deletes)
         head_compare_path = file_diff.old_path or current_path
         head_blob = _get_blob_or_none(head_tree, head_compare_path)
-        head_content = head_blob.data_stream.read() if head_blob else None
+        head_content = _read_blob_bytes(head_blob)
         # Use the old_type already determined in Step 1 or 2
         head_type = file_diff.old_type
         # head_mode and head_sha are already stored in file_diff.old_mode/old_content_sha
@@ -925,7 +913,7 @@ class GitTestBase(unittest.TestCase):
         try:
             # Use posix path for Git operations
             rel_path = Path(filename).as_posix()
-            self.repo.index.add([rel_path])
+            self.repo.git.add(rel_path)
             self.repo.index.write()  # Persist index changes
         except Exception as e:
             logging.error(f"Error staging {filename}: {e}")
@@ -1421,7 +1409,7 @@ class TestGatherChangesEnhanced(GitTestBase):
         f_path = self._path("temp.txt")
         f_path.write_text("Hello\n", encoding="utf-8")
         rel_path = Path("temp.txt").as_posix()
-        self.repo.index.add([rel_path])
+        self.repo.git.add(rel_path)
         self.repo.index.write()
         # Remove from index only, keep in working tree ('git rm --cached')
         self.repo.index.remove([rel_path], working_tree=False)

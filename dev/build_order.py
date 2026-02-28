@@ -45,7 +45,7 @@ def toposort_projects(projects: dict[str, Project], target_project: str | None =
             raise ValueError(f"Unknown project: {target_project}")
 
         # BFS upward from target_project in reversed edges
-        rev = defaultdict(list)
+        rev: defaultdict[str, list[str]] = defaultdict(list)
         for src, children in graph.items():
             for c in children:
                 rev[c].append(src)

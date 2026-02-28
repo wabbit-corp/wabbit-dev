@@ -59,14 +59,14 @@ class GenericProjectStructureCheck(ProjectCheck):
     """
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
-        issues = []
+        issues: list[Issue] = []
 
         readme_path = path / "README.md"
 
         if not readme_path.exists():
             issues.append(E_MISSING_README.at(path))
         else:
-            with open(readme_path) as f:
+            with open(readme_path, encoding="utf-8") as f:
                 readme_content = f.read()
 
                 if '<img src=".banner.png"/>' not in readme_content:

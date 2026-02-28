@@ -9,6 +9,7 @@ General Guidelines:
 Use .venv python venv.
 Run tests (especially relevant tests) regularly while editing.
 Always keep CHANGELOG.md up to date with meaningful entries.
+Place pytest tests under `tests/` (not `dev/`).
 
 Python coding rules:
 * Do not use casts unless absolutely necessary.

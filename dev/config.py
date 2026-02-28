@@ -6,8 +6,9 @@ from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+from inspect import signature
 from pathlib import Path
-from typing import TypeGuard, Union
+from typing import TypeGuard, Union, cast
 
 from mu.exec import Quoted
 from mu.parser import parse
@@ -62,7 +63,8 @@ class Version:
             return None
 
         major, minor, patch, is_dev = match.groups()
-        return cls(version, int(major), int(minor), int(patch), bool(is_dev))
+        raw_version = version if isinstance(version, Quoted) else None
+        return cls(raw_version, int(major), int(minor), int(patch), bool(is_dev))
 
     @classmethod
     def parse(cls, version: Quoted[StringExpr] | str) -> "Version":
@@ -110,6 +112,20 @@ class Feature:
 
     def implied(self) -> list["Feature"]:
         return []
+
+
+def _has_only_str_keys(value: dict[object, object]) -> TypeGuard[dict[str, object]]:
+    return all(isinstance(key, str) for key in value)
+
+
+def _dataclass_field_names(feature: Feature) -> list[str] | None:
+    maybe_fields = getattr(feature, "__dataclass_fields__", None)
+    if not isinstance(maybe_fields, dict):
+        return None
+    field_map = cast(dict[object, object], maybe_fields)
+    if not _has_only_str_keys(field_map):
+        return None
+    return list(field_map.keys())
 
 
 @dataclass
@@ -282,8 +298,8 @@ def _merge_feature(existing: Feature, incoming: Feature) -> Feature:
     if type(existing) is not type(incoming):
         raise TypeError(f"Cannot merge features with different types: {type(existing)} vs {type(incoming)}")
 
-    dataclass_fields = getattr(existing, "__dataclass_fields__", None)
-    if not isinstance(dataclass_fields, dict):
+    dataclass_field_names = _dataclass_field_names(existing)
+    if dataclass_field_names is None:
         if existing != incoming:
             raise ValueError(
                 f"Implied feature {type(existing).__feature_name__} conflicts: " f"{existing} != {incoming}"
@@ -291,7 +307,7 @@ def _merge_feature(existing: Feature, incoming: Feature) -> Feature:
         return existing
 
     merged_kwargs: dict[str, object] = {}
-    for field_name in dataclass_fields:
+    for field_name in dataclass_field_names:
         existing_value = getattr(existing, field_name)
         incoming_value = getattr(incoming, field_name)
         if existing_value is None and incoming_value is not None:
@@ -705,7 +721,7 @@ class PythonDefaults:
 def _coerce_jvm_version(value: int | str, field_name: str = "jvm_version") -> int:
     if isinstance(value, int):
         version = value
-    elif isinstance(value, str):
+    else:
         normalized = value.strip()
         if normalized == "1.8":
             version = 8
@@ -713,8 +729,6 @@ def _coerce_jvm_version(value: int | str, field_name: str = "jvm_version") -> in
             version = int(normalized)
         else:
             raise ValueError(f"{field_name} must be an int or numeric string (e.g. 17, '21', '1.8')")
-    else:
-        raise ValueError(f"{field_name} must be an int or numeric string, got {type(value)}")
 
     if version < 8:
         raise ValueError(f"{field_name} must be >= 8")
@@ -761,10 +775,17 @@ class Config:
 
 
 def load_config() -> Config:
+    parse_params = signature(parse).parameters
+
+    def parse_document(text: str) -> Document:
+        if "no_spans" in parse_params:
+            return parse(text, no_spans=False)
+        return parse(text)
+
     with open(CONFIG_FILE, encoding="utf-8") as f:
-        root = parse(f.read(), no_spans=False)
+        root = parse_document(f.read())
     with open(CONFIG_PRIVATE_FILE, encoding="utf-8") as f:
-        root_private = parse(f.read(), no_spans=False)
+        root_private = parse_document(f.read())
 
     config = Config(raw=root)
 
@@ -782,6 +803,11 @@ def load_config() -> Config:
 
     top_level_target = config_typed.make_top_level_target(module_command_types)
     defines: dict[str, object] = {}
+
+    def register_project(project_id: str, project: Project) -> None:
+        if project_id in config.defined_projects:
+            raise ValueError(f"Project {project_id} already exists")
+        config.defined_projects[project_id] = project
 
     def _extract_expr_span(expr: object) -> object | None:
         if isinstance(expr, (AtomExpr, StringExpr)):
@@ -806,17 +832,13 @@ def load_config() -> Config:
 
     def _resolve_maven_version(value: config_typed.Value[str]) -> str:
         if isinstance(value, config_typed.Const):
-            if isinstance(value.value, str):
-                return value.value
-            raise ValueError(f"Maven version constant must be a string, got {type(value.value)}")
-        if isinstance(value, config_typed.VarName):
-            if value.name not in defines:
-                raise ValueError(f"Undefined variable referenced in maven version: {value.name}")
-            resolved = defines[value.name]
-            if not isinstance(resolved, str):
-                raise ValueError(f"Maven version variable {value.name} must resolve to string, got {type(resolved)}")
-            return resolved
-        raise TypeError(f"Unknown maven version value: {value}")
+            return value.value
+        if value.name not in defines:
+            raise ValueError(f"Undefined variable referenced in maven version: {value.name}")
+        resolved = defines[value.name]
+        if not isinstance(resolved, str):
+            raise ValueError(f"Maven version variable {value.name} must resolve to string, got {type(resolved)}")
+        return resolved
 
     def _render_maven_coordinate(expr: config_typed.MavenCoordinateExpr) -> str:
         version_value = _resolve_maven_version(expr.version)
@@ -846,12 +868,10 @@ def load_config() -> Config:
                 per_rule_ignores=command.per_rule_ignores or {},
                 auto_package_map=command.auto_package_map,
             )
-        if isinstance(command, config_typed.PythonImportlinterCommand):
-            return PythonImportLinter(
-                root_packages=command.root_packages or [],
-                layers=command.layers or [],
-            )
-        raise TypeError(f"Unknown feature command: {type(command)}")
+        return PythonImportLinter(
+            root_packages=command.root_packages or [],
+            layers=command.layers or [],
+        )
 
     def _validate_modifier(modifier: str | None) -> str | None:
         if modifier is None:
@@ -881,16 +901,7 @@ def load_config() -> Config:
             return [dep]
 
         if isinstance(dep, list):
-            result: list[Dependency] = []
-            for item in dep:
-                if isinstance(item, Dependency):
-                    result.append(item)
-                else:
-                    raise ValueError(f"Unknown dependency type: {item}")
-            return result
-
-        if not isinstance(dep, str):
-            raise TypeError(f"Expected string, Dependency, or DepCall, got {type(dep)}")
+            return list(dep)
 
         modifier = _validate_modifier(modifier)
 
@@ -916,10 +927,8 @@ def load_config() -> Config:
                     group_result.extend(parse_gradle_dependency(lib, modifier))
                 elif isinstance(lib, list):
                     group_result.extend(parse_gradle_dependency(lib, modifier))
-                elif isinstance(lib, Dependency):
-                    group_result.extend(parse_gradle_dependency(lib, modifier))
                 else:
-                    raise ValueError(f"Unknown library-group child type: {lib}")
+                    group_result.extend(parse_gradle_dependency(lib, modifier))
             return group_result
 
         if dep in config.libraries:
@@ -1077,6 +1086,7 @@ def load_config() -> Config:
             ownership = _coerce_ownership(command.ownership)
             path = Path(f"./{command.dir_name}")
             name = command.name or command.dir_name
+            project_id = command.dir_name
             defaults = config.python_defaults
             requires_python = command.requires_python or defaults.requires_python
             legacy_scripts = command.scripts or []
@@ -1088,9 +1098,6 @@ def load_config() -> Config:
 
             application: PythonApplication | None = None
             for feature in command.features or []:
-                if not isinstance(feature, config_typed.PythonApplicationCommand):
-                    raise TypeError(f"Unsupported python feature command: {type(feature)}")
-
                 if application is not None:
                     raise ValueError(f"Python project {name} defines multiple python-application features")
 
@@ -1146,12 +1153,13 @@ def load_config() -> Config:
                 resolved_dependencies=[],
             )
             verify_project(python_project)
-            config.defined_projects[name] = python_project
+            register_project(project_id, python_project)
             return
 
         if isinstance(command, config_typed.PurescriptProjectCommand):
             ownership = _coerce_ownership(command.ownership)
             name = command.name or command.dir_name
+            project_id = command.dir_name
             purescript_project = PurescriptProject(
                 path=Path(f"./{command.dir_name}"),
                 name=name,
@@ -1166,12 +1174,13 @@ def load_config() -> Config:
                 resolved_dependencies=[],
             )
             verify_project(purescript_project)
-            config.defined_projects[name] = purescript_project
+            register_project(project_id, purescript_project)
             return
 
         if isinstance(command, config_typed.DataProjectCommand):
             ownership = _coerce_ownership(command.ownership)
             name = command.name or command.dir_name
+            project_id = command.dir_name
             data_project = DataProject(
                 path=Path(f"./{command.dir_name}"),
                 name=name,
@@ -1186,12 +1195,13 @@ def load_config() -> Config:
                 resolved_dependencies=[],
             )
             verify_project(data_project)
-            config.defined_projects[name] = data_project
+            register_project(project_id, data_project)
             return
 
         if isinstance(command, config_typed.PremakeProjectCommand):
             ownership = _coerce_ownership(command.ownership)
             name = command.name or command.dir_name
+            project_id = command.dir_name
             premake_project = PremakeProject(
                 path=Path(f"./{command.dir_name}"),
                 name=name,
@@ -1206,60 +1216,60 @@ def load_config() -> Config:
                 resolved_dependencies=[],
             )
             verify_project(premake_project)
-            config.defined_projects[name] = premake_project
+            register_project(project_id, premake_project)
             return
 
-        if isinstance(command, config_typed.GradleProjectCommand):
-            ownership = _coerce_ownership(command.ownership)
-            name = command.name or command.dir_name
-            raw_features = [_feature_from_command(item) for item in (command.features or [])]
-            resolved_features = resolve_features(raw_features)
+        ownership = _coerce_ownership(command.ownership)
+        name = command.name or command.dir_name
+        project_id = command.dir_name
+        raw_features = [_feature_from_command(item) for item in (command.features or [])]
+        resolved_features = resolve_features(raw_features)
 
-            raw_dependencies: list[str | Dependency | list[Dependency]] = []
-            resolved_dependencies: list[Dependency] = []
-            for item in command.dependencies or []:
-                if isinstance(item, str):
-                    raw_dependencies.append(item)
-                    resolved_dependencies.extend(parse_gradle_dependency(item))
-                elif isinstance(item, config_typed.DepCall):
-                    resolved = parse_gradle_dependency(item)
-                    raw_dependencies.append(resolved)
-                    resolved_dependencies.extend(resolved)
-                else:
-                    raise TypeError(f"Unknown gradle dependency value: {item}")
+        raw_dependencies: list[str | Dependency | list[Dependency]] = []
+        resolved_dependencies: list[Dependency] = []
+        for item in command.dependencies or []:
+            if isinstance(item, str):
+                raw_dependencies.append(item)
+                resolved_dependencies.extend(parse_gradle_dependency(item))
+            elif isinstance(item, config_typed.DepCall):
+                resolved = parse_gradle_dependency(item)
+                raw_dependencies.append(resolved)
+                resolved_dependencies.extend(resolved)
+            else:
+                raise TypeError(f"Unknown gradle dependency value: {item}")
 
-            maven_repositories: list[MavenRepositoryDefinition] = []
-            for dep in resolved_dependencies:
-                if isinstance(dep.target, MavenDependencyTarget) and dep.target.maven_repo:
-                    maven_repo = config.repositories[dep.target.maven_repo]
-                    if maven_repo not in maven_repositories:
-                        maven_repositories.append(maven_repo)
+        maven_repositories: list[MavenRepositoryDefinition] = []
+        for dep in resolved_dependencies:
+            if isinstance(dep.target, MavenDependencyTarget) and dep.target.maven_repo:
+                maven_repo = config.repositories[dep.target.maven_repo]
+                if maven_repo not in maven_repositories:
+                    maven_repositories.append(maven_repo)
 
-            default_group_name = config.default_maven_project_group
-            if default_group_name is None:
-                raise ValueError("default-maven-project-group must be configured for gradle projects")
+        default_group_name = config.default_maven_project_group
+        if default_group_name is None:
+            raise ValueError("default-maven-project-group must be configured for gradle projects")
 
-            gradle_project = GradleProject(
-                path=Path(f"./{command.dir_name}"),
-                group_name=default_group_name,
-                name=name,
-                version=Version.parse(command.version) if command.version else None,
-                description=command.description,
-                authors=command.authors or [],
-                quarantine=command.quarantine,
-                license=command.license,
-                publish=command.publish,
-                github_repo=command.repo,
-                raw_dependencies=raw_dependencies,
-                raw_features=raw_features,
-                resolved_maven_repositories=maven_repositories,
-                resolved_features=resolved_features,
-                resolved_dependencies=resolved_dependencies,
-                ownership=ownership,
-            )
-            verify_project(gradle_project)
-            config.defined_projects[name] = gradle_project
-            return
+        gradle_project = GradleProject(
+            path=Path(f"./{command.dir_name}"),
+            group_name=default_group_name,
+            name=name,
+            version=Version.parse(command.version) if command.version else None,
+            description=command.description,
+            authors=command.authors or [],
+            quarantine=command.quarantine,
+            license=command.license,
+            publish=command.publish,
+            github_repo=command.repo,
+            raw_dependencies=raw_dependencies,
+            raw_features=raw_features,
+            resolved_maven_repositories=maven_repositories,
+            resolved_features=resolved_features,
+            resolved_dependencies=resolved_dependencies,
+            ownership=ownership,
+        )
+        verify_project(gradle_project)
+        register_project(project_id, gradle_project)
+        return
 
         raise ValueError(f"Unknown builtin command: {type(command)}")
 

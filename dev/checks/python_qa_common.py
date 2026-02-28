@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -19,6 +20,7 @@ else:
 
 from dev.checks.base import Issue, IssueType, Severity
 from dev.config import Project, PythonProject
+from dev.json_utils import as_dict, as_list
 
 DEFAULT_EXCLUDE_CSV = ".venv,.git,__pycache__,.mypy_cache,.pytest_cache"
 
@@ -454,24 +456,36 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
-def to_int(value: str | int | None) -> int | None:
+def to_int(value: object) -> int | None:
     if value is None:
+        return None
+    if isinstance(value, bool):
         return None
     if isinstance(value, int):
         return value
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value)
+        return None
+    if not isinstance(value, str):
+        return None
     try:
         return int(value)
     except ValueError:
         return None
 
 
-def to_float(value: str | int | float | None) -> float | None:
+def to_float(value: object) -> float | None:
     if value is None:
+        return None
+    if isinstance(value, bool):
         return None
     if isinstance(value, int):
         return float(value)
     if isinstance(value, float):
         return value
+    if not isinstance(value, str):
+        return None
     try:
         return float(value)
     except ValueError:
@@ -493,17 +507,11 @@ def get_int(data: dict[str, object], key: str) -> int | None:
 
 
 def get_dict(data: dict[str, object], key: str) -> dict[str, object] | None:
-    value = data.get(key)
-    if isinstance(value, dict):
-        return value
-    return None
+    return as_dict(data.get(key))
 
 
 def get_list(data: dict[str, object], key: str) -> list[object] | None:
-    value = data.get(key)
-    if isinstance(value, list):
-        return value
-    return None
+    return as_list(data.get(key))
 
 
 def extract_json_payload(log_text: str) -> object | None:
@@ -584,10 +592,12 @@ def issue_location(
 
 def parse_ruff_issues(log_text: str) -> Sequence[RuffIssue | RuffFailure]:
     payload = extract_json_payload(log_text)
-    if isinstance(payload, list):
+    payload_items = as_list(payload)
+    if payload_items is not None:
         json_issues: list[RuffIssue | RuffFailure] = []
-        for item in payload:
-            if not isinstance(item, dict):
+        for item_raw in payload_items:
+            item = as_dict(item_raw)
+            if item is None:
                 continue
             code = get_str(item, "code") or "UNKNOWN"
             message = get_str(item, "message") or ""
@@ -745,8 +755,9 @@ def parse_mypy_issues(log_text: str) -> Sequence[MypyIssue | MypyFailure]:
     notes: list[str] = []
     if json_lines:
         issues: list[MypyIssue | MypyFailure] = []
-        for item in json_lines:
-            if not isinstance(item, dict):
+        for item_raw in json_lines:
+            item = as_dict(item_raw)
+            if item is None:
                 continue
             message = get_str(item, "message") or ""
             severity = get_str(item, "severity") or "error"
@@ -777,17 +788,20 @@ def parse_mypy_issues(log_text: str) -> Sequence[MypyIssue | MypyFailure]:
 
     payload = extract_json_payload(log_text)
     items: list[object] | None = None
-    if isinstance(payload, list):
-        items = payload
-    elif isinstance(payload, dict):
-        payload_items = get_list(payload, "errors") or get_list(payload, "results")
+    payload_list = as_list(payload)
+    if payload_list is not None:
+        items = payload_list
+    else:
+        payload_dict = as_dict(payload)
+        payload_items = None if payload_dict is None else (get_list(payload_dict, "errors") or get_list(payload_dict, "results"))
         if payload_items is not None:
             items = payload_items
 
     if items is not None:
         json_issues: list[MypyIssue | MypyFailure] = []
-        for item in items:
-            if not isinstance(item, dict):
+        for item_raw in items:
+            item = as_dict(item_raw)
+            if item is None:
                 continue
             message = get_str(item, "message") or ""
             severity = get_str(item, "severity") or "error"
@@ -841,13 +855,15 @@ def parse_mypy_issues(log_text: str) -> Sequence[MypyIssue | MypyFailure]:
 def parse_pyright_issues(log_text: str) -> Sequence[PyrightIssue | PyrightFailure]:
     payload = extract_json_payload(log_text)
     diagnostics: list[object] | None = None
-    if isinstance(payload, dict):
-        diagnostics = get_list(payload, "generalDiagnostics") or get_list(payload, "diagnostics")
+    payload_dict = as_dict(payload)
+    if payload_dict is not None:
+        diagnostics = get_list(payload_dict, "generalDiagnostics") or get_list(payload_dict, "diagnostics")
 
     if diagnostics is not None:
         json_issues: list[PyrightIssue | PyrightFailure] = []
-        for item in diagnostics:
-            if not isinstance(item, dict):
+        for item_raw in diagnostics:
+            item = as_dict(item_raw)
+            if item is None:
                 continue
             severity = get_str(item, "severity") or "error"
             message = get_str(item, "message") or ""
@@ -1093,10 +1109,12 @@ def parse_deptry_issues(log_text: str, log_path: Path | None = None) -> Sequence
                 payload = json.loads(json_output.read_text(encoding="utf-8"))
             except Exception:
                 payload = None
-    if isinstance(payload, list):
+    payload_items = as_list(payload)
+    if payload_items is not None:
         json_issues: list[DeptryIssue | DeptryFailure] = []
-        for item in payload:
-            if not isinstance(item, dict):
+        for item_raw in payload_items:
+            item = as_dict(item_raw)
+            if item is None:
                 continue
             error_block = get_dict(item, "error") or {}
             location_block = get_dict(item, "location") or {}
@@ -1163,12 +1181,14 @@ def parse_vulture_issues(log_text: str) -> Sequence[VultureIssue | VultureFailur
 
 def parse_semgrep_issues(log_text: str) -> Sequence[SemgrepIssue | SemgrepFailure]:
     payload = extract_json_payload(log_text)
-    if isinstance(payload, dict):
-        results = get_list(payload, "results")
+    payload_dict = as_dict(payload)
+    if payload_dict is not None:
+        results = get_list(payload_dict, "results")
         if results is not None:
             json_issues: list[SemgrepIssue | SemgrepFailure] = []
-            for item in results:
-                if not isinstance(item, dict):
+            for item_raw in results:
+                item = as_dict(item_raw)
+                if item is None:
                     continue
                 rule_id = get_str(item, "check_id") or "unknown"
                 path = get_str(item, "path")
@@ -1250,12 +1270,14 @@ def parse_semgrep_issues(log_text: str) -> Sequence[SemgrepIssue | SemgrepFailur
 
 def parse_bandit_issues(log_text: str) -> Sequence[BanditIssue | BanditFailure]:
     payload = extract_json_payload(log_text)
-    if isinstance(payload, dict):
-        results = get_list(payload, "results")
+    payload_dict = as_dict(payload)
+    if payload_dict is not None:
+        results = get_list(payload_dict, "results")
         if results is not None:
             json_issues: list[BanditIssue | BanditFailure] = []
-            for item in results:
-                if not isinstance(item, dict):
+            for item_raw in results:
+                item = as_dict(item_raw)
+                if item is None:
                     continue
                 test_id = get_str(item, "test_id") or "B000"
                 message = get_str(item, "issue_text") or ""
@@ -1339,18 +1361,21 @@ def parse_bandit_issues(log_text: str) -> Sequence[BanditIssue | BanditFailure]:
 
 def parse_pip_audit_issues(log_text: str) -> Sequence[PipAuditIssue | PipAuditFailure]:
     payload = extract_json_payload(log_text)
-    if isinstance(payload, dict):
-        dependencies = get_list(payload, "dependencies")
+    payload_dict = as_dict(payload)
+    if payload_dict is not None:
+        dependencies = get_list(payload_dict, "dependencies")
         if dependencies is not None:
             json_issues: list[PipAuditIssue | PipAuditFailure] = []
-            for dep in dependencies:
-                if not isinstance(dep, dict):
+            for dep_raw in dependencies:
+                dep = as_dict(dep_raw)
+                if dep is None:
                     continue
                 package = get_str(dep, "name") or "unknown"
                 installed_version = get_str(dep, "version") or ""
                 vulns = get_list(dep, "vulns") or []
-                for vuln in vulns:
-                    if not isinstance(vuln, dict):
+                for vuln_raw in vulns:
+                    vuln = as_dict(vuln_raw)
+                    if vuln is None:
                         continue
                     vulnerability_id = get_str(vuln, "id") or "unknown"
                     json_fix_versions: list[str] = []
@@ -1374,10 +1399,12 @@ def parse_pip_audit_issues(log_text: str) -> Sequence[PipAuditIssue | PipAuditFa
                     )
             return json_issues
 
-    if isinstance(payload, list):
+    payload_items = as_list(payload)
+    if payload_items is not None:
         legacy_json_issues: list[PipAuditIssue | PipAuditFailure] = []
-        for vuln in payload:
-            if not isinstance(vuln, dict):
+        for vuln_raw in payload_items:
+            vuln = as_dict(vuln_raw)
+            if vuln is None:
                 continue
             package = get_str(vuln, "name") or get_str(vuln, "package") or "unknown"
             installed_version = get_str(vuln, "version") or get_str(vuln, "installed_version") or ""
@@ -1461,18 +1488,21 @@ def parse_diff_cover_issues(
         except Exception:
             payload = None
 
-        if isinstance(payload, dict):
-            src_stats = payload.get("src_stats")
-            if isinstance(src_stats, dict):
-                for path, stats in src_stats.items():
-                    if not isinstance(path, str) or not isinstance(stats, dict):
+        payload_dict = as_dict(payload)
+        if payload_dict is not None:
+            src_stats = get_dict(payload_dict, "src_stats")
+            if src_stats is not None:
+                for path, stats_raw in src_stats.items():
+                    stats = as_dict(stats_raw)
+                    if stats is None:
                         continue
                     pct = to_float(stats.get("percent_covered"))
                     lines_raw = stats.get("violation_lines")
                     lines: list[int] = []
-                    if isinstance(lines_raw, list):
-                        for item in lines_raw:
-                            if isinstance(item, int):
+                    lines_value = as_list(lines_raw)
+                    if lines_value is not None:
+                        for item in lines_value:
+                            if isinstance(item, int) and not isinstance(item, bool):
                                 lines.append(item)
                     if lines:
                         issues.append(
@@ -1482,8 +1512,8 @@ def parse_diff_cover_issues(
                                 missing_lines=lines,
                             )
                         )
-            total_violations = to_int(payload.get("total_num_violations"))
-            total_pct = to_float(payload.get("total_percent_covered"))
+            total_violations = to_int(payload_dict.get("total_num_violations"))
+            total_pct = to_float(payload_dict.get("total_percent_covered"))
             issues.append(
                 DiffCoverSummaryIssue(
                     missing_lines=total_violations,
@@ -1804,7 +1834,15 @@ def failure_issue(label: str, log_text: str, rc: int | None = None) -> ParsedIss
 def summarize_failure_message(label: str, log_text: str, rc: int | None = None) -> str:
     base = f"{label} failed"
     if rc is not None:
-        base = f"{base} (exit code {rc})"
+        if rc < 0:
+            sig = -rc
+            try:
+                sig_name = signal.Signals(sig).name
+                base = f"{base} (terminated by signal {sig} [{sig_name}])"
+            except ValueError:
+                base = f"{base} (terminated by signal {sig})"
+        else:
+            base = f"{base} (exit code {rc})"
     cleaned_text = strip_ansi_escape_sequences(log_text)
     lines = [line.strip() for line in cleaned_text.splitlines() if line.strip()]
     if not lines:
@@ -1849,7 +1887,7 @@ def summarize_failure_message(label: str, log_text: str, rc: int | None = None) 
 
 
 def _sanitize_label(label: str) -> str:
-    sanitized = []
+    sanitized: list[str] = []
     for char in label:
         if char in " /":
             sanitized.append("_")
@@ -2120,22 +2158,6 @@ def _resolve_existing(path: Path) -> Path | None:
     return None
 
 
-def _resolve_existing_dir(path: Path) -> Path | None:
-    if path.is_dir():
-        return path
-    return None
-
-
-def _resolve_target_first(repo_root: Path, filename: str, fallback: Path | None) -> Path | None:
-    target = repo_root / filename
-    resolved_target = _resolve_existing(target)
-    if resolved_target is not None:
-        return resolved_target
-    if fallback is None:
-        return None
-    return _resolve_existing(fallback)
-
-
 def _parse_csv_items(value: str | None) -> list[str]:
     if value is None:
         return []
@@ -2175,38 +2197,6 @@ def _read_simple_checkignore_paths(repo_root: Path) -> list[str]:
     return paths
 
 
-def _resolve_default_config_file(
-    env: dict[str, str],
-    explicit_env_key: str,
-    defaults_root: Path | None,
-    filename: str,
-) -> Path | None:
-    explicit = env.get(explicit_env_key)
-    if explicit:
-        return _resolve_existing(Path(explicit).expanduser())
-    if defaults_root is not None:
-        return _resolve_existing(defaults_root / filename)
-    return None
-
-
-def _discover_defaults_root(repo_root: Path) -> Path | None:
-    workspace_root = repo_root.parent
-    try:
-        candidates = sorted(workspace_root.iterdir())
-    except OSError:
-        return None
-
-    for candidate in candidates:
-        if not candidate.is_dir() or candidate == repo_root:
-            continue
-        has_pyproject = (candidate / "pyproject.toml").is_file()
-        has_mypy = (candidate / "mypy.ini").is_file()
-        has_pyright = (candidate / "pyrightconfig.json").is_file()
-        if has_pyproject and has_mypy and has_pyright:
-            return candidate
-    return None
-
-
 def _read_coverage_fail_under_from_pyproject(pyproject_path: Path | None) -> int | None:
     if pyproject_path is None:
         return None
@@ -2217,14 +2207,17 @@ def _read_coverage_fail_under_from_pyproject(pyproject_path: Path | None) -> int
     except Exception:
         return None
 
-    tool = data.get("tool")
-    if not isinstance(tool, dict):
+    data_dict = as_dict(data)
+    if data_dict is None:
         return None
-    coverage = tool.get("coverage")
-    if not isinstance(coverage, dict):
+    tool = as_dict(data_dict.get("tool"))
+    if tool is None:
         return None
-    report = coverage.get("report")
-    if not isinstance(report, dict):
+    coverage = as_dict(tool.get("coverage"))
+    if coverage is None:
+        return None
+    report = as_dict(coverage.get("report"))
+    if report is None:
         return None
     value = report.get("fail_under")
     if isinstance(value, int):
@@ -2247,14 +2240,17 @@ def _has_import_linter_contracts(pyproject_path: Path | None) -> bool:
     except Exception:
         return False
 
-    tool = data.get("tool")
-    if not isinstance(tool, dict):
+    data_dict = as_dict(data)
+    if data_dict is None:
         return False
-    importlinter = tool.get("importlinter")
-    if not isinstance(importlinter, dict):
+    tool = as_dict(data_dict.get("tool"))
+    if tool is None:
         return False
-    contracts = importlinter.get("contracts")
-    return isinstance(contracts, list) and len(contracts) > 0
+    importlinter = as_dict(tool.get("importlinter"))
+    if importlinter is None:
+        return False
+    contracts = as_list(importlinter.get("contracts"))
+    return contracts is not None and len(contracts) > 0
 
 
 def _new_state(repo_root: Path) -> PythonQaRepoState:
@@ -2262,43 +2258,9 @@ def _new_state(repo_root: Path) -> PythonQaRepoState:
     venv = repo_root / ".venv"
     python = venv / "bin" / "python"
     bin_dir = venv / "bin"
-    defaults_root = (
-        _resolve_existing_dir(Path(env["PYTHON_QA_DEFAULTS_ROOT"]).expanduser())
-        if env.get("PYTHON_QA_DEFAULTS_ROOT")
-        else None
-    )
-    if defaults_root is None:
-        defaults_root = _discover_defaults_root(repo_root)
-    pyproject_fallback = _resolve_default_config_file(
-        env,
-        "PYTHON_QA_DEFAULT_PYPROJECT",
-        defaults_root,
-        "pyproject.toml",
-    )
-    mypy_fallback = _resolve_default_config_file(
-        env,
-        "PYTHON_QA_DEFAULT_MYPY",
-        defaults_root,
-        "mypy.ini",
-    )
-    pyright_fallback = _resolve_default_config_file(
-        env,
-        "PYTHON_QA_DEFAULT_PYRIGHT",
-        defaults_root,
-        "pyrightconfig.json",
-    )
-
-    pyproject_config = _resolve_target_first(
-        repo_root,
-        "pyproject.toml",
-        pyproject_fallback,
-    )
-    mypy_config = _resolve_target_first(repo_root, "mypy.ini", mypy_fallback)
-    pyright_config = _resolve_target_first(
-        repo_root,
-        "pyrightconfig.json",
-        pyright_fallback,
-    )
+    pyproject_config = _resolve_existing(repo_root / "pyproject.toml")
+    mypy_config = _resolve_existing(repo_root / "mypy.ini")
+    pyright_config = _resolve_existing(repo_root / "pyrightconfig.json")
 
     fail_under = env_int("COVERAGE_FAIL_UNDER", -1)
     if fail_under < 0:

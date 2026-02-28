@@ -135,6 +135,45 @@ def write_text_file(path: Path, content: str) -> None:
             f.write(content_bytes)
 
 
+def write_text_file_if_missing(path: Path, content: str) -> bool:
+    assert isinstance(path, Path), f"Expected Path, got {type(path)}"
+    if path.exists():
+        return False
+    write_text_file(path, content)
+    return True
+
+
+def merge_word_list_file(path: Path, words: list[str]) -> bool:
+    assert isinstance(path, Path), f"Expected Path, got {type(path)}"
+
+    normalized_words = [word.strip() for word in words if word.strip() and not word.strip().startswith("#")]
+    if not normalized_words:
+        return False
+
+    if not path.exists():
+        content = "\n".join(normalized_words) + "\n"
+        write_text_file(path, content)
+        return True
+
+    old_content = path.read_text(encoding="utf-8")
+    old_lines = old_content.splitlines()
+    existing_words = {line.strip() for line in old_lines if line.strip() and not line.strip().startswith("#")}
+
+    added_words: list[str] = []
+    for word in normalized_words:
+        if word not in existing_words:
+            existing_words.add(word)
+            added_words.append(word)
+
+    if not added_words:
+        return False
+
+    merged_lines = list(old_lines) + added_words
+    merged_content = "\n".join(merged_lines).rstrip("\n") + "\n"
+    write_text_file(path, merged_content)
+    return True
+
+
 def walk_files(path: Path, predicate: Callable[[Path], bool] | None = None) -> Generator[Path, None, None]:
     assert isinstance(path, Path), f"Expected Path, got {type(path)}"
     if predicate is not None and not predicate(path):

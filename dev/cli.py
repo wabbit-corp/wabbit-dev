@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import TracebackType
 
@@ -11,14 +12,14 @@ from types import TracebackType
 ##################################################################################################
 
 type ArgParser = argparse.ArgumentParser
-type SubParser = argparse._SubParsersAction[argparse.ArgumentParser]
+type AddParser = Callable[[str], ArgParser]
 
 
 class Commands:
     def __init__(self, parser: ArgParser) -> None:
         self.root_parser = parser
         self.parsers: dict[str, ArgParser] = {}
-        self.subparsers: dict[str, SubParser] = {}
+        self.subparsers: dict[str, AddParser] = {}
 
     class Command:
         def __init__(self, commands: "Commands", name: str) -> None:
@@ -35,15 +36,17 @@ class Commands:
                 parsers[""] = commands.root_parser
 
             if "" not in subparsers:
-                subparsers[""] = commands.root_parser.add_subparsers(dest="command")
+                root_subparsers = commands.root_parser.add_subparsers(dest="command")
+                subparsers[""] = root_subparsers.add_parser
 
             for i in range(1, len(path) + 1):
                 p = "/".join(path[:i])
                 p0 = "/".join(path[: i - 1])
                 if p not in parsers:
-                    parsers[p] = subparsers[p0].add_parser(path[i - 1])
+                    parsers[p] = subparsers[p0](path[i - 1])
                 if p not in subparsers and i != len(path):
-                    subparsers[p] = parsers[p].add_subparsers(dest=subcommand(i))
+                    child_subparsers = parsers[p].add_subparsers(dest=subcommand(i))
+                    subparsers[p] = child_subparsers.add_parser
 
             self.parser = parsers[name]
 

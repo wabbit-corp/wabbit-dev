@@ -8,8 +8,9 @@ from pathlib import Path
 
 import openai
 
-from dev.caching import cache
+from dev.caching import DEFAULT_CACHE_DB_PATH, cache
 from dev.io import read_ignore_file, read_text_file, walk_files
+from dev.json_utils import as_dict, as_list
 
 # Keep this prompt aligned with AGENTS.md > Commit Message Policy.
 SUGGEST_COMMIT_PROMPT = textwrap.dedent("""
@@ -110,9 +111,10 @@ def suggest_commit_name(modified: str, /, api_key: str) -> str:
     if message_content is None:
         return ensure_semver_impact_line("Unknown")
 
-    obj = json.loads(message_content)
-    if isinstance(obj, dict):
-        full_commit_message = obj.get("full_commit_message")
+    payload = json.loads(message_content)
+    payload_obj = as_dict(payload)
+    if payload_obj is not None:
+        full_commit_message: object | None = payload_obj.get("full_commit_message")
         if isinstance(full_commit_message, str):
             return ensure_semver_impact_line(full_commit_message)
     return ensure_semver_impact_line("Unknown")
@@ -199,11 +201,20 @@ def suggest_version_number(commits: list[str], last_version: str, /, api_key: st
 
     message_content = response.choices[0].message.content
     assert message_content is not None, "Response content is missing"
-    obj = json.loads(message_content)
-    assert isinstance(obj, dict), "Response is not a JSON object"
-    assert "version" in obj, "Version number is missing"
-    assert "rationale" in obj, "Rationale is missing"
-    assert "commit_rationales" in obj, "Commit rationales are missing"
+    payload = json.loads(message_content)
+    payload_obj = as_dict(payload)
+    assert payload_obj is not None, "Response is not a JSON object"
+    version: object | None = payload_obj.get("version")
+    rationale: object | None = payload_obj.get("rationale")
+    commit_rationales_raw: object | None = payload_obj.get("commit_rationales")
+    assert isinstance(version, str), "Version number is missing or invalid"
+    assert isinstance(rationale, str), "Rationale is missing or invalid"
+    commit_rationales_raw_list = as_list(commit_rationales_raw)
+    assert commit_rationales_raw_list is not None, "Commit rationales are missing or invalid"
+    commit_rationales: list[str] = []
+    for item in commit_rationales_raw_list:
+        assert isinstance(item, str), "Commit rationales must be a list of strings"
+        commit_rationales.append(item)
 
     os.makedirs(".llm/logs/suggest_version_number", exist_ok=True)
     with open(f".llm/logs/suggest_version_number/{key}.json", "w") as f:
@@ -218,11 +229,11 @@ def suggest_version_number(commits: list[str], last_version: str, /, api_key: st
             indent=2,
         )
 
-    return obj["version"], obj["rationale"], obj["commit_rationales"]
+    return version, rationale, commit_rationales
 
 
-suggest_commit_name = cache(path=".dev.cache.db", ttl=7 * 24 * 3600)(suggest_commit_name)
-suggest_version_number = cache(path=".dev.cache.db", ttl=7 * 24 * 3600)(suggest_version_number)
+suggest_commit_name = cache(path=DEFAULT_CACHE_DB_PATH, ttl=7 * 24 * 3600)(suggest_commit_name)
+suggest_version_number = cache(path=DEFAULT_CACHE_DB_PATH, ttl=7 * 24 * 3600)(suggest_version_number)
 
 
 # SUMMARIZE_BUILD_LOG = textwrap.dedent(
@@ -361,7 +372,7 @@ def agent_call(
                 "gradle.properties",
             ],
         )
-        files = []
+        files: list[str] = []
         for path in walk_files(root, predicate=lambda t: not ignore(t)):
             files.append(path.relative_to(root).as_posix())
         return files

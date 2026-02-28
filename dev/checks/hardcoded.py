@@ -400,7 +400,7 @@ class HardcodedUrlCheck(FileCheck):
         allowed_domains: set[str] | None = None,
     ):
         self.url_regex = url_regex
-        self.allowed_domains = allowed_domains if allowed_domains else set()
+        self.allowed_domains: set[str] = set(allowed_domains or ())
         # Add common public/documentation domains that are usually fine to hardcode
         self.allowed_domains.update(
             {

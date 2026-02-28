@@ -1,3 +1,5 @@
+# pyright: reportImportCycles=false
+
 from __future__ import annotations
 
 import abc
@@ -51,7 +53,11 @@ class Severity(enum.Enum):
     CRITICAL = "critical"
 
 
-_KNOWN_TYPES = set()
+_KNOWN_TYPES: set[str] = set()
+
+
+def known_issue_types() -> frozenset[str]:
+    return frozenset(_KNOWN_TYPES)
 
 
 @dataclass(frozen=True)
@@ -66,8 +72,6 @@ class IssueType:
 
     def __post_init__(self) -> None:
         # Verify that the ID is a valid IssueType Id
-        if not isinstance(self.id, str):
-            raise ValueError(f"Invalid ID: {self.id}")
         if not self.id.startswith("E_"):
             raise ValueError(f"IssueType ID must start with 'E_': {self.id}")
         # Error ids must be [A-Z0-9_]

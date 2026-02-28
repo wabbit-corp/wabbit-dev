@@ -1,3 +1,5 @@
+# pyright: reportUnknownMemberType=false
+
 from dataclasses import dataclass
 
 from graphviz import Digraph

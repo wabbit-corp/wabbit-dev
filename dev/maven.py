@@ -3,7 +3,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from dev.caching import cache
+from dev.caching import DEFAULT_CACHE_DB_PATH, cache
 
 ##################################################################################################
 # Maven Coordinates
@@ -104,8 +104,6 @@ class MavenVersionCoordinate:
                 return str(self.version)
             case VersionAxis.MILESTONE:
                 return f"M{self.version}"
-            case _:
-                raise AssertionError(f"Unknown version axis: {self.axis}")
 
     def num_repr(self) -> tuple[int, int | str]:
         match self.axis:
@@ -127,8 +125,6 @@ class MavenVersionCoordinate:
                 return (7, self.version)
             case VersionAxis.UNKNOWN:
                 return (99, self.version)
-            case _:
-                raise AssertionError(f"Unknown version axis: {self.axis}")
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, MavenVersionCoordinate):
@@ -164,7 +160,7 @@ class MavenVersion:
 
     @classmethod
     def parse(cls, version_str: str) -> "MavenVersion":
-        components = []
+        components: list[MavenVersionCoordinate] = []
 
         split_re = re.compile(r"[\._-]")
 
@@ -275,9 +271,7 @@ def _fetch_raw_metadata_impl(repo_base_url: str, group_id: str, artifact_id: str
     url = f"{repo_base_url}{group_id.replace('.', '/')}/{artifact_id}/maven-metadata.xml"
     response = requests.get(url)
     response.raise_for_status()
-    text = response.text
-    if not isinstance(text, str):
-        raise TypeError(f"Expected str response text, got {type(text)}")
+    text: str = response.text
     return text
 
 
@@ -286,5 +280,5 @@ def _fetch_metadata_impl(repo_base_url: str, group_id: str, artifact_id: str) ->
     return MavenMetadata.parse(response)
 
 
-fetch_raw_metadata: Callable[[str, str, str], str] = cache(path=".dev.cache.db")(_fetch_raw_metadata_impl)
-fetch_metadata: Callable[[str, str, str], MavenMetadata] = cache(path=".dev.cache.db")(_fetch_metadata_impl)
+fetch_raw_metadata: Callable[[str, str, str], str] = cache(path=DEFAULT_CACHE_DB_PATH)(_fetch_raw_metadata_impl)
+fetch_metadata: Callable[[str, str, str], MavenMetadata] = cache(path=DEFAULT_CACHE_DB_PATH)(_fetch_metadata_impl)

@@ -42,21 +42,22 @@ def _decode_symbol_atom(expr: Expr, _ctx: DecodeContext) -> str:
             got=type(expr).__name__,
             span=getattr(expr, "span", None),
         )
-    if not isinstance(expr.value, str):
-        raise DecodeError(
-            path=_ctx.path,
-            expected="symbol atom",
-            got=type(expr.value).__name__,
-            span=getattr(expr, "span", None),
-        )
-    return expr.value
+    value_obj: object = expr.value
+    if isinstance(value_obj, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+        return value_obj
+    raise DecodeError(
+        path=_ctx.path,
+        expected="symbol atom",
+        got=type(value_obj).__name__,
+        span=getattr(expr, "span", None),
+    )
 
 
 def _decode_issue_name_or_star(expr: Expr, ctx: DecodeContext) -> str:
     if isinstance(expr, StringExpr):
-        value = expr.value
+        value_obj: object = expr.value
     elif isinstance(expr, AtomExpr):
-        value = expr.value
+        value_obj = expr.value
     else:
         raise DecodeError(
             path=ctx.path,
@@ -64,14 +65,14 @@ def _decode_issue_name_or_star(expr: Expr, ctx: DecodeContext) -> str:
             got=type(expr).__name__,
             span=getattr(expr, "span", None),
         )
-    if not isinstance(value, str):
+    if not isinstance(value_obj, str):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise DecodeError(
             path=ctx.path,
             expected="issue id string (E_...) or *",
-            got=type(value).__name__,
+            got=type(value_obj).__name__,
             span=getattr(expr, "span", None),
         )
-
+    value = value_obj
     if value == "*" or re.fullmatch(r"E_[A-Z0-9_]+", value):
         return value
 

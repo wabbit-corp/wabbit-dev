@@ -102,6 +102,8 @@ def cloc(
             case PythonProject():
                 # Count entire project
                 combined_stats[proj.name] = _run_cloc(proj_path)
+            case _:
+                warning(f"Unsupported project type for cloc: {type(proj).__name__}")
 
     # Print results
     for proj_name, stats in combined_stats.items():

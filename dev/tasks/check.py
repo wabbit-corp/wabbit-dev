@@ -23,6 +23,7 @@ from dev.checks.base import (
     ScopedFindingIgnoreRule,
     ScopedReadSuppressions,
     Severity,
+    known_issue_types,
 )
 from dev.config import Project, load_config
 from dev.messages import error, info, warning
@@ -83,12 +84,7 @@ def check_main(
 
     # Gather checks
     from dev.checks.base import (
-        _KNOWN_TYPES,
         Check,
-        DirectoryCheck,
-        FileCheck,
-        ProjectCheck,
-        RepoCheck,
     )
 
     all_checks: dict[str, Check] = {}
@@ -132,17 +128,18 @@ def check_main(
 
     disabled_checks: dict[str, pathspec.PathSpec] = {}
     ignored_findings: list[tuple[str, pathspec.PathSpec, str]] = []
+    known_types = known_issue_types()
     if config is not None:
         patterns_by_error_name: dict[str, list[str]] = {}
         for error_name, pattern in config.disabled_checks:
             assert isinstance(error_name, str), f"Expected string, got {type(error_name)}"
             assert isinstance(pattern, str), f"Expected string, got {type(pattern)}"
             assert (
-                error_name in _KNOWN_TYPES or error_name == "*"
+                error_name in known_types or error_name == "*"
             ), f"Unknown error type in disabled_checks: {repr(error_name)}"
 
             if error_name == "*":
-                for known_error in _KNOWN_TYPES:
+                for known_error in known_types:
                     if known_error not in patterns_by_error_name:
                         patterns_by_error_name[known_error] = []
                     patterns_by_error_name[known_error].append(pattern)
@@ -161,7 +158,7 @@ def check_main(
             assert isinstance(pattern, str), f"Expected string, got {type(pattern)}"
             assert isinstance(value, str), f"Expected string, got {type(value)}"
             assert (
-                error_name in _KNOWN_TYPES or error_name == "*"
+                error_name in known_types or error_name == "*"
             ), f"Unknown error type in ignored_findings: {repr(error_name)}"
             ignored_findings.append(
                 (

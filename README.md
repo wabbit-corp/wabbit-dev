@@ -26,7 +26,7 @@ under `dev/tasks`, for example:
 * `commit` and `push` – Git helper commands
 * `setup` – initialise a new repository using templates
 
-Tests for various modules are located in `dev/test_*.py`.
+Tests for various modules are located in `tests/test_*.py`.
 
 ## 🚀 Installation
 

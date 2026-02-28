@@ -10,15 +10,20 @@ T = TypeVar("T")
 try:
     from termcolor import colored
 
-    CHECKMARK = "[" + colored("✓", "green") + "]"
-    CROSSMARK = "[" + colored("✗", "red") + "]"
-    QUESTIONMARK = "[" + colored("?", "yellow") + "]"
-    INFOMARK = "[" + colored("i", "blue") + "]"
+    _checkmark = "[" + colored("✓", "green") + "]"
+    _crossmark = "[" + colored("✗", "red") + "]"
+    _questionmark = "[" + colored("?", "yellow") + "]"
+    _infomark = "[" + colored("i", "blue") + "]"
 except ImportError:
-    CHECKMARK = "[✓]"
-    CROSSMARK = "[✗]"
-    QUESTIONMARK = "[?]"
-    INFOMARK = "[i]"
+    _checkmark = "[✓]"
+    _crossmark = "[✗]"
+    _questionmark = "[?]"
+    _infomark = "[i]"
+
+CHECKMARK = _checkmark
+CROSSMARK = _crossmark
+QUESTIONMARK = _questionmark
+INFOMARK = _infomark
 
 
 def _message(prefix: str, raw_prefix: str, *args: object) -> None:

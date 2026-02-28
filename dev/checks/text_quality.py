@@ -265,9 +265,8 @@ class TextQualityCheck(FileCheck):
         if ctx.path.is_symlink():
             return
 
-        if ctx is not None:
-            if ctx.file_scope == CoarseFileScope.BUILD_TEMP:
-                return
+        if ctx.file_scope == CoarseFileScope.BUILD_TEMP:
+            return
 
         if not ctx.expected_properties.is_text:
             return
@@ -360,7 +359,7 @@ class TextQualityCheck(FileCheck):
                     # Often conflict markers break other checks, maybe continue to next line?
 
                 # Check for Long Lines (only for code files)
-                if ctx.expected_properties.is_code and not (ctx and ctx.project_type == CoarseProjectType.DATA):
+                if ctx.expected_properties.is_code and ctx.project_type != CoarseProjectType.DATA:
                     # Note: len() works on Unicode characters, not bytes. This is usually what's desired.
                     if len(line) > MAX_CODE_LINE_LENGTH:
                         ctx.add_issue(
@@ -393,8 +392,8 @@ class TextQualityCheck(FileCheck):
                     )
 
                 # Character-level checks within the line
-                control_chars = set()
-                invisible_chars = set()
+                control_chars: set[str] = set()
+                invisible_chars: set[str] = set()
                 for char in line:
                     category = unicodedata.category(char)  # Get Unicode category (e.g., 'Lu', 'Ll', 'Cc', 'Cf', 'Zs')
 

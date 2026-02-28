@@ -14,19 +14,15 @@ class IntRangeSet:
         Initializes an IntRangeSet from a list of integers or (start, end) tuples.
         The ranges are automatically sorted, merged, and validated.
         """
-        processed_ranges = []
+        processed_ranges: list[tuple[int, int]] = []
         for value in values:
             if isinstance(value, int):
                 processed_ranges.append((value, value))
-            elif isinstance(value, tuple) and len(value) == 2:
+            else:
                 start, end = value
-                if not isinstance(start, int) or not isinstance(end, int):
-                    raise TypeError(f"Range endpoints must be integers: {value}")
                 if start > end:
                     raise ValueError(f"Invalid range: start ({start}) cannot be greater than end ({end}) in {value}")
                 processed_ranges.append(value)
-            else:
-                raise TypeError(f"Invalid value type: {value}. Must be int or tuple[int, int].")
 
         # Sort ranges primarily by start, secondarily by end for merging logic
         processed_ranges.sort()
@@ -93,13 +89,13 @@ class IntRangeSet:
         new_set.ranges = merged_ranges  # Directly assign the calculated ranges
         return new_set
 
-    def __add__(self, other: "IntRangeSet") -> "IntRangeSet":
+    def __add__(self, other: object) -> "IntRangeSet":
         """
         Returns a new IntRangeSet that is the union of this and another IntRangeSet.
         Overloads the '+' operator.
         """
         if not isinstance(other, IntRangeSet):
-            return NotImplemented
+            raise TypeError("Can only add IntRangeSet to IntRangeSet")
         return self.union(other)  # Calls the corrected union method
 
     def intersection(self, other: "IntRangeSet") -> "IntRangeSet":
@@ -126,9 +122,9 @@ class IntRangeSet:
         new_set.ranges = result
         return new_set
 
-    def __and__(self, other: "IntRangeSet") -> "IntRangeSet":
+    def __and__(self, other: object) -> "IntRangeSet":
         if not isinstance(other, IntRangeSet):
-            return NotImplemented
+            raise TypeError("Can only intersect IntRangeSet with IntRangeSet")
         return self.intersection(other)
 
     def __contains__(self, value: object) -> bool:
@@ -158,7 +154,7 @@ class IntRangeSet:
     def __repr__(self) -> str:
         """Returns a developer-friendly string representation of the IntRangeSet."""
         # Create a more canonical representation usable with __init__
-        range_strs = []
+        range_strs: list[str] = []
         for s, e in self.ranges:
             if s == e:
                 range_strs.append(str(s))
@@ -169,7 +165,7 @@ class IntRangeSet:
     def __str__(self) -> str:
         """Returns a user-friendly string representation."""
         # Could be simplified, e.g., "{1-3, 5, 7-9}"
-        range_strs = []
+        range_strs: list[str] = []
         for s, e in self.ranges:
             if s == e:
                 range_strs.append(str(s))

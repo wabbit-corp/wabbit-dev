@@ -135,7 +135,7 @@ def find_and_process_files(root_dir: str, fix_files: bool = False) -> tuple[list
     Walks the directory tree, finds suspicious files, and optionally fixes them.
     Returns a list of files that were identified as suspicious.
     """
-    suspicious_files_found = []
+    suspicious_files_found: list[str] = []
     fixed_count = 0
     error_count = 0
 

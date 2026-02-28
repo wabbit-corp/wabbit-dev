@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import datetime
 
 import dateparser
 import requests
@@ -26,7 +27,7 @@ def save_uri(uri: str, path: str) -> None:
                     old_etag = fin.read().strip()
                 print(f"Old ETag: {old_etag}")
 
-        head_mtime = None
+        head_mtime: float | None = None
         head_etag = None
         head_status = None
 
@@ -39,11 +40,12 @@ def save_uri(uri: str, path: str) -> None:
             head_status = response.status_code
 
             # Parse Last-Modified if it exists
-            head_mtime = response.headers.get("Last-Modified", None)
-            if head_mtime is not None:
-                head_mtime = dateparser.parse(head_mtime)
-                head_mtime = time.mktime(head_mtime.timetuple())
-                print(f"Last modification time: {head_mtime}")
+            head_mtime_raw = response.headers.get("Last-Modified", None)
+            if head_mtime_raw is not None:
+                parsed_head_mtime = dateparser.parse(head_mtime_raw)
+                if isinstance(parsed_head_mtime, datetime):
+                    head_mtime = time.mktime(parsed_head_mtime.timetuple())
+                    print(f"Last modification time: {head_mtime}")
 
             head_etag = response.headers.get("ETag", None)
             if head_etag is not None:
@@ -79,11 +81,13 @@ def save_uri(uri: str, path: str) -> None:
     with open(path, "w+") as fout:
         fout.write(response.text)
 
+    last_modified: float | None = None
     try:
-        last_modified = response.headers.get("Last-Modified", None)
-        if last_modified is not None:
-            last_modified = dateparser.parse(last_modified)
-            last_modified = time.mktime(last_modified.timetuple())
+        last_modified_raw = response.headers.get("Last-Modified", None)
+        if last_modified_raw is not None:
+            parsed_last_modified = dateparser.parse(last_modified_raw)
+            if isinstance(parsed_last_modified, datetime):
+                last_modified = time.mktime(parsed_last_modified.timetuple())
     except Exception as e:
         print(e)
         print("Could not get last-modified date.")

@@ -2,17 +2,19 @@ import asyncio
 import atexit
 import inspect
 import logging
-import os
 import pickle
 import sqlite3
 import threading
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from functools import wraps
 from hashlib import sha256
+from pathlib import Path
 from typing import ParamSpec, Protocol, TypeVar, cast
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_CACHE_DB_PATH = "~/.wabbit-dev/cache.db"
 
 
 # --- Sentinel for Conditional Caching ---
@@ -31,6 +33,15 @@ _thread_local_storage = threading.local()
 _global_cashier_registry: dict[str, "Cashier"] = {}  # Map path -> Cashier instance
 _registry_lock = threading.Lock()
 _cleanup_registered = False
+
+
+def _normalize_cache_path(path: str) -> str:
+    if path == ":memory:":
+        return path
+    expanded = Path(path).expanduser()
+    if not expanded.is_absolute():
+        expanded = Path.cwd() / expanded
+    return str(expanded.resolve())
 
 
 class Cashier:
@@ -86,8 +97,9 @@ class Cashier:
         self._lock = threading.RLock()  # RLock for re-entrancy if needed
 
         try:
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            if self.path != ":memory:":
+                path_parent = Path(self.path).parent
+                path_parent.mkdir(parents=True, exist_ok=True)
             # Single connection for the entire instance, check_same_thread=False needed for multi-thread access via factory
             self._conn = sqlite3.connect(self.path, timeout=60, check_same_thread=False)
             # Use WAL mode for better concurrency
@@ -268,7 +280,7 @@ def get_cashier_instance(path: str) -> Cashier:
     Creates one instance per path for the entire application.
     """
     global _cleanup_registered
-    abs_path = os.path.abspath(path)
+    abs_path = _normalize_cache_path(path)
 
     with _registry_lock:
         if abs_path not in _global_cashier_registry:
@@ -462,9 +474,10 @@ def cache(
                 if is_async:
                     # Need to return awaitable for async function
                     async def passthrough_async() -> object:
-                        async_result = fn(*args, **kwargs)
-                        if isinstance(async_result, Awaitable):
-                            return await async_result
+                        async_result_obj = fn(*args, **kwargs)
+                        if inspect.isawaitable(async_result_obj):
+                            awaited_result: object = await async_result_obj
+                            return awaited_result
                         raise TypeError(f"Expected awaitable from async function {fqn}")
 
                     return cast(R, passthrough_async())
@@ -577,10 +590,10 @@ def cache(
                 async def async_executor() -> object:
                     try:
                         # Await the original async function
-                        async_result = fn(*args, **kwargs)
-                        if not isinstance(async_result, Awaitable):
+                        async_result_obj = fn(*args, **kwargs)
+                        if not inspect.isawaitable(async_result_obj):
                             raise TypeError(f"Expected awaitable from async function {fqn}")
-                        result = await async_result
+                        result: object = await async_result_obj
                     except Exception as e:
                         logger.error(
                             "Original async function execution failed for key=%s (fqn=%s): %s",

@@ -25,6 +25,16 @@ from enum import Enum
 import aiohttp
 from aiohttp import ClientResponse, ClientSession
 
+from dev.json_utils import (
+    as_bool,
+    as_dict,
+    as_list,
+    as_optional_str,
+    as_str,
+    as_string_dict_list,
+    as_string_list,
+)
+
 __all__ = [
     "JitPackAPI",
     "JitPackAPIError",
@@ -266,30 +276,31 @@ class JitPackAPI:
         """
         path = f"/api/refs/{group}/{project}"
         data = await self._request("GET", path)
-        if not isinstance(data, dict):
+        data_dict = as_dict(data)
+        if data_dict is None:
             raise JitPackAPIError(f"Unexpected refs response type: {type(data).__name__}")
-        refs = []
+        refs: list[Ref] = []
 
         # Expecting something like:  {"tags": [...], "branches": [...]}
         # Let's combine them or parse them separately.
-        tags_raw = data.get("tags", [])
-        branches_raw = data.get("branches", [])
-        if not isinstance(tags_raw, list) or not isinstance(branches_raw, list):
-            raise JitPackAPIError("Unexpected refs payload shape")
+        tags_raw = as_list(data_dict.get("tags")) or []
+        branches_raw = as_list(data_dict.get("branches")) or []
 
         # We unify them as "Ref" objects.
         # The JS code suggests "tag_name" and "commit" for branches as well.
         for t in tags_raw:
-            if not isinstance(t, dict):
+            t_dict = as_dict(t)
+            if t_dict is None:
                 continue
-            name = str(t.get("tag_name") or t.get("name") or "unknown")
-            commit = str(t.get("commit", ""))[:7]
+            name = as_str(t_dict.get("tag_name")) or as_str(t_dict.get("name"), "unknown")
+            commit = as_str(t_dict.get("commit"))[:7]
             refs.append(Ref(name=name, commit=commit))
         for b in branches_raw:
-            if not isinstance(b, dict):
+            b_dict = as_dict(b)
+            if b_dict is None:
                 continue
-            name = str(b.get("tag_name") or b.get("name") or "unknown")
-            commit = str(b.get("commit", ""))[:7]
+            name = as_str(b_dict.get("tag_name")) or as_str(b_dict.get("name"), "unknown")
+            commit = as_str(b_dict.get("commit"))[:7]
             refs.append(Ref(name=name, commit=commit))
 
         return refs
@@ -350,7 +361,7 @@ class JitPackAPI:
 
     def _get_cookies(self) -> dict[str, str]:
         # Prepare cookies
-        cookies = {}
+        cookies: dict[str, str] = {}
         # If the session_cookie is "sessionId=XYZ" you can parse it or directly pass it in a dict
         if self.session_cookie:
             # If your cookie is exactly "XYZ" and you want a "sessionId" key:
@@ -416,18 +427,20 @@ class JitPackAPI:
             params["branch"] = branch
 
         data = await self._request("GET", path, params=params)
-        if not isinstance(data, dict):
+        data_dict = as_dict(data)
+        if data_dict is None:
             raise JitPackAPIError(f"Unexpected commits response type: {type(data).__name__}")
-        commits_raw = data.get("commits", [])
-        if not isinstance(commits_raw, list):
+        commits_raw = as_list(data_dict.get("commits"))
+        if commits_raw is None:
             raise JitPackAPIError("Unexpected commits payload shape")
         commits: list[Commit] = []
 
         for c in commits_raw:
-            if not isinstance(c, dict):
+            c_dict = as_dict(c)
+            if c_dict is None:
                 continue
-            sha = str(c.get("sha", ""))[:40]
-            message = str(c.get("message", ""))
+            sha = as_str(c_dict.get("sha"))[:40]
+            message = as_str(c_dict.get("message"))
             commits.append(Commit(sha=sha, message=message))
 
         return commits
@@ -448,12 +461,13 @@ class JitPackAPI:
             data = await self._request("GET", path)
         except JitPackNotFoundError:
             return None
-        if not isinstance(data, dict):
+        data_dict = as_dict(data)
+        if data_dict is None:
             raise JitPackAPIError(f"Unexpected build info response type: {type(data).__name__}")
 
         # The JS code suggests possible fields:
         # { "status": "ok|Building|...", "ci": bool, "buildUrl": "...", "deletable": bool, ...}
-        status_str = data.get("status", "unknown")
+        status_str = as_str(data_dict.get("status"), "unknown")
         try:
             status = BuildStatus(status_str)
         except ValueError:
@@ -462,10 +476,10 @@ class JitPackAPI:
         build = Build(
             version=version,
             status=status,
-            ci=data.get("ci", False),
-            build_url=data.get("buildUrl"),
-            deletable=data.get("deletable", False),
-            raw=data,
+            ci=as_bool(data_dict.get("ci"), False),
+            build_url=as_optional_str(data_dict.get("buildUrl")),
+            deletable=as_bool(data_dict.get("deletable"), False),
+            raw=data_dict,
         )
         return build
 
@@ -508,32 +522,40 @@ class JitPackAPI:
                 params[query] = ""
 
         data = await self._request("GET", path, params=params)
-        if not isinstance(data, dict):
+        data_dict = as_dict(data)
+        if data_dict is None:
             raise JitPackAPIError(f"Unexpected versions response type: {type(data).__name__}")
-        grouped_data = data.get(group, {})
-        if not isinstance(grouped_data, dict):
+        grouped_data = as_dict(data_dict.get(group))
+        if grouped_data is None:
             raise JitPackAPIError(f"Unexpected versions group payload type: {type(grouped_data).__name__}")
-        project_data = grouped_data.get(project, {})
-        if not isinstance(project_data, dict):
+        project_data = as_dict(grouped_data.get(project))
+        if project_data is None:
             raise JitPackAPIError(f"Unexpected versions project payload type: {type(project_data).__name__}")
-        versions = []
-        for _, v in project_data.items():
-            if not isinstance(v, dict):
+        versions: list[Version] = []
+        for version_obj in project_data.values():
+            v_dict = as_dict(version_obj)
+            if v_dict is None:
                 continue
-            status_str = v.get("status", "unknown")
+            status_str = as_str(v_dict.get("status"), "unknown")
             try:
                 status = BuildStatus(status_str)
             except ValueError:
                 status = BuildStatus.UNKNOWN
 
+            version_name = as_str(v_dict.get("version"))
+            if not version_name:
+                continue
+            is_tag_obj = v_dict.get("isTag")
+            commit_obj = v_dict.get("commit")
+            deletable_obj = v_dict.get("deletable")
             versions.append(
                 Version(
                     status=status,
-                    isTag=v.get("isTag"),
-                    commit=v.get("commit"),
-                    deletable=v.get("deletable"),
-                    version=v["version"],
-                    date=v.get("date"),
+                    isTag=as_bool(is_tag_obj) if is_tag_obj is not None else None,
+                    commit=as_optional_str(commit_obj),
+                    deletable=as_bool(deletable_obj) if deletable_obj is not None else None,
+                    version=version_name,
+                    date=as_optional_str(v_dict.get("date")),
                 )
             )
         return versions
@@ -548,21 +570,22 @@ class JitPackAPI:
         """
         path = f"/api/settings/{group}/{project}"
         data = await self._request("GET", path)
-        if not isinstance(data, dict):
+        data_dict = as_dict(data)
+        if data_dict is None:
             raise JitPackAPIError(f"Unexpected settings response type: {type(data).__name__}")
 
         # Convert JSON into Settings data class
         s = Settings(
-            is_admin=data.get("isAdmin", False),
-            need_auth=data.get("needAuth", False),
-            show_ci=data.get("showCI", False),
-            enable_ci=data.get("enableCI", False),
-            public=data.get("public", True),
-            access_tokens=data.get("access_tokens", []),
-            collaborators=data.get("collaborators", []),
-            environment=data.get("environment", []),
-            extra_tokens=data.get("extraTokens", []),
-            raw=data,
+            is_admin=as_bool(data_dict.get("isAdmin"), False),
+            need_auth=as_bool(data_dict.get("needAuth"), False),
+            show_ci=as_bool(data_dict.get("showCI"), False),
+            enable_ci=as_bool(data_dict.get("enableCI"), False),
+            public=as_bool(data_dict.get("public"), True),
+            access_tokens=as_string_list(data_dict.get("access_tokens")),
+            collaborators=as_string_dict_list(data_dict.get("collaborators")),
+            environment=as_string_dict_list(data_dict.get("environment")),
+            extra_tokens=as_string_dict_list(data_dict.get("extraTokens")),
+            raw=data_dict,
         )
         return s
 
@@ -577,19 +600,20 @@ class JitPackAPI:
         """
         path = f"/api/settings/{group}/{project}"
         data = await self._request("PUT", path, json_data=new_settings)
-        if not isinstance(data, dict):
+        data_dict = as_dict(data)
+        if data_dict is None:
             raise JitPackAPIError(f"Unexpected updated settings response type: {type(data).__name__}")
         return Settings(
-            is_admin=data.get("isAdmin", False),
-            need_auth=data.get("needAuth", False),
-            show_ci=data.get("showCI", False),
-            enable_ci=data.get("enableCI", False),
-            public=data.get("public", True),
-            access_tokens=data.get("access_tokens", []),
-            collaborators=data.get("collaborators", []),
-            environment=data.get("environment", []),
-            extra_tokens=data.get("extraTokens", []),
-            raw=data,
+            is_admin=as_bool(data_dict.get("isAdmin"), False),
+            need_auth=as_bool(data_dict.get("needAuth"), False),
+            show_ci=as_bool(data_dict.get("showCI"), False),
+            enable_ci=as_bool(data_dict.get("enableCI"), False),
+            public=as_bool(data_dict.get("public"), True),
+            access_tokens=as_string_list(data_dict.get("access_tokens")),
+            collaborators=as_string_dict_list(data_dict.get("collaborators")),
+            environment=as_string_dict_list(data_dict.get("environment")),
+            extra_tokens=as_string_dict_list(data_dict.get("extraTokens")),
+            raw=data_dict,
         )
 
     async def post_trial(self, git_owner_url: str, login: str, plan: str) -> dict[str, object]:
@@ -608,9 +632,10 @@ class JitPackAPI:
             "plan": plan,
         }
         data = await self._request("POST", path, params=params)
-        if not isinstance(data, dict):
+        data_dict = as_dict(data)
+        if data_dict is None:
             raise JitPackAPIError(f"Unexpected trial response type: {type(data).__name__}")
-        return data
+        return data_dict
 
 
 #

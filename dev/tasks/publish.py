@@ -11,14 +11,14 @@ import asyncio
 import os
 import textwrap
 import time
-from collections.abc import Callable
-from typing import Literal, ParamSpec, TypeVar
+from typing import Literal
 
 import git
+from git.objects.tag import TagObject
 
 from dev.ai import suggest_version_number
 from dev.build_order import toposort_projects
-from dev.caching import NO_CACHE, NoCacheSentinel, cache
+from dev.caching import DEFAULT_CACHE_DB_PATH, NO_CACHE, NoCacheSentinel, cache
 from dev.config import (
     GradleProject,
     Version,
@@ -39,10 +39,6 @@ from dev.tasks.setup import (
     setup_project,
 )
 
-P = ParamSpec("P")
-R = TypeVar("R")
-
-
 def _format_commit_message(message: str | bytes) -> str:
     if isinstance(message, bytes):
         return message.decode("utf-8", errors="replace").strip()
@@ -59,7 +55,7 @@ def get_latest_version(repo: git.Repo) -> tuple[Version | None, git.Commit | Non
         tag_commit = tag.object
         # print(tag_name, tag_commit, type(tag_commit))
 
-        if isinstance(tag_commit, git.objects.tag.TagObject):
+        if isinstance(tag_commit, TagObject):
             tag_commit = tag_commit.object
             # print(tag_commit, type(tag_commit))
 
@@ -124,7 +120,7 @@ def set_project_version_in_root_clj(
     with open(root_file, encoding="utf-8") as f:
         lines = f.readlines()
 
-    updated_lines = []
+    updated_lines: list[str] = []
     in_target_gradle_block = False  # True if we are inside the (gradle "project_name" ...) form
     found_and_replaced = False
     project_types = ["gradle", "python", "data", "purescript", "premake"]
@@ -288,8 +284,8 @@ def _check_jitpack_status_cached_ttl(status: object) -> float | NoCacheSentinel 
     return NO_CACHE
 
 
-_jitpack_status_cache_decorator: Callable[[Callable[P, R]], Callable[P, R]] = cache(
-    path=".dev.cache.db",
+_jitpack_status_cache_decorator = cache(
+    path=DEFAULT_CACHE_DB_PATH,
     ttl=3600,
     exclude_params=["jitpack_api"],
     ttl_policy_func=_check_jitpack_status_cached_ttl,

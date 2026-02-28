@@ -5,7 +5,7 @@ import pyperclip
 
 from dev.messages import info, success
 
-IGNORE_FILES = set(
+IGNORE_FILES: set[str] = set(
     [
         ".DS_Store",
         "Thumbs.db",
@@ -13,11 +13,11 @@ IGNORE_FILES = set(
     ]
 )
 
-IGNORE_DIRS = set([".git", ".idea", "__pycache__"])
+IGNORE_DIRS: set[str] = set([".git", ".idea", "__pycache__"])
 
 
 def llmcopy(paths: list[str]) -> None:
-    added_paths = set()
+    added_paths: set[Path] = set()
     buf = io.StringIO()
 
     def go(p: Path) -> None:

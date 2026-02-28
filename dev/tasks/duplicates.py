@@ -11,9 +11,9 @@ import codecs
 import hashlib
 import os
 import sys
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 from collections.abc import Iterator
-from typing import BinaryIO
+from typing import BinaryIO, NamedTuple
 
 # reopen stdout with utf-8 support
 stdout_buffer = getattr(sys.stdout, "buffer", None)
@@ -24,7 +24,11 @@ if stdout_buffer is not None:
 IGNORE_DIRS = {".git", ".svn", ".hg", ".idea", ".vscode", "__pycache__"}
 IGNORE_FILES = {"Thumbs.db", "desktop.ini", ".DS_Store"}
 
-FileGroup = namedtuple("FileGroup", "total_size total_count files")
+
+class FileGroup(NamedTuple):
+    total_size: int
+    total_count: int
+    files: list[str]
 
 
 def is_ignored_dir(path: str) -> bool:
@@ -127,7 +131,7 @@ def check_for_duplicates(
 
     del files_by_small_hash
 
-    file_groups = []
+    file_groups: list[FileGroup] = []
 
     # Print the duplicate files
     for files in files_by_full_hash.values():
@@ -136,9 +140,6 @@ def check_for_duplicates(
             total_count = len(files)
             for filename in files:
                 try:
-                    # if the target is a symlink (soft one), this will
-                    # dereference it - change the value to the actual target file
-                    full_path = os.path.realpath(filename)
                     file_size = os.path.getsize(filename)
                 except OSError:
                     # not accessible (permissions, etc) - pass on

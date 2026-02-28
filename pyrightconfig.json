@@ -1,0 +1,13 @@
+{
+  "include": ["dev", "tests", "dev.py", "setup.py"],
+  "exclude": [".venv", ".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache", "build", "dist", "site", "tmp", "tmp-*", "tmp-test", "tmp-test-*"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "strict",
+  "reportMissingTypeStubs": "none",
+  "reportMissingImports": "error",
+  "reportUndefinedVariable": "error",
+  "reportUnboundVariable": "error",
+  "reportImportCycles": "error"
+}

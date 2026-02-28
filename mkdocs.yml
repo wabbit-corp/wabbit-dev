@@ -1,0 +1,24 @@
+site_name: wabbit-dev
+site_description: Development utilities for the Wabbit project
+repo_url: https://github.com/wabbit-corp/wabbit-dev
+repo_name: wabbit-corp/wabbit-dev
+docs_dir: docs
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.sections
+    - content.code.copy
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      use_pygments: true
+      pygments_lang_class: true
+  - pymdownx.superfences
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Development: development.md

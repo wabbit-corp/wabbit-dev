@@ -10,6 +10,7 @@ from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 from functools import cmp_to_key
 from importlib import import_module
+from typing import cast
 
 type VersionComponent = int | float
 type VersionTuple = tuple[VersionComponent, ...]
@@ -138,21 +139,36 @@ def find_installed_jvms_win32() -> set[str]:
             and callable(enum_key)
             and callable(query_value_ex)
         ):
+            root_key: object | None = None
+            key_count = 0
             try:
-                root_key = open_key(hkey_local_machine, r"SOFTWARE\JavaSoft\JDK")
-                key_count = query_info_key(root_key)[0]
+                opened_key = open_key(hkey_local_machine, r"SOFTWARE\JavaSoft\JDK")
+                key_info = query_info_key(opened_key)
+                if isinstance(key_info, tuple) and key_info and isinstance(key_info[0], int):
+                    root_key = opened_key
+                    key_count = key_info[0]
             except OSError:
+                root_key = None
+
+            if root_key is None:
                 key_count = 0
 
             for i in range(0, key_count):
-                key_name = enum_key(root_key, i)
+                key_name_obj = enum_key(root_key, i)
+                if not isinstance(key_name_obj, str):
+                    continue
+                key_name = key_name_obj
                 try:
                     key = open_key(hkey_local_machine, rf"SOFTWARE\JavaSoft\JDK\\{key_name}")
-                    java_home_value, _ = query_value_ex(key, "JavaHome")
+                    java_home_raw = query_value_ex(key, "JavaHome")
                 except OSError:
                     continue
-                if not isinstance(java_home_value, str):
+                if not isinstance(java_home_raw, tuple) or not java_home_raw:
                     continue
+                java_home_tuple = cast(tuple[object, ...], java_home_raw)
+                if not isinstance(java_home_tuple[0], str):
+                    continue
+                java_home_value = java_home_tuple[0]
 
                 has_java = os.path.exists(os.path.join(java_home_value, "bin", "java.exe"))
                 has_javaw = os.path.exists(os.path.join(java_home_value, "bin", "javaw.exe"))
