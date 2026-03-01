@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import shutil
 import sys
@@ -13,7 +15,7 @@ from dev.config import load_config
 from dev.json_utils import as_dict
 
 if TYPE_CHECKING:
-    from dev.config import PythonApplication, PythonProject
+    from dev.config import Config, PythonApplication, PythonProject
     from dev.tasks.setup import RepoSetupContext
 
 
@@ -37,6 +39,19 @@ def _copy_tree(src: Path, dest: Path) -> None:
 
 def _load_toml(path: Path) -> dict[str, object]:
     return tomllib.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_repo_config(repo_root: Path) -> Config:
+    candidate_roots = [repo_root, repo_root / "test"]
+    for candidate in candidate_roots:
+        if (candidate / "root.clj").is_file() and (candidate / "root.private.clj").is_file():
+            cwd = os.getcwd()
+            os.chdir(candidate)
+            try:
+                return load_config()
+            finally:
+                os.chdir(cwd)
+    pytest.skip("No root.clj/root.private.clj fixture available for setup context tests")
 
 
 def _make_python_project_for_render(path: Path, *, application: PythonApplication | None = None) -> PythonProject:
@@ -69,7 +84,8 @@ def _make_python_project_for_render(path: Path, *, application: PythonApplicatio
 def _make_render_context(pyproject_template: str | None = None) -> RepoSetupContext:
     import dev.tasks.setup as setup_module
 
-    config = load_config()
+    repo_root = Path(__file__).resolve().parents[1]
+    config = _load_repo_config(repo_root)
     config.default_git_user_email = "test@example.com"
     config.default_git_user_name = "Test User"
 
@@ -217,9 +233,7 @@ def test_render_python_pyproject_preserves_existing_metadata_when_config_omits_i
     assert 'classifiers = ["Topic :: Software Development :: Libraries :: Python Modules"]' in rendered
 
 
-def test_setup_generates_python_docs_and_quality_defaults(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_setup_generates_python_docs_and_quality_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     workspace_root = repo_root.parent
     sys.path.insert(0, str(repo_root))

@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -7,8 +10,23 @@ import pytest
 from git import Repo
 
 if TYPE_CHECKING:
-    from dev.config import PythonApplication, PythonProject
+    from dev.config import Config, PythonApplication, PythonProject
     from dev.tasks.setup import RepoSetupContext
+
+
+def _load_repo_config(repo_root: Path) -> Config:
+    from dev.config import load_config
+
+    candidate_roots = [repo_root, repo_root / "test"]
+    for candidate in candidate_roots:
+        if (candidate / "root.clj").is_file() and (candidate / "root.private.clj").is_file():
+            cwd = os.getcwd()
+            os.chdir(candidate)
+            try:
+                return load_config()
+            finally:
+                os.chdir(cwd)
+    pytest.skip("No root.clj/root.private.clj fixture available for setup context tests")
 
 
 def _make_python_project(
@@ -42,9 +60,9 @@ def _make_python_project(
 
 def _make_setup_context(pyproject_template: str, codespell_words: str = "wabbit\n") -> RepoSetupContext:
     import dev.tasks.setup as setup_module
-    from dev.config import load_config
 
-    config = load_config()
+    repo_root = Path(__file__).resolve().parents[1]
+    config = _load_repo_config(repo_root)
     config.default_git_user_email = "test@example.com"
     config.default_git_user_name = "Test User"
 
@@ -96,7 +114,6 @@ def test_setup_project_creates_directory_before_project_setup(tmp_path: Path, mo
     sys.path.insert(0, str(repo_root))
 
     import dev.tasks.setup as setup_module
-    from dev.config import PythonProject
 
     project = _make_python_project(tmp_path / "missing" / "pkg")
     called = False
@@ -123,7 +140,6 @@ def test_setup_project_skips_remote_check_when_github_api_unavailable(
     sys.path.insert(0, str(repo_root))
 
     import dev.tasks.setup as setup_module
-    from dev.config import PythonProject
 
     project = _make_python_project(tmp_path / "pkg", github_repo="org/pkg")
     project.path.mkdir(parents=True, exist_ok=True)
