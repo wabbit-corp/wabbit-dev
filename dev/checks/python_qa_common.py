@@ -11,12 +11,8 @@ import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import xml.etree.ElementTree as ET
-else:
-    from defusedxml import ElementTree as ET
+from defusedxml import ElementTree as ET
 
 from dev.checks.base import Issue, IssueType, Severity
 from dev.config import Project, PythonProject
@@ -793,7 +789,9 @@ def parse_mypy_issues(log_text: str) -> Sequence[MypyIssue | MypyFailure]:
         items = payload_list
     else:
         payload_dict = as_dict(payload)
-        payload_items = None if payload_dict is None else (get_list(payload_dict, "errors") or get_list(payload_dict, "results"))
+        payload_items = (
+            None if payload_dict is None else (get_list(payload_dict, "errors") or get_list(payload_dict, "results"))
+        )
         if payload_items is not None:
             items = payload_items
 
@@ -1626,6 +1624,8 @@ def read_cobertura_totals(xml_path: Path) -> CoberturaTotals | None:
     try:
         root = ET.parse(xml_path).getroot()
     except Exception:
+        return None
+    if root is None:
         return None
 
     def _f(name: str) -> float | None:
