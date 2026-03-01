@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Make Gradle setup force Java/Kotlin target 17 for projects with the `intellij-plugin` feature, so generated plugin builds stay compatible with IntelliJ 2023.2 without extra per-project JVM config.
 - Resolve `E_PYQA_DEPTRY` in `app-wabbit-dev` by regenerating Python dependency manifests from workspace `root.clj`: remove unused direct deps (`beautifulsoup4`, `aiodns`, `gitdb`, `anthropic`, `fastembed`), add direct `lang-mu` for `mu` imports, and keep secure XML parsing via explicit `defusedxml` runtime imports.
 - Fix Python QA pytest collection/runtime regressions in setup/config tests by postponing annotation evaluation and loading config fixtures from stable repo roots (`./` or `./test`) regardless of current working directory.
 - Make cache DB path handling more robust by explicitly expanding `~` via `HOME`, ensuring parent directory creation, and falling back to a local repo cache DB when the configured user-level cache path is not writable.

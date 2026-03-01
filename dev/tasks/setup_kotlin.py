@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol
 
@@ -120,10 +121,25 @@ def clean_gradle_build_text(text: str) -> str:
     return text
 
 
+def java_version_for_features(default_java_version: int, features: Mapping[str, object]) -> int:
+    # IntelliJ 2023.2 platform runtime is Java 17; targeting higher bytecode is invalid.
+    if "intellij-plugin" in features:
+        return 17
+    return default_java_version
+
+
+def kotlin_jvm_target_for_version(java_version: int) -> str:
+    if java_version == 8:
+        return "JVM_1_8"
+    return f"JVM_{java_version}"
+
+
 def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, interactive: bool = True) -> None:
     del interactive
     project_dependencies, other_dependencies = _make_dependency_strings(ctx, project)
     mode_value = ctx.mode.value
+    java_version = java_version_for_features(ctx.config.java_version, project.resolved_features)
+    kotlin_jvm_target = kotlin_jvm_target_for_version(java_version)
 
     result = render_template(
         ctx.subproject_build_template,
@@ -132,8 +148,8 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
         project_version=project.version,
         repositories=project.resolved_maven_repositories,
         kotlin_version=ctx.config.plugins["kotlin-jvm"].version,
-        java_version=ctx.config.java_version,
-        kotlin_jvm_target=ctx.config.kotlin_jvm_target,
+        java_version=java_version,
+        kotlin_jvm_target=kotlin_jvm_target,
         shadow_version=ctx.config.plugins["shadow"].version,
         features=project.resolved_features,
         project_dependencies=project_dependencies,
@@ -191,4 +207,9 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
     write_banner(ctx, project)
 
 
-__all__ = ["_make_dependency_strings", "setup_gradle_project"]
+__all__ = [
+    "_make_dependency_strings",
+    "java_version_for_features",
+    "kotlin_jvm_target_for_version",
+    "setup_gradle_project",
+]

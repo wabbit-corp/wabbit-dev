@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from dev.config import Config
 
 
-def _load_from_temp_root(tmp_path: Path, root_clj: str) -> Config:
+def _load_from_temp_root(tmp_path: Path, root_clj: str) -> "Config":
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
 
