@@ -129,7 +129,7 @@ async def async_main() -> int:
         cmd.add_argument("project", type=str, nargs=1)
 
     with commands("commit") as cmd:
-        cmd.add_argument("project", type=str, nargs=1)
+        cmd.add_argument("project", type=str, nargs="?")
 
     with commands("push") as cmd:
         cmd.add_argument("project", type=str, nargs="?", default=".")
@@ -236,8 +236,8 @@ async def async_main() -> int:
         case "commit":
             from dev.tasks.commit import commit
 
-            project_name = args.project[0]
-            assert isinstance(project_name, str), f"Expected str, got {type(project_name)}"
+            project_name = args.project
+            assert project_name is None or isinstance(project_name, str), f"Expected str|None, got {type(project_name)}"
             commit(project_name)
 
         case "push":

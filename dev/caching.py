@@ -292,8 +292,8 @@ class Cashier:
 def get_cashier_instance(path: str) -> Cashier:
     """
     Gets or creates a Cashier instance for the given path.
-    Manages instances globally but ensures thread-local access semantics if needed indirectly.
     Creates one instance per path for the entire application.
+    Initialization failures are treated as hard errors.
     """
     global _cleanup_registered
     requested_path = _normalize_cache_path(path)
@@ -316,27 +316,7 @@ def get_cashier_instance(path: str) -> Cashier:
 
             except Exception as e:
                 logger.error("Failed to create Cashier instance for path %s: %s", actual_path, e)
-                if actual_path != ":memory:":
-                    fallback_path = _normalize_cache_path(".dev.cache.db")
-                    if fallback_path != actual_path:
-                        logger.warning(
-                            "Falling back to local cache DB at %s after cache initialization failure for %s",
-                            fallback_path,
-                            actual_path,
-                        )
-                        fallback_instance = Cashier(path=fallback_path)
-                        _global_cashier_registry[fallback_path] = fallback_instance
-                        _global_cache_path_aliases[requested_path] = fallback_path
-                        actual_path = fallback_path
-
-                        if not _cleanup_registered:
-                            atexit.register(_cleanup_all_cashiers)
-                            _cleanup_registered = True
-                            logger.debug("atexit cleanup function registered for Cashier instances.")
-                    else:
-                        raise
-                else:
-                    raise
+                raise
 
         if actual_path in _global_cashier_registry:
             return _global_cashier_registry[actual_path]
@@ -487,15 +467,14 @@ def cache(
         # Errors during instance creation will propagate here
         try:
             cashier = get_cashier_instance(path=path)
-        except Exception:
+        except Exception as ex:
             logger.critical(
-                "Failed to obtain Cashier instance for %s used by %s. Caching disabled for this function.",
+                "Failed to obtain Cashier instance for %s used by %s.",
                 path,
                 fqn,
                 exc_info=True,
             )
-            # Return the original function if cache cannot be initialized
-            return fn
+            raise RuntimeError(f"Failed to initialize cache backend for {fqn} at {path}") from ex
 
         @wraps(fn)
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:

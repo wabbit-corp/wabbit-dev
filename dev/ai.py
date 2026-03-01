@@ -3,10 +3,25 @@ import json
 import logging
 import os
 import re
+import shlex
+import subprocess
 import textwrap
 from pathlib import Path
 
 import openai
+from openai.types.chat import (
+    ChatCompletionAssistantMessageParam,
+    ChatCompletionMessage,
+    ChatCompletionMessageFunctionToolCallParam,
+    ChatCompletionMessageParam,
+    ChatCompletionToolMessageParam,
+    ChatCompletionToolParam,
+)
+from openai.types.responses import ResponseFunctionToolCall
+from openai.types.responses.function_tool_param import FunctionToolParam
+from openai.types.responses.response_input_item_param import FunctionCallOutput
+from openai.types.responses.response_input_param import ResponseInputParam
+from openai.types.shared_params.reasoning import Reasoning
 
 from dev.caching import DEFAULT_CACHE_DB_PATH, cache
 from dev.io import read_ignore_file, read_text_file, walk_files
@@ -58,8 +73,22 @@ Finally, at the end of the commit message, explicitly include a line stating the
      }
 """).strip()
 
+COMMITTING_MODEL = "gpt-5.3-codex"
+CHAT_MODEL = "gpt-5-chat-latest"
+
 
 SEMVER_IMPACT_PATTERN = re.compile(r"^Semver Impact:\s*(MAJOR|MINOR|PATCH|NONE)\s*$", re.MULTILINE | re.IGNORECASE)
+GIT_TOOL_TIMEOUT_SECONDS = 15
+GIT_TOOL_MAX_OUTPUT_CHARS = 12000
+GIT_TOOL_ALLOWED_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^git status(?: --short)?(?: --branch)?$"),
+    re.compile(r"^git diff(?: --staged| --cached)?(?: --name-only| --name-status| --stat)?$"),
+    re.compile(r"^git diff(?: --staged| --cached)? -- [A-Za-z0-9_./-]+$"),
+    re.compile(r"^git log --oneline -n [1-9][0-9]?$"),
+    re.compile(r"^git show [A-Za-z0-9^~._/-]+(?: --stat| --name-status)?$"),
+    re.compile(r"^git rev-parse --abbrev-ref HEAD$"),
+    re.compile(r"^git ls-files(?: --others --exclude-standard)?$"),
+)
 
 
 def ensure_semver_impact_line(commit_message: str) -> str:
@@ -71,53 +100,235 @@ def ensure_semver_impact_line(commit_message: str) -> str:
     return f"{message}\n\nSemver Impact: NONE"
 
 
-def suggest_commit_name(modified: str, /, api_key: str) -> str:
+def _normalize_tool_command(command: str) -> str:
+    return " ".join(command.strip().split())
+
+
+def _clip_tool_output(text: str) -> str:
+    if len(text) <= GIT_TOOL_MAX_OUTPUT_CHARS:
+        return text
+    return text[: GIT_TOOL_MAX_OUTPUT_CHARS - 20] + "\n...[truncated]"
+
+
+def is_allowed_git_tool_command(command: str) -> bool:
+    normalized = _normalize_tool_command(command)
+    return any(pattern.fullmatch(normalized) for pattern in GIT_TOOL_ALLOWED_PATTERNS)
+
+
+def run_safe_git_tool_command(command: str, /, repo_path: Path | str | None) -> dict[str, object]:
+    normalized = _normalize_tool_command(command)
+    if not normalized:
+        return {"ok": False, "error": "Command is empty"}
+
+    if repo_path is None:
+        return {"ok": False, "error": "Repository path is required for git tool commands"}
+
+    if not is_allowed_git_tool_command(normalized):
+        return {"ok": False, "error": f"Command is not allowed: {normalized}"}
+
+    repo_root = Path(repo_path)
+    if not repo_root.is_dir():
+        return {"ok": False, "error": f"Repository path does not exist: {repo_root}"}
+
+    args = shlex.split(normalized)
+    if not args or args[0] != "git":
+        return {"ok": False, "error": "Only git commands are allowed"}
+
+    try:
+        completed = subprocess.run(
+            args,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TOOL_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"Command timed out after {GIT_TOOL_TIMEOUT_SECONDS}s"}
+    except OSError as ex:
+        return {"ok": False, "error": f"Failed to execute command: {ex}"}
+
+    return {
+        "ok": True,
+        "command": normalized,
+        "returncode": completed.returncode,
+        "stdout": _clip_tool_output(completed.stdout),
+        "stderr": _clip_tool_output(completed.stderr),
+    }
+
+
+def _extract_full_commit_message(message_content: str | None) -> str:
+    if message_content is None:
+        return "Unknown"
+    stripped = message_content.strip()
+    if not stripped:
+        return "Unknown"
+
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return stripped
+
+    payload_obj = as_dict(payload)
+    if payload_obj is None:
+        return stripped
+
+    full_commit_message: object | None = payload_obj.get("full_commit_message")
+    if isinstance(full_commit_message, str) and full_commit_message.strip():
+        return full_commit_message
+    return stripped
+
+
+def _assistant_message_to_param(message: ChatCompletionMessage) -> ChatCompletionAssistantMessageParam:
+    assistant_message: ChatCompletionAssistantMessageParam = {"role": "assistant"}
+
+    if message.content is not None:
+        assistant_message["content"] = message.content
+
+    if message.tool_calls:
+        tool_calls: list[ChatCompletionMessageFunctionToolCallParam] = []
+        for tool_call in message.tool_calls:
+            if tool_call.type != "function":
+                continue
+            tool_calls.append(
+                {
+                    "id": tool_call.id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_call.function.name,
+                        "arguments": tool_call.function.arguments,
+                    },
+                }
+            )
+        if tool_calls:
+            assistant_message["tool_calls"] = tool_calls
+
+    if "content" not in assistant_message and "tool_calls" not in assistant_message:
+        assistant_message["content"] = ""
+
+    return assistant_message
+
+
+def suggest_commit_name(modified: str, /, api_key: str, repo_path: Path | str | None = None) -> str:
     assert modified.strip(), "No modified files"
     client = openai.Client(api_key=api_key)
+    normalized_repo_path = str(repo_path) if repo_path is not None else None
 
     h = hashlib.sha256()
-    h.update(json.dumps({"modified": modified, "prompt": SUGGEST_COMMIT_PROMPT}, sort_keys=True).encode("utf-8"))
+    h.update(
+        json.dumps(
+            {
+                "modified": modified,
+                "prompt": SUGGEST_COMMIT_PROMPT,
+                "repo_path": normalized_repo_path,
+                "model": COMMITTING_MODEL,
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    )
     key = h.hexdigest()
 
-    response = client.chat.completions.create(
-        messages=[
-            {
-                "role": "user",
-                "content": SUGGEST_COMMIT_PROMPT.replace("{modified}", modified),
-            }
-        ],
-        model="gpt-5",
-        reasoning_effort="high",
-        # max_tokens=8192,
-        # temperature=1.0,
-        # top_p=0.90,
-        response_format={"type": "json_object"},
+    prompt = SUGGEST_COMMIT_PROMPT.replace("{modified}", modified)
+    prompt += "\n\nYou may call the `run_git_command` tool for additional repository context."
+    prompt += " Use only read-only git queries; never attempt writes."
+
+    tools: list[FunctionToolParam] = [
+        {
+            "type": "function",
+            "name": "run_git_command",
+            "description": "Run a read-only git command and return stdout/stderr and return code.",
+            "strict": False,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "A single git command, e.g. 'git status --short'.",
+                    }
+                },
+                "required": ["command"],
+            },
+        },
+    ]
+
+    tool_calls_log: list[dict[str, object]] = []
+    final_message_content: str | None = None
+    reasoning: Reasoning = {"effort": "high"}
+
+    response = client.responses.create(
+        model=COMMITTING_MODEL,
+        input=prompt,
+        reasoning=reasoning,
+        tools=tools,
+        tool_choice="auto",
     )
+
+    for _ in range(8):
+        function_calls: list[ResponseFunctionToolCall] = [
+            item for item in response.output if isinstance(item, ResponseFunctionToolCall)
+        ]
+        if not function_calls:
+            final_message_content = response.output_text
+            break
+
+        tool_outputs: ResponseInputParam = []
+        for tool_call in function_calls:
+            tool_name = tool_call.name
+            args_text = tool_call.arguments
+            tool_arguments_raw: object
+            try:
+                tool_arguments_raw = json.loads(args_text)
+            except json.JSONDecodeError:
+                tool_arguments_raw = {}
+            tool_arguments_obj = as_dict(tool_arguments_raw)
+
+            if tool_name != "run_git_command":
+                tool_result: dict[str, object] = {"ok": False, "error": f"Unknown tool: {tool_name}"}
+            else:
+                command_arg = None if tool_arguments_obj is None else tool_arguments_obj.get("command")
+                if not isinstance(command_arg, str):
+                    tool_result = {"ok": False, "error": "Missing or invalid tool argument: command"}
+                else:
+                    tool_result = run_safe_git_tool_command(command_arg, repo_path=normalized_repo_path)
+
+            tool_calls_log.append(
+                {
+                    "name": tool_name,
+                    "arguments": tool_arguments_obj,
+                    "result": tool_result,
+                }
+            )
+
+            tool_output: FunctionCallOutput = {
+                "type": "function_call_output",
+                "call_id": tool_call.call_id,
+                "output": json.dumps(tool_result, ensure_ascii=False),
+            }
+            tool_outputs.append(tool_output)
+
+        response = client.responses.create(
+            model=COMMITTING_MODEL,
+            previous_response_id=response.id,
+            input=tool_outputs,
+        )
 
     # we are going to save a log of the response
     os.makedirs(".llm/logs/suggest_commit_name", exist_ok=True)
-    message_content = response.choices[0].message.content
     with open(f".llm/logs/suggest_commit_name/{key}.json", "w") as f:
         json.dump(
             {
                 "prompt": SUGGEST_COMMIT_PROMPT,
                 "modified": modified,
-                "response": message_content,
+                "repo_path": normalized_repo_path,
+                "model": COMMITTING_MODEL,
+                "tool_calls": tool_calls_log,
+                "response": final_message_content,
             },
             f,
             indent=2,
         )
 
-    if message_content is None:
-        return ensure_semver_impact_line("Unknown")
-
-    payload = json.loads(message_content)
-    payload_obj = as_dict(payload)
-    if payload_obj is not None:
-        full_commit_message: object | None = payload_obj.get("full_commit_message")
-        if isinstance(full_commit_message, str):
-            return ensure_semver_impact_line(full_commit_message)
-    return ensure_semver_impact_line("Unknown")
+    return ensure_semver_impact_line(_extract_full_commit_message(final_message_content))
 
 
 SUGGEST_VERSION_NUMBER = textwrap.dedent("""
@@ -182,24 +393,15 @@ def suggest_version_number(commits: list[str], last_version: str, /, api_key: st
     )
     key = h.hexdigest()
 
-    response = client.chat.completions.create(
-        messages=[
-            {
-                "role": "user",
-                "content": SUGGEST_VERSION_NUMBER.replace("{commits}", commits_str).replace(
-                    "{last_version}", str(last_version)
-                ),
-            }
-        ],
-        model="gpt-5",
-        reasoning_effort="high",
-        # max_tokens=1024,
-        # temperature=1.0,
-        # top_p=0.90,
-        response_format={"type": "json_object"},
+    reasoning: Reasoning = {"effort": "high"}
+    response = client.responses.create(
+        model=COMMITTING_MODEL,
+        input=SUGGEST_VERSION_NUMBER.replace("{commits}", commits_str).replace("{last_version}", str(last_version)),
+        reasoning=reasoning,
+        text={"format": {"type": "json_object"}},
     )
 
-    message_content = response.choices[0].message.content
+    message_content = response.output_text
     assert message_content is not None, "Response content is missing"
     payload = json.loads(message_content)
     payload_obj = as_dict(payload)
@@ -223,6 +425,7 @@ def suggest_version_number(commits: list[str], last_version: str, /, api_key: st
                 "prompt": SUGGEST_VERSION_NUMBER,
                 "last_version": last_version,
                 "commits": commits,
+                "model": COMMITTING_MODEL,
                 "response": message_content,
             },
             f,
@@ -293,7 +496,7 @@ def answer_about_file(
             },
             {"role": "user", "content": prompt},
         ],
-        model="gpt-4o",
+        model=CHAT_MODEL,
         max_tokens=8000,
         temperature=1.0,
         top_p=0.90,
@@ -314,7 +517,7 @@ def agent_call(
         assert api_key is not None, "API key is required"
         client = openai.Client(api_key=api_key)
 
-    tools = [
+    tools: list[ChatCompletionToolParam] = [
         {
             "type": "function",
             "function": {
@@ -406,7 +609,7 @@ def agent_call(
 
     logging.info(f"Initial prompt: {initial_prompt}")
 
-    messages = [
+    messages: list[ChatCompletionMessageParam] = [
         {
             "role": "system",
             "content": "You are a 10x software developer, matching in skill and experience to John Carmack.",
@@ -415,11 +618,9 @@ def agent_call(
     ]
 
     while True:
-        create_method_name = "create"
-        create_completion = getattr(client.chat.completions, create_method_name)
-        response = create_completion(
+        response = client.chat.completions.create(
             messages=messages,
-            model="gpt-4o",
+            model=CHAT_MODEL,
             max_tokens=4000,
             temperature=1.0,
             top_p=0.95,
@@ -430,7 +631,7 @@ def agent_call(
         message = response.choices[0].message
         finish_reason = response.choices[0].finish_reason
         assert finish_reason == "tool_calls"
-        messages.append(message)
+        messages.append(_assistant_message_to_param(message))
 
         if message.tool_calls:
             for tool_call in message.tool_calls:
@@ -451,10 +652,9 @@ def agent_call(
 
                     logging.info(f"Answered question: {result}")
 
-                    msg = {
+                    msg: ChatCompletionToolMessageParam = {
                         "tool_call_id": tool_id,
                         "role": "tool",
-                        "name": tool_name,
                         "content": json.dumps(result, ensure_ascii=False),
                     }
 
@@ -506,7 +706,7 @@ def create_readme(project_name: str, root: Path, /, api_key: str) -> str:
             },
             {"role": "user", "content": prompt_template},
         ],
-        model="gpt-4o",
+        model=CHAT_MODEL,
         max_tokens=8000,
         temperature=1.0,
         top_p=0.95,

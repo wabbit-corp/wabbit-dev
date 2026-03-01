@@ -82,7 +82,13 @@ class RepoSetupContext:
     mode: RepoSetupMode
 
 
-def setup_project(ctx: RepoSetupContext, project: Project, interactive: bool = True) -> None:
+def setup_project(
+    ctx: RepoSetupContext,
+    project: Project,
+    interactive: bool = True,
+    commit_changes: bool = True,
+    allow_push: bool = True,
+) -> None:
     name = project.name
 
     # Each project should have a directory before project-type setup writes files.
@@ -215,8 +221,12 @@ def setup_project(ctx: RepoSetupContext, project: Project, interactive: bool = T
                 repo.create_remote("origin", f"git@github.com:{project.github_repo}.git")
 
                 if repo.active_branch.name == "master":
-                    # Set upstream for master branch
-                    repo.git.push("--set-upstream", "origin", "master")
+                    if allow_push:
+                        # Set upstream for master branch
+                        info(f"Setting upstream for master branch to origin/master for {project.name}")
+                        repo.git.push("--set-upstream", "origin", "master")
+                    else:
+                        info(f"Skipping upstream push/config for {project.name} (allow_push=False)")
 
         if (project.path / "src").exists():
             pass
@@ -258,7 +268,12 @@ def setup_project(ctx: RepoSetupContext, project: Project, interactive: bool = T
 
             # R3.2: The origin remote should be set
 
-        if repo is not None and ctx.mode == RepoSetupMode.PROD and repo.active_branch.name == "master":
+        if (
+            commit_changes
+            and repo is not None
+            and ctx.mode == RepoSetupMode.PROD
+            and repo.active_branch.name == "master"
+        ):
             commit_repo_changes(project, repo, openai_key=ctx.config.openai_key, interactive=interactive)
 
 
@@ -545,7 +560,16 @@ def commit_repo_changes(
                 # Suggest a commit message using the assembled patch content
                 # Ensure suggest_commit_name handles potential errors
                 api_key = openai_key if openai_key is not None else ""
-                commit_name = suggest_commit_name(final_diff_text, api_key=api_key)
+                try:
+                    repo_working_tree = repo.working_tree_dir
+                except AttributeError:
+                    repo_working_tree = None
+                repo_path = str(repo_working_tree) if repo_working_tree is not None else None
+                commit_name = suggest_commit_name(
+                    final_diff_text,
+                    api_key=api_key,
+                    repo_path=repo_path,
+                )
                 print(f"Suggested commit message: {commit_name}")
 
         if commit_name is not None:

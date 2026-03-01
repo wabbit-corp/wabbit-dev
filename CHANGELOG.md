@@ -1,10 +1,16 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Route commit/version AI calls through the Responses API so `gpt-5.3-codex` is used on a supported endpoint without model fallback logic.
+- Prevent `dev commit` setup flow from pushing to remotes: commit-mode setup now runs with `allow_push=False` so it never executes `git push --set-upstream`.
+- Raise Python `openai` dependency to `>=2.24.0,<3.0.0` (from workspace `root.clj`) so the CLI uses the same modern SDK API/types across environments.
+- Make `dev commit` accept an optional project argument; when omitted it now commits all configured projects in topological order after running setup in `PROD` mode.
+- Upgrade AI commit/version suggestions to `gpt-5.3-codex` and add a regex-gated git command tool for commit-message generation so the model can query safe read-only repo context before composing messages.
+- Update `dev commit <project>` to mirror the early publish workflow: run target/dependency setup in `PROD` mode first, then generate AI commit messages and commit once per unique repository.
 - Make Gradle setup force Java/Kotlin target 17 for projects with the `intellij-plugin` feature, so generated plugin builds stay compatible with IntelliJ 2023.2 without extra per-project JVM config.
 - Resolve `E_PYQA_DEPTRY` in `app-wabbit-dev` by regenerating Python dependency manifests from workspace `root.clj`: remove unused direct deps (`beautifulsoup4`, `aiodns`, `gitdb`, `anthropic`, `fastembed`), add direct `lang-mu` for `mu` imports, and keep secure XML parsing via explicit `defusedxml` runtime imports.
 - Fix Python QA pytest collection/runtime regressions in setup/config tests by postponing annotation evaluation and loading config fixtures from stable repo roots (`./` or `./test`) regardless of current working directory.
-- Make cache DB path handling more robust by explicitly expanding `~` via `HOME`, ensuring parent directory creation, and falling back to a local repo cache DB when the configured user-level cache path is not writable.
+- Make cache DB path handling more robust by explicitly expanding `~` via `HOME` and ensuring parent directory creation, while failing fast on cache initialization errors instead of silently falling back to a different DB path.
 - Fix remaining reported Ruff import-order/modern-import diagnostics and Black formatting drift in affected `dev/` and `tests/` files.
 - Eliminate the remaining `E_PYQA_PYRIGHT` backlog in `dev/config.py`, `dev/tasks/setup.py`, and supporting modules/tests (`cli`, `check`, `clean`, `cloc`, `setup_common`, `duplicates`, `text_quality`) while keeping strict mypy clean in parallel.
 - Add a public issue-type accessor in `dev/checks/base.py` and switch check-task validation to it, removing private `_KNOWN_TYPES` usage.

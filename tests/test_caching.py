@@ -733,6 +733,30 @@ def test_get_cashier_instance_expands_tilde_path(tmp_path: Path, monkeypatch: Mo
     instance.close()
 
 
+@pytest.mark.usefixtures("clean_global_state")
+def test_get_cashier_instance_init_failure_has_no_fallback(cache_path: Path, monkeypatch: MonkeyPatch) -> None:
+    class FailingCashier:
+        def __init__(self, path: str) -> None:
+            del path
+            raise sqlite3.Error("init boom")
+
+    monkeypatch.setattr(caching, "Cashier", FailingCashier)
+
+    with pytest.raises(sqlite3.Error, match="init boom"):
+        get_cashier_instance(str(cache_path))
+
+
+def test_cache_decorator_raises_when_backend_unavailable(cache_path: Path, monkeypatch: MonkeyPatch) -> None:
+    def fail_get_cashier_instance(path: str) -> Cashier:
+        del path
+        raise sqlite3.Error("backend unavailable")
+
+    monkeypatch.setattr(caching, "get_cashier_instance", fail_get_cashier_instance)
+
+    with pytest.raises(RuntimeError, match="Failed to initialize cache backend"):
+        cache(path=str(cache_path))(sync_func)
+
+
 # Note: Testing atexit behavior directly is complex in unit tests.
 # We rely on the clean_global_state fixture calling _cleanup_all_cashiers
 # to ensure connections are closed between tests. Manual inspection or
