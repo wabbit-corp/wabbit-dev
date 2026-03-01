@@ -2,6 +2,7 @@ import asyncio
 import atexit
 import inspect
 import logging
+import os
 import pickle
 import sqlite3
 import threading
@@ -30,15 +31,30 @@ NO_CACHE = NoCacheSentinel()
 ###############################################################################
 
 _thread_local_storage = threading.local()
-_global_cashier_registry: dict[str, "Cashier"] = {}  # Map path -> Cashier instance
+_global_cashier_registry: dict[str, "Cashier"] = {}  # Map normalized actual path -> Cashier instance
+_global_cache_path_aliases: dict[str, str] = {}  # Map requested path -> actual path
 _registry_lock = threading.Lock()
 _cleanup_registered = False
+
+
+def _expand_home_path(path: str) -> str:
+    if not path.startswith("~"):
+        return path
+
+    home = os.environ.get("HOME")
+    if home:
+        if path == "~":
+            return home
+        if path.startswith("~/"):
+            return str(Path(home) / path[2:])
+
+    return str(Path(path).expanduser())
 
 
 def _normalize_cache_path(path: str) -> str:
     if path == ":memory:":
         return path
-    expanded = Path(path).expanduser()
+    expanded = Path(_expand_home_path(path))
     if not expanded.is_absolute():
         expanded = Path.cwd() / expanded
     return str(expanded.resolve())
@@ -280,14 +296,17 @@ def get_cashier_instance(path: str) -> Cashier:
     Creates one instance per path for the entire application.
     """
     global _cleanup_registered
-    abs_path = _normalize_cache_path(path)
+    requested_path = _normalize_cache_path(path)
 
     with _registry_lock:
-        if abs_path not in _global_cashier_registry:
-            logger.debug("Creating new shared Cashier instance for path: %s", abs_path)
+        actual_path = _global_cache_path_aliases.get(requested_path, requested_path)
+
+        if actual_path not in _global_cashier_registry:
+            logger.debug("Creating new shared Cashier instance for path: %s", actual_path)
             try:
-                instance = Cashier(path=abs_path)
-                _global_cashier_registry[abs_path] = instance
+                instance = Cashier(path=actual_path)
+                _global_cashier_registry[actual_path] = instance
+                _global_cache_path_aliases[requested_path] = actual_path
 
                 # Register cleanup hook ONCE, when the first Cashier is made
                 if not _cleanup_registered:
@@ -296,18 +315,33 @@ def get_cashier_instance(path: str) -> Cashier:
                     logger.debug("atexit cleanup function registered for Cashier instances.")
 
             except Exception as e:
-                # Log error during creation, but let exception propagate
-                logger.error("Failed to create Cashier instance for path %s: %s", abs_path, e)
-                raise  # Propagate creation error
+                logger.error("Failed to create Cashier instance for path %s: %s", actual_path, e)
+                if actual_path != ":memory:":
+                    fallback_path = _normalize_cache_path(".dev.cache.db")
+                    if fallback_path != actual_path:
+                        logger.warning(
+                            "Falling back to local cache DB at %s after cache initialization failure for %s",
+                            fallback_path,
+                            actual_path,
+                        )
+                        fallback_instance = Cashier(path=fallback_path)
+                        _global_cashier_registry[fallback_path] = fallback_instance
+                        _global_cache_path_aliases[requested_path] = fallback_path
+                        actual_path = fallback_path
 
-        # Return the instance associated with the path
-        # If creation failed above, this line won't be reached for that path
-        # If it existed before, or creation succeeded, return it
-        if abs_path in _global_cashier_registry:
-            return _global_cashier_registry[abs_path]
-        else:
-            # Should not happen if exception handling is correct, but as a safeguard:
-            raise RuntimeError(f"Failed to get or create Cashier instance for {abs_path}")
+                        if not _cleanup_registered:
+                            atexit.register(_cleanup_all_cashiers)
+                            _cleanup_registered = True
+                            logger.debug("atexit cleanup function registered for Cashier instances.")
+                    else:
+                        raise
+                else:
+                    raise
+
+        if actual_path in _global_cashier_registry:
+            return _global_cashier_registry[actual_path]
+
+        raise RuntimeError(f"Failed to get or create Cashier instance for {actual_path}")
 
 
 def unregister_cashier_globally(abs_path: str) -> None:
@@ -316,6 +350,10 @@ def unregister_cashier_globally(abs_path: str) -> None:
         if abs_path in _global_cashier_registry:
             del _global_cashier_registry[abs_path]
             logger.debug("Unregistered Cashier instance for path: %s", abs_path)
+
+        alias_keys = [requested for requested, actual in _global_cache_path_aliases.items() if actual == abs_path]
+        for alias_key in alias_keys:
+            del _global_cache_path_aliases[alias_key]
 
 
 def _cleanup_all_cashiers() -> None:
