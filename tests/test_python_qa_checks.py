@@ -169,6 +169,7 @@ def test_run_subprocess_dedupes_identical_parsed_issues(tmp_path: Path, monkeypa
         message="collection failure",
         location=qa.issue_location(None),
     )
+
     def fake_parse_issues(label: str, log_path: Path, fail_under: int) -> list[qa.PytestIssue]:
         return [duplicate, duplicate]
 

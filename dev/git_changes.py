@@ -13,15 +13,14 @@ import tempfile
 import unittest
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import cast
 
 # is_git_dir is not directly available, using internal check logic if needed
 # Assume python 3.8+ for typing syntax if used implicitly before
 from pathlib import Path
+from typing import cast
 
 from git import Blob, Diff, IndexFile, Repo, Tree
 from git.exc import GitCommandError, InvalidGitRepositoryError
-
 from git.objects.commit import Commit
 
 # Configure logging for debugging if needed

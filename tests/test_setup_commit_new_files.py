@@ -10,10 +10,11 @@ def test_commit_repo_changes_handles_added_files_without_a_path(monkeypatch: pyt
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
 
-    import dev.tasks.setup as setup_module
-    from dev.git_changes import ChangeType, FileDiff, FileType
-    from dev.config import Project
     from git import Repo
+
+    import dev.tasks.setup as setup_module
+    from dev.config import Project
+    from dev.git_changes import ChangeType, FileDiff, FileType
 
     class DummyGit:
         def __init__(self) -> None:

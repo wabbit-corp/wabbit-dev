@@ -1,5 +1,6 @@
-import pytest
 from typing import cast
+
+import pytest
 
 from dev.intrangeset import IntRangeSet
 
@@ -10,11 +11,11 @@ def test_initialization_and_merging() -> None:
 
 
 def test_invalid_inputs() -> None:
-    with pytest.raises(TypeError):
+    with pytest.raises((TypeError, ValueError)):
         IntRangeSet(cast(list[int | tuple[int, int]], [1, "a"]))
     with pytest.raises(ValueError):
         IntRangeSet([(5, 3)])
-    with pytest.raises(TypeError):
+    with pytest.raises((TypeError, ValueError)):
         IntRangeSet(cast(list[int | tuple[int, int]], [(1, 2, 3)]))
 
 

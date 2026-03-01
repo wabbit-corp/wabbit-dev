@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import sys
 from inspect import signature
@@ -235,9 +237,7 @@ def test_project_identifier_uses_directory_name_when_name_is_overridden(tmp_path
     assert config.defined_projects["python-lang-mu"].name == "lang-mu"
 
 
-def test_load_config_supports_preserve_spans_parser_signature(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_supports_preserve_spans_parser_signature(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
 

@@ -3,6 +3,7 @@ from typing import cast
 
 from dev.config import Dependency, DependencyTarget
 
+
 def test_dependency_as_string_jarfile_defaults_modifier_and_dir() -> None:
     dep = Dependency(scope=None, target=DependencyTarget.JarFile(path=Path("app.jar")))
 

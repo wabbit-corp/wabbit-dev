@@ -1,5 +1,5 @@
-from inspect import unwrap
 import sys
+from inspect import unwrap
 from pathlib import Path
 from types import ModuleType
 

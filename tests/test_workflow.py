@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import os
 from collections import defaultdict
-from collections.abc import Generator
-from typing import Callable, NamedTuple, TypeGuard
+from collections.abc import Callable, Generator
+from typing import NamedTuple, TypeGuard
 
 
 class DirList(NamedTuple):

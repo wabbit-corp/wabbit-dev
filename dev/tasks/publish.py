@@ -39,6 +39,7 @@ from dev.tasks.setup import (
     setup_project,
 )
 
+
 def _format_commit_message(message: str | bytes) -> str:
     if isinstance(message, bytes):
         return message.decode("utf-8", errors="replace").strip()

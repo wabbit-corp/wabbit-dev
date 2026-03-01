@@ -1,9 +1,9 @@
 # pyright: reportPrivateUsage=false
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from collections.abc import Callable
 from typing import cast
 
 from git import Repo
