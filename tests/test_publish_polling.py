@@ -13,7 +13,7 @@ def _publish_module() -> ModuleType:
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
 
-    import dev.tasks.publish as publish_module
+    import dev.tasks.publish_jetpack as publish_module
 
     return publish_module
 

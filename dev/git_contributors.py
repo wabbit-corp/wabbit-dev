@@ -19,19 +19,25 @@ class GitContributor:
         return f"GitContributor(name={self.name}, email={self.email})"
 
 
+def _resolve_git_root(path: Path) -> Path:
+    if not path.is_dir():
+        raise ValueError(f"Path {path} is not a valid directory.")
+    try:
+        output = subprocess.check_output(["git", "-C", str(path), "rev-parse", "--show-toplevel"], text=True).strip()
+    except subprocess.CalledProcessError as ex:
+        raise ValueError(f"Path {path} is not a valid git repository.") from ex
+    return Path(output)
+
+
 def list_git_contributors(path: Path) -> dict[GitContributor, int]:
     """
     List all git contributors in the current repository.
     """
-    # Check if the path is a valid git repository
-    if not path.is_dir():
-        raise ValueError(f"Path {path} is not a valid directory.")
-    if not (path / ".git").exists():
-        raise ValueError(f"Path {path} is not a valid git repository.")
+    repo_root = _resolve_git_root(path)
 
     change_dir = os.getcwd()
     try:
-        os.chdir(path)
+        os.chdir(repo_root)
         # git shortlog -sne --all
 
         # Get the output of the git command
@@ -75,15 +81,11 @@ def get_git_user_name(path: Path) -> str | None:
     """
     Get the git user name from the git configuration.
     """
-
-    if not path.is_dir():
-        raise ValueError(f"Path {path} is not a valid directory.")
-    if not (path / ".git").exists():
-        raise ValueError(f"Path {path} is not a valid git repository.")
+    repo_root = _resolve_git_root(path)
 
     change_dir = os.getcwd()
     try:
-        os.chdir(path)
+        os.chdir(repo_root)
         name = subprocess.check_output(["git", "config", "--get", "user.name"], text=True).strip()
         return name
     except subprocess.CalledProcessError:
@@ -102,15 +104,11 @@ def get_git_user_email(path: Path) -> str | None:
     """
     Get the git user email from the git configuration.
     """
-
-    if not path.is_dir():
-        raise ValueError(f"Path {path} is not a valid directory.")
-    if not (path / ".git").exists():
-        raise ValueError(f"Path {path} is not a valid git repository.")
+    repo_root = _resolve_git_root(path)
 
     change_dir = os.getcwd()
     try:
-        os.chdir(path)
+        os.chdir(repo_root)
         email = subprocess.check_output(["git", "config", "--get", "user.email"], text=True).strip()
         return email
     except subprocess.CalledProcessError:
@@ -153,7 +151,7 @@ if __name__ == "__main__":
 
     config = load_config()
     for project in config.defined_projects.values():
-        path = project.path
+        path = project.effective_repo_root
 
         print(f"Checking {path}...")
 

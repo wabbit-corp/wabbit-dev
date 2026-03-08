@@ -113,6 +113,7 @@ def _make_render_context(pyproject_template: str | None = None) -> RepoSetupCont
         subproject_settings_template=jinja2.Template(""),
         build_template=jinja2.Template(""),
         subproject_build_template=jinja2.Template(""),
+        subproject_build_kmp_template=jinja2.Template(""),
         gradle_gitignore_template=jinja2.Template(""),
         gradle_properties_template=jinja2.Template(""),
         python_gitignore_template=jinja2.Template(""),
@@ -231,6 +232,46 @@ def test_render_python_pyproject_preserves_existing_metadata_when_config_omits_i
     assert 'license = "AGPL-3.0-or-later"' in rendered
     assert 'keywords = ["mu", "parser"]' in rendered
     assert 'classifiers = ["Topic :: Software Development :: Libraries :: Python Modules"]' in rendered
+
+
+@pytest.mark.parametrize(
+    ("project_license", "expected_spdx"),
+    [
+        ("MIT", "MIT"),
+        ("BSD", "BSD-3-Clause"),
+        ("GPLv3", "GPL-3.0-only"),
+        ("mit", "MIT"),
+        ("gpl-3.0", "GPL-3.0-only"),
+    ],
+)
+def test_render_python_pyproject_maps_supported_license_to_spdx(
+    tmp_path: Path,
+    project_license: str,
+    expected_spdx: str,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    from dev.tasks.setup import render_python_pyproject
+
+    project_path = tmp_path / "demo"
+    project_path.mkdir(parents=True, exist_ok=True)
+    (project_path / "README.md").write_text("# demo\n", encoding="utf-8")
+    (project_path / "demo").mkdir(parents=True, exist_ok=True)
+    (project_path / "demo" / "__init__.py").write_text("", encoding="utf-8")
+
+    project = _make_python_project_for_render(project_path)
+    project.license = project_license
+
+    context = _make_render_context(
+        '[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n'
+        '{% if license %}license = "{{ license }}"\n{% endif %}\n'
+        '[tool.poetry.dependencies]\npython = "{{ python_version }}"\n'
+    )
+
+    rendered = render_python_pyproject(context, project)
+
+    assert f'license = "{expected_spdx}"' in rendered
 
 
 def test_setup_generates_python_docs_and_quality_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -16,6 +16,7 @@ from packaging.version import Version as PythonVersion
 
 import dev.io
 from dev.config import Config, PythonProject
+from dev.licenses import canonicalize_license_key, python_spdx_for_license
 from dev.messages import warning
 from dev.tasks.setup_common import (
     clean_text,
@@ -447,7 +448,7 @@ def _normalize_python_license(project_license: str | None, existing_license: obj
             return existing_license.strip()
         return None
 
-    normalized = project_license.strip()
+    normalized = canonicalize_license_key(project_license)
     if not normalized:
         if isinstance(existing_license, str) and existing_license.strip():
             return existing_license.strip()
@@ -456,13 +457,8 @@ def _normalize_python_license(project_license: str | None, existing_license: obj
     if normalized in {"AGPL", "CC0"}:
         if isinstance(existing_license, str) and existing_license.strip():
             return existing_license.strip()
-        mapped = {
-            "AGPL": "AGPL-3.0-or-later",
-            "CC0": "CC0-1.0",
-        }
-        return mapped[normalized]
 
-    return normalized
+    return python_spdx_for_license(normalized)
 
 
 def render_python_pyproject(ctx: PythonSetupContext, project: PythonProject) -> str:

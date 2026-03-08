@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from types import UnionType
 
 from mu.typed import DecodeContext, DecodeError, DecodeWith, tag
-from mu.types import AtomExpr, Expr, StringExpr
+from mu.types import AtomExpr, Expr, MappingExpr, SequenceExpr, StringExpr
 
 
 @dataclass(frozen=True)
@@ -139,6 +139,198 @@ def _decode_maven_coordinate_expr(expr: Expr, ctx: DecodeContext) -> MavenCoordi
     )
 
 
+def _decode_gradle_target_commands(expr: Expr, ctx: DecodeContext) -> list["GradleTargetCommand"]:
+    if not isinstance(expr, SequenceExpr):
+        raise DecodeError(
+            path=ctx.path,
+            expected="sequence [] of Gradle target maps",
+            got=type(expr).__name__,
+            span=getattr(expr, "span", None),
+        )
+
+    result: list[GradleTargetCommand] = []
+    for index, item in enumerate(expr.values):
+        if not isinstance(item, MappingExpr):
+            raise DecodeError(
+                path=f"{ctx.path}[{index}]",
+                expected="map {} for Gradle target",
+                got=type(item).__name__,
+                span=getattr(item, "span", None),
+            )
+
+        kind: str | None = None
+        name: str | None = None
+        namespace: str | None = None
+        application_id: str | None = None
+        compile_sdk: int | None = None
+        min_sdk: int | None = None
+        target_sdk: int | None = None
+        manifest_path: str | None = None
+        for field_index, field in enumerate(item.values):
+            key = ctx.decode(field.key, str, path=f"{ctx.path}[{index}].keys[{field_index}]")
+            value_path = f"{ctx.path}[{index}].values[{field_index}]"
+            if key == "kind":
+                kind = ctx.decode(field.value, str, path=value_path)
+                continue
+            if key == "name":
+                name = ctx.decode(field.value, str, path=value_path)
+                continue
+            if key == "namespace":
+                namespace = ctx.decode(field.value, str, path=value_path)
+                continue
+            if key == "applicationId":
+                application_id = ctx.decode(field.value, str, path=value_path)
+                continue
+            if key == "compileSdk":
+                compile_sdk = ctx.decode(field.value, int, path=value_path)
+                continue
+            if key == "minSdk":
+                min_sdk = ctx.decode(field.value, int, path=value_path)
+                continue
+            if key == "targetSdk":
+                target_sdk = ctx.decode(field.value, int, path=value_path)
+                continue
+            if key == "manifestPath":
+                manifest_path = ctx.decode(field.value, str, path=value_path)
+                continue
+            raise DecodeError(
+                path=f"{ctx.path}[{index}]",
+                expected="Gradle target field",
+                got=key,
+                span=getattr(field.key, "span", None),
+            )
+
+        if kind is None:
+            raise DecodeError(
+                path=f"{ctx.path}[{index}]",
+                expected="Gradle target with kind",
+                got="missing kind",
+                span=getattr(item, "span", None),
+            )
+        result.append(
+            GradleTargetCommand(
+                kind=kind,
+                name=name,
+                namespace=namespace,
+                applicationId=application_id,
+                compileSdk=compile_sdk,
+                minSdk=min_sdk,
+                targetSdk=target_sdk,
+                manifestPath=manifest_path,
+            )
+        )
+    return result
+
+
+def _decode_kmp_jvm_run_entries(expr: Expr, ctx: DecodeContext) -> list["KmpJvmRunEntryCommand"]:
+    if not isinstance(expr, SequenceExpr):
+        raise DecodeError(
+            path=ctx.path,
+            expected="sequence [] of kmp-jvm-runs entry maps",
+            got=type(expr).__name__,
+            span=getattr(expr, "span", None),
+        )
+
+    result: list[KmpJvmRunEntryCommand] = []
+    for index, item in enumerate(expr.values):
+        if not isinstance(item, MappingExpr):
+            raise DecodeError(
+                path=f"{ctx.path}[{index}]",
+                expected="map {} for kmp-jvm-runs entry",
+                got=type(item).__name__,
+                span=getattr(item, "span", None),
+            )
+
+        task_name: str | None = None
+        main_class: str | None = None
+        description: str | None = None
+        jvm_args: list[str] | None = None
+        for field_index, field in enumerate(item.values):
+            key = ctx.decode(field.key, str, path=f"{ctx.path}[{index}].keys[{field_index}]")
+            value_path = f"{ctx.path}[{index}].values[{field_index}]"
+            if key == "taskName":
+                task_name = ctx.decode(field.value, str, path=value_path)
+                continue
+            if key == "mainClass":
+                main_class = ctx.decode(field.value, str, path=value_path)
+                continue
+            if key == "description":
+                description = ctx.decode(field.value, str, path=value_path)
+                continue
+            if key == "jvmArgs":
+                jvm_args = ctx.decode(field.value, list[str], path=value_path)
+                continue
+            raise DecodeError(
+                path=f"{ctx.path}[{index}]",
+                expected="kmp-jvm-runs field",
+                got=key,
+                span=getattr(field.key, "span", None),
+            )
+
+        if task_name is None or main_class is None or description is None:
+            raise DecodeError(
+                path=f"{ctx.path}[{index}]",
+                expected="taskName/mainClass/description strings",
+                got="missing required field",
+                span=getattr(item, "span", None),
+            )
+        result.append(
+            KmpJvmRunEntryCommand(
+                taskName=task_name,
+                mainClass=main_class,
+                description=description,
+                jvmArgs=jvm_args,
+            )
+        )
+    return result
+
+
+def _decode_gradle_source_sets(expr: Expr, ctx: DecodeContext) -> dict[str, "GradleSourceSetCommand"]:
+    if not isinstance(expr, MappingExpr):
+        raise DecodeError(
+            path=ctx.path,
+            expected="map {} of Gradle source-set definitions",
+            got=type(expr).__name__,
+            span=getattr(expr, "span", None),
+        )
+
+    result: dict[str, GradleSourceSetCommand] = {}
+    for index, field in enumerate(expr.values):
+        source_set_name = ctx.decode(field.key, str, path=f"{ctx.path}.keys[{index}]")
+        if not isinstance(field.value, MappingExpr):
+            raise DecodeError(
+                path=f"{ctx.path}.values[{index}]",
+                expected="map {} for source-set definition",
+                got=type(field.value).__name__,
+                span=getattr(field.value, "span", None),
+            )
+
+        depends_on: list[str] | None = None
+        dependencies: list[DependencyInput] | None = None
+        for nested_index, nested_field in enumerate(field.value.values):
+            nested_key = ctx.decode(
+                nested_field.key,
+                str,
+                path=f"{ctx.path}.values[{index}].keys[{nested_index}]",
+            )
+            nested_path = f"{ctx.path}.values[{index}].values[{nested_index}]"
+            if nested_key == "dependsOn":
+                depends_on = ctx.decode(nested_field.value, list[str], path=nested_path)
+                continue
+            if nested_key == "dependencies":
+                dependencies = ctx.decode(nested_field.value, list[DependencyInput], path=nested_path)
+                continue
+            raise DecodeError(
+                path=f"{ctx.path}.values[{index}]",
+                expected="source-set fields dependsOn/dependencies",
+                got=nested_key,
+                span=getattr(nested_field.key, "span", None),
+            )
+
+        result[source_set_name] = GradleSourceSetCommand(dependsOn=depends_on, dependencies=dependencies)
+    return result
+
+
 @tag("checks/disable")
 @dataclass(frozen=True)
 class ChecksDisableCommand:
@@ -177,6 +369,18 @@ class GithubTokenCommand:
 @dataclass(frozen=True)
 class AnthropicKeyCommand:
     key: str
+
+
+@tag("jetbrains-marketplace-token")
+@dataclass(frozen=True)
+class JetbrainsMarketplaceTokenCommand:
+    token: str
+
+
+@tag("pypi-token")
+@dataclass(frozen=True)
+class PypiTokenCommand:
+    token: str
 
 
 @tag("jitpack-cookie")
@@ -263,12 +467,73 @@ class JvmKotlinAgentCommand:
 @dataclass(frozen=True)
 class IntellijPluginCommand:
     pluginName: str
+    pluginId: str | None = None
+    ideaVersion: str | None = None
+    sinceBuild: str | None = None
+    untilBuild: str | None = None
+    vendorName: str | None = None
+    vendorEmail: str | None = None
+    vendorUrl: str | None = None
+    pluginDescription: str | None = None
+    pluginChangeNotes: str | None = None
+    depends: list[str] | None = None
+    bundledPlugins: list[str] | None = None
+    publishChannel: str | None = None
+    marketplaceTokenEnv: str | None = None
 
 
 @tag("kotlin-serialization")
 @dataclass(frozen=True)
 class KotlinSerializationCommand:
     pass
+
+
+@tag("kmp-android-library")
+@dataclass(frozen=True)
+class KmpAndroidLibraryCommand:
+    namespace: str
+    compileSdk: int
+    minSdk: int
+    manifestPath: str = "src/androidMain/AndroidManifest.xml"
+
+
+@tag("kmp-compose")
+@dataclass(frozen=True)
+class KmpComposeCommand:
+    publicResClass: bool = True
+    resClassPackage: str | None = None
+
+
+@dataclass(frozen=True)
+class KmpJvmRunEntryCommand:
+    taskName: str
+    mainClass: str
+    description: str
+    jvmArgs: list[str] | None = None
+
+
+@tag("kmp-jvm-runs")
+@dataclass(frozen=True)
+class KmpJvmRunsCommand:
+    entries: typing.Annotated[list[KmpJvmRunEntryCommand], DecodeWith(_decode_kmp_jvm_run_entries)]
+
+
+@dataclass(frozen=True)
+class GradleSourceSetCommand:
+    dependsOn: list[str] | None = None
+    dependencies: list["DependencyInput"] | None = None
+
+
+@dataclass(frozen=True)
+class GradleTargetCommand:
+    kind: str
+    name: str | None = None
+    namespace: str | None = None
+    applicationId: str | None = None
+    compileSdk: int | None = None
+    minSdk: int | None = None
+    targetSdk: int | None = None
+    manifestPath: str | None = None
 
 
 @tag("python-deptry")
@@ -306,6 +571,9 @@ FeatureCommand = (
     | JvmKotlinAgentCommand
     | IntellijPluginCommand
     | KotlinSerializationCommand
+    | KmpAndroidLibraryCommand
+    | KmpComposeCommand
+    | KmpJvmRunsCommand
     | PythonDeptryCommand
     | PythonImportlinterCommand
 )
@@ -434,10 +702,41 @@ class GradleProjectCommand:
     license: str | None = "AGPL"
     quarantine: bool = False
     publish: bool = True
+    buildModel: str | None = None
+    gradleProjectName: str | None = None
+    artifactId: str | None = None
+    platforms: list[str] | None = None
+    targets: typing.Annotated[list[GradleTargetCommand] | None, DecodeWith(_decode_gradle_target_commands)] = None
     dependencies: list[DependencyInput] | None = None
+    sourceSetDependencies: dict[str, list[DependencyInput]] | None = None
+    sourceSets: typing.Annotated[
+        dict[str, GradleSourceSetCommand] | None,
+        DecodeWith(_decode_gradle_source_sets),
+    ] = None
     features: list[FeatureCommand] | None = None
+    jvmPolicy: str | None = None
+    jvmTaskPolicies: dict[str, str] | None = None
     repo: str | None = None
     ownership: str | None = None
+
+
+RepoProjectCommand = (
+    PythonProjectCommand
+    | PurescriptProjectCommand
+    | DataProjectCommand
+    | PremakeProjectCommand
+    | GradleProjectCommand
+)
+
+
+@tag("repo")
+@dataclass(frozen=True)
+class RepoCommand:
+    dir_name: str
+    repo: str | None = None
+    gradleRootProjectName: str | None = None
+    jvmPolicy: str | None = None
+    projects: list[RepoProjectCommand] | None = None
 
 
 BuiltinTopLevelCommand = (
@@ -447,6 +746,8 @@ BuiltinTopLevelCommand = (
     | OpenaiKeyCommand
     | GithubTokenCommand
     | AnthropicKeyCommand
+    | JetbrainsMarketplaceTokenCommand
+    | PypiTokenCommand
     | JitpackCookieCommand
     | DefaultMavenProjectGroupCommand
     | GitUserCommand
@@ -463,6 +764,7 @@ BuiltinTopLevelCommand = (
     | DataProjectCommand
     | PremakeProjectCommand
     | GradleProjectCommand
+    | RepoCommand
 )
 
 
@@ -473,6 +775,8 @@ BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[object], ...] = (
     OpenaiKeyCommand,
     GithubTokenCommand,
     AnthropicKeyCommand,
+    JetbrainsMarketplaceTokenCommand,
+    PypiTokenCommand,
     JitpackCookieCommand,
     DefaultMavenProjectGroupCommand,
     GitUserCommand,
@@ -489,6 +793,7 @@ BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[object], ...] = (
     DataProjectCommand,
     PremakeProjectCommand,
     GradleProjectCommand,
+    RepoCommand,
 )
 
 
@@ -527,9 +832,16 @@ __all__ = [
     "GithubTokenCommand",
     "GitUserCommand",
     "GradleProjectCommand",
+    "GradleSourceSetCommand",
+    "GradleTargetCommand",
     "IntellijPluginCommand",
+    "JetbrainsMarketplaceTokenCommand",
     "JitpackCookieCommand",
     "JvmDefaultsCommand",
+    "KmpAndroidLibraryCommand",
+    "KmpComposeCommand",
+    "KmpJvmRunEntryCommand",
+    "KmpJvmRunsCommand",
     "JvmKotlinAgentCommand",
     "JvmKotlinApplicationCommand",
     "JvmKotlinLibraryCommand",
@@ -540,7 +852,10 @@ __all__ = [
     "MavenCoordinateExpr",
     "OpenaiKeyCommand",
     "PaperPluginCommand",
+    "PypiTokenCommand",
     "PremakeProjectCommand",
+    "RepoCommand",
+    "RepoProjectCommand",
     "PurescriptProjectCommand",
     "PythonDefaultsCommand",
     "PythonApplicationCommand",

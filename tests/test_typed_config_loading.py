@@ -12,7 +12,11 @@ if TYPE_CHECKING:
     from dev.config import Config
 
 
-def _load_from_temp_root(tmp_path: Path, root_clj: str) -> Config:
+def _load_from_temp_root(
+    tmp_path: Path,
+    root_clj: str,
+    root_private_clj: str = '(github-token "dummy")\n',
+) -> Config:
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
 
@@ -20,7 +24,7 @@ def _load_from_temp_root(tmp_path: Path, root_clj: str) -> Config:
 
     tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "root.clj").write_text(root_clj, encoding="utf-8")
-    (tmp_path / "root.private.clj").write_text('(github-token "dummy")\n', encoding="utf-8")
+    (tmp_path / "root.private.clj").write_text(root_private_clj, encoding="utf-8")
 
     cwd = os.getcwd()
     os.chdir(tmp_path)
@@ -125,6 +129,175 @@ def test_unknown_top_level_tag_fails_decode(tmp_path: Path) -> None:
 
     with pytest.raises(DecodeError):
         _load_from_temp_root(tmp_path, '(unknown-cmd "x")\n')
+
+
+def test_gradle_kmp_platforms_and_source_set_dependencies_are_loaded(tmp_path: Path) -> None:
+    from dev.config import GradleProject
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(define-maven-library "kotlin-stdlib" "org.jetbrains.kotlin:kotlin-stdlib:2.2.20")',
+                "("
+                'gradle "demo-kmp" '
+                ':version "0.1.0" '
+                ':platforms ["jvm" "android"] '
+                ":features ["
+                '(kmp-android-library :namespace "one.wabbit.demo" :compileSdk 34 :minSdk 26)'
+                "] "
+                ':sourceSetDependencies {"commonMain": ["kotlin-stdlib"] "androidMain": ["kotlin-stdlib"]})',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo-kmp"]
+    assert isinstance(project, GradleProject)
+    assert project.platforms == ["jvm", "android"]
+    assert set(project.source_set_dependencies.keys()) == {"commonMain", "androidMain"}
+    assert len(project.source_set_dependencies["commonMain"]) == 1
+    assert len(project.source_set_dependencies["androidMain"]) == 1
+
+
+def test_gradle_kmp_rejects_legacy_dependencies_key(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="must use :sourceSetDependencies instead of :dependencies"):
+        _load_from_temp_root(
+            tmp_path,
+            "\n".join(
+                [
+                    '(default-maven-project-group "one.wabbit")',
+                    '(define-maven-library "kotlin-stdlib" "org.jetbrains.kotlin:kotlin-stdlib:2.2.20")',
+                    "("
+                    'gradle "demo-kmp" '
+                    ':version "0.1.0" '
+                    ':platforms ["jvm" "android"] '
+                    ":features ["
+                    '(kmp-android-library :namespace "one.wabbit.demo" :compileSdk 34 :minSdk 26)'
+                    "] "
+                    ':dependencies ["kotlin-stdlib"])',
+                    "",
+                ]
+            ),
+        )
+
+
+def test_gradle_kmp_rejects_source_set_key_not_supported_by_platforms(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="does not support it"):
+        _load_from_temp_root(
+            tmp_path,
+            "\n".join(
+                [
+                    '(default-maven-project-group "one.wabbit")',
+                    '(define-maven-library "kotlin-stdlib" "org.jetbrains.kotlin:kotlin-stdlib:2.2.20")',
+                    "("
+                    'gradle "demo-kmp" '
+                    ':version "0.1.0" '
+                    ':platforms ["jvm" "android"] '
+                    ":features ["
+                    '(kmp-android-library :namespace "one.wabbit.demo" :compileSdk 34 :minSdk 26)'
+                    "] "
+                    ':sourceSetDependencies {"iosArm64Main": ["kotlin-stdlib"]})',
+                    "",
+                ]
+            ),
+        )
+
+
+def test_kmp_source_set_validation_allows_jvm_main_to_depend_on_jvm_only_project(tmp_path: Path) -> None:
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(gradle "lib-jvm" :version "0.1.0" :features [(jvm-kotlin-library)])',
+                "("
+                'gradle "app-kmp" '
+                ':version "0.1.0" '
+                ':platforms ["jvm" "android"] '
+                ":features ["
+                '(kmp-android-library :namespace "one.wabbit.app" :compileSdk 34 :minSdk 26)'
+                "] "
+                ':sourceSetDependencies {"jvmMain": [":lib-jvm"]})',
+                "",
+            ]
+        ),
+    )
+
+    assert "app-kmp" in config.defined_projects
+
+
+def test_kmp_source_set_validation_rejects_common_main_to_jvm_only_dependency(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="common compatibility"):
+        _load_from_temp_root(
+            tmp_path,
+            "\n".join(
+                [
+                    '(default-maven-project-group "one.wabbit")',
+                    '(gradle "lib-jvm" :version "0.1.0" :features [(jvm-kotlin-library)])',
+                    "("
+                    'gradle "app-kmp" '
+                    ':version "0.1.0" '
+                    ':platforms ["jvm" "android"] '
+                    ":features ["
+                    '(kmp-android-library :namespace "one.wabbit.app" :compileSdk 34 :minSdk 26)'
+                    "] "
+                    ':sourceSetDependencies {"commonMain": [":lib-jvm"]})',
+                    "",
+                ]
+            ),
+        )
+
+
+def test_kmp_source_set_validation_rejects_ios_arm64_to_non_ios_project(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="iosArm64 compatibility"):
+        _load_from_temp_root(
+            tmp_path,
+            "\n".join(
+                [
+                    '(default-maven-project-group "one.wabbit")',
+                    "("
+                    'gradle "lib-kmp" '
+                    ':version "0.1.0" '
+                    ':platforms ["jvm" "android"] '
+                    ":features ["
+                    '(kmp-android-library :namespace "one.wabbit.lib" :compileSdk 34 :minSdk 26)'
+                    "] "
+                    ':sourceSetDependencies {"commonMain": ["org.jetbrains.kotlin:kotlin-stdlib:2.2.20"]})',
+                    "("
+                    'gradle "app-kmp" '
+                    ':version "0.1.0" '
+                    ':platforms ["jvm" "iosArm64"] '
+                    ':sourceSetDependencies {"iosArm64Main": [":lib-kmp"]})',
+                    "",
+                ]
+            ),
+        )
+
+
+def test_kmp_source_set_validation_allows_apple_main_to_depend_on_apple_capable_project(tmp_path: Path) -> None:
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'gradle "lib-apple" '
+                ':version "0.1.0" '
+                ':platforms ["jvm" "iosArm64"] '
+                ':sourceSetDependencies {"commonMain": ["org.jetbrains.kotlin:kotlin-stdlib:2.2.20"]})',
+                "("
+                'gradle "app-kmp" '
+                ':version "0.1.0" '
+                ':platforms ["jvm" "iosArm64" "iosSimulatorArm64"] '
+                ':sourceSetDependencies {"appleMain": [":lib-apple"]})',
+                "",
+            ]
+        ),
+    )
+
+    assert "app-kmp" in config.defined_projects
 
 
 def test_strict_kebab_case_rejects_legacy_python_keyword_names(tmp_path: Path) -> None:
@@ -237,6 +410,85 @@ def test_project_identifier_uses_directory_name_when_name_is_overridden(tmp_path
     assert config.defined_projects["python-lang-mu"].name == "lang-mu"
 
 
+def test_repo_command_loads_nested_projects_and_repo_metadata(tmp_path: Path) -> None:
+    from dev.config import GradleProject, PythonProject
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'repo "jeeves" '
+                ':repo "wabbit-corp/jeeves" '
+                ':gradleRootProjectName "one.wabbit" '
+                ':jvmPolicy "jvm-21" '
+                ":projects ["
+                '(gradle "api" :version "0.1.0" :buildModel "jvm" :features [(jvm-kotlin-library)]) '
+                '(python "audio-backend" :version "0.1.0")'
+                "])",
+                "",
+            ]
+        ),
+    )
+
+    repo_definition = config.defined_repos["jeeves"]
+    assert repo_definition.repo_id == "jeeves"
+    assert repo_definition.path == Path("./jeeves")
+    assert repo_definition.github_repo == "wabbit-corp/jeeves"
+    assert repo_definition.gradle_root_project_name == "one.wabbit"
+    assert repo_definition.jvm_policy == "jvm-21"
+    assert repo_definition.project_ids == ["jeeves/api", "jeeves/audio-backend"]
+
+    api_project = config.defined_projects["jeeves/api"]
+    assert isinstance(api_project, GradleProject)
+    assert api_project.project_id == "jeeves/api"
+    assert api_project.repo_id == "jeeves"
+    assert api_project.repo_root == Path("./jeeves")
+    assert api_project.path == Path("./jeeves/api")
+    assert api_project.managed_by_setup is False
+    assert api_project.effective_gradle_project_name == "jeeves-api"
+    assert api_project.github_repo == "wabbit-corp/jeeves"
+
+    audio_project = config.defined_projects["jeeves/audio-backend"]
+    assert isinstance(audio_project, PythonProject)
+    assert audio_project.repo_id == "jeeves"
+    assert audio_project.repo_root == Path("./jeeves")
+    assert audio_project.path == Path("./jeeves/audio-backend")
+    assert audio_project.managed_by_setup is False
+    assert audio_project.github_repo == "wabbit-corp/jeeves"
+
+
+def test_repo_local_dependency_shorthand_resolves_with_repo_prefix(tmp_path: Path) -> None:
+    from dev.config import GradleProject, ProjectDependencyTarget
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'repo "jeeves" '
+                ':repo "wabbit-corp/jeeves" '
+                ":projects ["
+                '(gradle "api" :version "0.1.0" :buildModel "jvm" :features [(jvm-kotlin-library)]) '
+                '(gradle "server" :version "0.1.0" :buildModel "jvm" :features [(jvm-kotlin-library)] :dependencies [":api"])'
+                "])",
+                "",
+            ]
+        ),
+    )
+
+    server_project = config.defined_projects["jeeves/server"]
+    assert isinstance(server_project, GradleProject)
+    project_dependencies = [
+        dependency.target.project
+        for dependency in server_project.resolved_dependencies
+        if isinstance(dependency.target, ProjectDependencyTarget)
+    ]
+    assert project_dependencies == ["jeeves/api"]
+
+
 def test_load_config_supports_preserve_spans_parser_signature(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
@@ -268,3 +520,105 @@ def test_load_config_supports_preserve_spans_parser_signature(tmp_path: Path, mo
         os.chdir(cwd)
 
     assert "pkg" in config.defined_projects
+
+
+def test_intellij_plugin_metadata_and_private_publish_tokens_are_loaded(tmp_path: Path) -> None:
+    from dev.config import GradleProject, IntellijPlugin
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'gradle "ij-diff-paste" '
+                ':version "0.0.1" '
+                ":features ["
+                '(intellij-plugin "DiffPaste" '
+                ':pluginId "one.wabbit.diffpaste" '
+                ':ideaVersion "2023.2" '
+                ':sinceBuild "232" '
+                ':vendorName "Wabbit Consulting Corporation" '
+                ':vendorEmail "wabbit@wabbit.one" '
+                ':vendorUrl "https://wabbit.one" '
+                ':pluginDescription "Applies clipboard diff patches directly to your open file." '
+                ':pluginChangeNotes "Initial release." '
+                ':depends ["com.intellij.modules.platform"] '
+                ':bundledPlugins ["com.intellij.java"] '
+                ':publishChannel "default" '
+                ':marketplaceTokenEnv "JETBRAINS_MARKETPLACE_TOKEN")]'
+                ")",
+                "",
+            ]
+        ),
+        "\n".join(
+            [
+                '(github-token "dummy")',
+                '(jetbrains-marketplace-token "jb-token")',
+                '(pypi-token "pypi-token")',
+                "",
+            ]
+        ),
+    )
+
+    assert config.jetbrains_marketplace_token == "jb-token"
+    assert config.pypi_token == "pypi-token"
+
+    project = config.defined_projects["ij-diff-paste"]
+    assert isinstance(project, GradleProject)
+    feature = project.resolved_features["intellij-plugin"]
+    assert isinstance(feature, IntellijPlugin)
+    assert feature.pluginName == "DiffPaste"
+    assert feature.pluginId == "one.wabbit.diffpaste"
+    assert feature.ideaVersion == "2023.2"
+    assert feature.sinceBuild == "232"
+    assert feature.untilBuild is None
+    assert feature.vendorName == "Wabbit Consulting Corporation"
+    assert feature.vendorEmail == "wabbit@wabbit.one"
+    assert feature.vendorUrl == "https://wabbit.one"
+    assert feature.pluginDescription == "Applies clipboard diff patches directly to your open file."
+    assert feature.pluginChangeNotes == "Initial release."
+    assert feature.depends == ["com.intellij.modules.platform"]
+    assert feature.bundledPlugins == ["com.intellij.java"]
+    assert feature.publishChannel == "default"
+    assert feature.marketplaceTokenEnv == "JETBRAINS_MARKETPLACE_TOKEN"
+
+
+def test_intellij_plugin_rejects_nonexistent_until_build_branch(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="does not exist"):
+        _load_from_temp_root(
+            tmp_path,
+            "\n".join(
+                [
+                    '(default-maven-project-group "one.wabbit")',
+                    "("
+                    'gradle "ij-diff-paste" '
+                    ':version "0.0.1" '
+                    ":features ["
+                    '(intellij-plugin "DiffPaste" :sinceBuild "232" :untilBuild "255.*")]'
+                    ")",
+                    "",
+                ]
+            ),
+        )
+
+
+def test_publish_target_routing(tmp_path: Path) -> None:
+    from dev.tasks.publish import determine_publish_target
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(gradle "kotlin-base58" :version "1.0.0" :features [(jvm-kotlin-library)])',
+                '(gradle "ij-diff-paste" :version "0.0.1" :features [(intellij-plugin "DiffPaste")])',
+                '(python "python-lang-mu" :version "0.4.0")',
+                "",
+            ]
+        ),
+    )
+
+    assert determine_publish_target(config.defined_projects["kotlin-base58"]) == "jetpack"
+    assert determine_publish_target(config.defined_projects["ij-diff-paste"]) == "intellij-marketplace"
+    assert determine_publish_target(config.defined_projects["python-lang-mu"]) == "pypi"

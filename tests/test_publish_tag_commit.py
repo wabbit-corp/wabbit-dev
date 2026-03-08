@@ -13,9 +13,9 @@ def _resolve_tag_commit_fn() -> Callable[[Repo, str, str], object]:
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
 
-    from dev.tasks.publish import _resolve_tag_commit
+    from dev.tasks.publish_common import resolve_tag_commit
 
-    return _resolve_tag_commit
+    return resolve_tag_commit
 
 
 def test_resolve_tag_commit_uses_existing_tag_commit() -> None:

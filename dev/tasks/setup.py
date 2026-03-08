@@ -16,12 +16,15 @@ from dev.config import (
     DataProject,
     GradleProject,
     PremakeProject,
+    ProjectDependencyTarget,
     Project,
     PurescriptProject,
     PythonProject,
     load_config,
+    project_repo_root,
 )
 from dev.git_changes import ChangeType, FileDiff, FileType, compute_repo_diffs
+from dev.licenses import load_license_texts
 from dev.messages import ask, error, info, warning
 from dev.tasks import setup_common, setup_kotlin, setup_python
 from dev.tasks.setup_common import RepoSetupMode, render_template
@@ -63,6 +66,7 @@ class RepoSetupContext:
     subproject_settings_template: jinja2.Template
     build_template: jinja2.Template
     subproject_build_template: jinja2.Template
+    subproject_build_kmp_template: jinja2.Template
     gradle_gitignore_template: jinja2.Template
     gradle_properties_template: jinja2.Template
     python_gitignore_template: jinja2.Template
@@ -90,6 +94,8 @@ def setup_project(
     allow_push: bool = True,
 ) -> None:
     name = project.name
+    repo_path = project_repo_root(project)
+    repo_managed_gradle_project = isinstance(project, GradleProject) and project.effective_gradle_root != project.path
 
     # Each project should have a directory before project-type setup writes files.
     if not project.path.exists():
@@ -105,20 +111,23 @@ def setup_project(
         return
 
     with Scope() as scope:
-        if isinstance(project, GradleProject):
-            setup_gradle_project(ctx, project, interactive=interactive)
-        elif isinstance(project, PythonProject):
-            setup_python_project(ctx, project, interactive=interactive)
-        elif isinstance(project, PurescriptProject):
-            setup_purescript_project(ctx, project, interactive=interactive)
-        elif isinstance(project, PremakeProject):
-            pass
-            # setup_purescript_project(ctx, project, interactive=interactive)
-        elif isinstance(project, DataProject):
-            pass
-            # warning(f"Skipping specialized setup for data project {name} (not yet implemented).")
+        if not project.managed_by_setup and not repo_managed_gradle_project:
+            info(f"Skipping file generation for repo-managed project {project.name}")
         else:
-            error(f"No setup function for project: {name}")
+            if isinstance(project, GradleProject):
+                setup_gradle_project(ctx, project, interactive=interactive)
+            elif isinstance(project, PythonProject):
+                setup_python_project(ctx, project, interactive=interactive)
+            elif isinstance(project, PurescriptProject):
+                setup_purescript_project(ctx, project, interactive=interactive)
+            elif isinstance(project, PremakeProject):
+                pass
+                # setup_purescript_project(ctx, project, interactive=interactive)
+            elif isinstance(project, DataProject):
+                pass
+                # warning(f"Skipping specialized setup for data project {name} (not yet implemented).")
+            else:
+                error(f"No setup function for project: {name}")
 
         # git push --set-upstream origin master
         # if repo is not None:
@@ -141,10 +150,11 @@ def setup_project(
 
         # Each project should have a .git directory
         if is_github_repo_set:
-            if not (project.path / ".git").exists():
+            if not (repo_path / ".git").exists():
                 error(f"{project.name} does not have .git")
                 if not interactive or ask(f"Initialize git repository for {project.name}?"):
-                    repo = Repo.init(project.path)
+                    repo_path.mkdir(parents=True, exist_ok=True)
+                    repo = Repo.init(repo_path)
                     scope.defer(repo.close)
 
                     # Set default user and email
@@ -154,11 +164,11 @@ def setup_project(
                 else:
                     raise Exception(".git does not exist")
 
-            elif not (project.path / ".git").is_dir():
+            elif not (repo_path / ".git").is_dir():
                 error(f"{project.name} has a non-directory named .git")
                 repo = None
             else:
-                repo = Repo(project.path)
+                repo = Repo(repo_path)
                 scope.defer(repo.close)
         else:
             repo = None
@@ -310,6 +320,99 @@ def setup_purescript_project(ctx: RepoSetupContext, project: PurescriptProject, 
 
 def setup_gradle_project(ctx: RepoSetupContext, project: GradleProject, interactive: bool = True) -> None:
     setup_kotlin.setup_gradle_project(ctx, project, interactive=interactive)
+
+
+def _relative_project_dir(root_path: Path, project_path: Path) -> str:
+    return Path(os.path.relpath(project_path.resolve(), start=root_path.resolve())).as_posix()
+
+
+def _gradle_project_dependencies(config: Config, project: GradleProject) -> list[GradleProject]:
+    result: list[GradleProject] = []
+    for dependency in project.resolved_dependencies:
+        target = dependency.target
+        if not isinstance(target, ProjectDependencyTarget):
+            continue
+        dependency_project = config.defined_projects[target.project]
+        if isinstance(dependency_project, GradleProject):
+            result.append(dependency_project)
+    return result
+
+
+def _collect_included_gradle_projects(
+    config: Config,
+    seed_projects: list[GradleProject],
+    mode: RepoSetupMode,
+) -> list[GradleProject]:
+    included: list[GradleProject] = []
+    seen: set[str] = set()
+    queue = list(seed_projects)
+
+    while queue:
+        project = queue.pop(0)
+        project_key = project.project_id or project.effective_gradle_project_name
+        if project_key in seen:
+            continue
+        seen.add(project_key)
+        included.append(project)
+
+        for dependency_project in _gradle_project_dependencies(config, project):
+            same_repo = dependency_project.effective_repo_root == project.effective_repo_root
+            if same_repo or mode == RepoSetupMode.LOCAL:
+                queue.append(dependency_project)
+
+    return included
+
+
+def _write_gradle_root_files(
+    ctx: RepoSetupContext,
+    *,
+    root_path: Path,
+    root_project_name: str,
+    seed_projects: list[GradleProject],
+    write_wrapper: bool,
+    write_build: bool = True,
+) -> None:
+    root_path.mkdir(parents=True, exist_ok=True)
+    included_projects = _collect_included_gradle_projects(ctx.config, seed_projects, ctx.mode)
+    plugin_versions = setup_kotlin.settings_plugin_versions(ctx)
+    if write_build:
+        build_text = render_template(
+            ctx.build_template,
+            **plugin_versions,
+        )
+        dev.io.write_text_file(root_path / "build.gradle.kts", setup_kotlin.clean_gradle_build_text(build_text))
+
+    settings_text = render_template(
+        ctx.settings_template,
+        **plugin_versions,
+        root_project_name=root_project_name,
+        included_projects=[
+            {
+                "gradle_project_name": included_project.effective_gradle_project_name,
+                "project_dir": _relative_project_dir(root_path, included_project.path),
+            }
+            for included_project in included_projects
+            if included_project.path.resolve() != root_path.resolve()
+        ],
+    )
+    dev.io.write_text_file(root_path / "settings.gradle.kts", setup_kotlin.clean_gradle_build_text(settings_text))
+
+    if write_wrapper:
+        dev.io.write_text_file(
+            root_path / "gradle.properties",
+            setup_common.clean_text(render_template(ctx.gradle_properties_template)),
+        )
+        dev.io.copy(ctx.repo_template / "gradle-files" / "gradlew", root_path / "gradlew")
+        dev.io.copy(ctx.repo_template / "gradle-files" / "gradlew.bat", root_path / "gradlew.bat")
+        setup_kotlin._mark_executable(root_path / "gradlew")
+        dev.io.copy(
+            ctx.repo_template / "gradle-files" / "gradle" / "wrapper" / "gradle-wrapper.jar",
+            root_path / "gradle" / "wrapper" / "gradle-wrapper.jar",
+        )
+        dev.io.copy(
+            ctx.repo_template / "gradle-files" / "gradle" / "wrapper" / "gradle-wrapper.properties",
+            root_path / "gradle" / "wrapper" / "gradle-wrapper.properties",
+        )
 
 
 USED_COMMIT_MESSAGES: dict[str, str] = {}
@@ -682,10 +785,7 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
         known_github_repos=known_github_repos,
         repo_template=repo_template,
         is_github_api_available=is_github_api_available,
-        licenses={
-            "AGPL": dev.io.read_text_file(repo_template / "legal" / "licenses" / "AGPL.md"),
-            "CC0": dev.io.read_text_file(repo_template / "legal" / "licenses" / "CC0.md"),
-        },
+        licenses=load_license_texts(repo_template / "legal" / "licenses"),
         gitignore_template=dev.io.read_template(repo_template / "gitignore.jinja2"),
         cla=dev.io.read_template(repo_template / "legal" / "cla" / "v1.0.0" / "CLA.md"),
         cla_explanations=dev.io.read_template(repo_template / "legal" / "cla" / "v1.0.0" / "CLA_EXPLANATIONS.md"),
@@ -701,6 +801,9 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
         build_template=dev.io.read_template(repo_template / "gradle-files" / "build.gradle.kts.jinja2"),
         subproject_build_template=dev.io.read_template(
             repo_template / "gradle-files" / "subproject-build.gradle.kts.jinja2"
+        ),
+        subproject_build_kmp_template=dev.io.read_template(
+            repo_template / "gradle-files" / "subproject-build-kmp.gradle.kts.jinja2"
         ),
         gradle_properties_template=dev.io.read_template(repo_template / "gradle-files" / "gradle.properties.jinja2"),
         python_gitignore_template=dev.io.read_template(repo_template / "python-files" / "gitignore.jinja2"),
@@ -749,22 +852,79 @@ def setup(mode: RepoSetupMode, *, interactive: bool = True, project: str | None 
     else:
         info(f"Setting up {project} and its dependencies in {mode.value} mode")
 
-    # For convenience, we generate top-level settings.gradle.kts, build.gradle.kts
-    # if any Gradle projects exist. Then we handle each project individually.
-    any_gradle = any(isinstance(p, GradleProject) for p in selected_projects)
-    if any_gradle:
-        gradle_build = render_template(ctx.build_template, kotlin_version=ctx.config.plugins["kotlin-jvm"].version)
-        dev.io.write_text_file(Path("build.gradle.kts"), gradle_build)
+    gradle_projects = [project_item for project_item in selected_projects if isinstance(project_item, GradleProject)]
+    if gradle_projects:
+        target_project = config.defined_projects.get(project) if project is not None else None
+        if isinstance(target_project, GradleProject) and mode != RepoSetupMode.LOCAL:
+            workspace_seed_projects = [
+                project_item
+                for project_item in gradle_projects
+                if project_item.effective_repo_root == target_project.effective_repo_root
+            ]
+        else:
+            workspace_seed_projects = gradle_projects
+        workspace_root_name = config.default_maven_project_group or "workspace"
+        _write_gradle_root_files(
+            ctx,
+            root_path=Path("."),
+            root_project_name=workspace_root_name,
+            seed_projects=workspace_seed_projects,
+            write_wrapper=False,
+            write_build=True,
+        )
 
-        gradle_subprojects = [p.name for p in selected_projects if isinstance(p, GradleProject)]
-        result = render_template(ctx.settings_template, subprojects=gradle_subprojects)
-        dev.io.write_text_file(Path("settings.gradle.kts"), result)
+        repo_ids_to_write = {
+            project_item.repo_id
+            for project_item in gradle_projects
+            if project_item.repo_id is not None and project_item.effective_gradle_root != Path(".")
+        }
+        for repo_id in sorted(repo_ids_to_write):
+            repo_definition = config.defined_repos.get(repo_id)
+            if repo_definition is None:
+                continue
+            repo_gradle_projects = [
+                defined_project
+                for defined_project in config.defined_projects.values()
+                if isinstance(defined_project, GradleProject) and defined_project.repo_id == repo_id
+            ]
+            if not repo_gradle_projects:
+                continue
+            _write_gradle_root_files(
+                ctx,
+                root_path=repo_definition.path,
+                root_project_name=repo_definition.gradle_root_project_name or repo_id,
+                seed_projects=repo_gradle_projects,
+                write_wrapper=True,
+                write_build=False,
+            )
 
     for setup_project_item in selected_projects:
         setup_project(ctx, setup_project_item, interactive=interactive)
 
+    if mode == RepoSetupMode.LOCAL:
+        standalone_gradle_projects = [
+            project_item
+            for project_item in selected_projects
+            if isinstance(project_item, GradleProject) and project_item.effective_gradle_root == project_item.path
+        ]
+        for standalone_project in standalone_gradle_projects:
+            _write_gradle_root_files(
+                ctx,
+                root_path=standalone_project.path,
+                root_project_name=standalone_project.effective_gradle_project_name,
+                seed_projects=[standalone_project],
+                write_wrapper=False,
+                write_build=False,
+            )
+
     if project is None:
-        project_dirs = [p.path.name for p in selected_projects]
+        project_dirs: list[str] = []
+        for project_item in selected_projects:
+            relative_parts = project_item.path.parts
+            if relative_parts and relative_parts[0] == ".":
+                relative_parts = relative_parts[1:]
+            if relative_parts:
+                project_dirs.append(relative_parts[0])
         ignored_dirs = [
             "build",
             ".gradle",

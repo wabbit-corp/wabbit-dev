@@ -1,6 +1,27 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Align generated Android/KMP builds to Gradle `8.13` and AGP `8.13.2`, update generated wrapper/`gradle.properties` versions accordingly, and keep repo-local wrappers in sync with the managed toolchain version.
+- Fix generated KMP coverage config by upgrading Kover to `0.9.3`, which restores `:jeeves-api:koverGenerateArtifactJvm` on Android-backed KMP modules.
+- Stop generating deprecated `-Xcontext-receivers`, standardize generated Kotlin compiler flags on `-Xcontext-parameters`, and clean up default KMP source-set rendering to avoid hierarchy-template warnings.
+- Add temporary generated Android-app task guards for known toolchain incompatibilities: skip `check*AarMetadata` in local builds, gate iOS simulator tests behind `jeeves.enableIosSimulatorTests`, and disable Android lint tasks by default until lint can read Kotlin `2.3.x` metadata (`-Pwabbit.enableAndroidLint=true` re-enables them).
+- Fix missing generated dependency coverage discovered during full-workspace compile validation by adding `:kotlin-dotenv` + `:kotlin-envformat` to `app-kairos` and `:kotlin-fastapi` to `app-blog`, plus a small Kotlin 2.3 compatibility fix in `app-blog`.
+- Generate one Gradle wrapper/settings layer per Git repo instead of per nested Gradle module, including repo-root settings for Jeeves-style mixed-language repos and standalone local-mode settings that preserve cross-repo included-project wiring for IntelliJ.
+- Expand KMP Gradle rendering to use explicit targets/source-set graphs and Compose accessor-aware dependency emission, allowing regenerated standalone multiplatform repos plus Jeeves `api`/`client`/`server` modules to assemble successfully with local project dependencies.
+- Add a repo-first config model with top-level `(repo ...)` blocks, nested mixed-language project loading, repo-root metadata (`project_id`, `repo_root`, Gradle root/module names), and repo-root-aware setup/commit/push/status behavior without forcing setup generation onto nested repo-managed projects.
+- Preserve the local-vs-published Gradle dependency contract across repo boundaries: same-repo modules stay as `project(...)` edges, cross-repo dependencies switch between local included projects and published artifacts by mode, and targeted `PROD` setup now omits cross-repo Gradle includes from generated root `settings.gradle.kts`.
+- Add reusable JVM discovery/policy selection in `dev/jvms.py` with macOS `/usr/libexec/java_home -V` support, built-in `jvm-N` and `android-agp-21` policies, task-level override matching, a rewritten `choose-jvm` CLI, and a repo-block migration for Jeeves (`api`, `client`, `server`, `web`, `discord-bridge`, `audio-backend`) in `root.clj` that captures current module behavior without regenerating their live Gradle files yet.
+- Add KMP-first Gradle config generation: `gradle` projects now support `:platforms` + strict `:sourceSetDependencies` (with canonical source-set keys, JVM fallback path, and hard-fail cross-project source-set/platform compatibility validation).
+- Add explicit KMP Gradle features in typed/runtime config (`kmp-android-library`, `kmp-compose`, `kmp-jvm-runs`) and render them through a dedicated KMP subproject template (`subproject-build-kmp.gradle.kts.jinja2`) while keeping existing JVM template behavior unchanged.
+- Migrate `jeeves-server` in workspace `root.clj` to declarative KMP config (platforms, source-set dependency map, Android/Compose metadata, and named JVM run entries), and generate its `build.gradle.kts` from setup instead of hand editing.
+- Update Gradle settings/build templates to better support Android/KMP projects in generated builds (`google()` in dependency/plugin management repos and dependency-analysis plugin no longer auto-applied globally).
+- Centralize setup license metadata in `dev/licenses.py` and expand supported project license keys/templates to `AGPL`, `CC0`, `MIT`, `BSD`, and `GPLv3` (including Python SPDX normalization).
+- Standardize license templating variables and rendering across all license templates so legacy placeholders (`<year>`, `<owner>`, `<name of author>`, etc.) are consistently replaced during setup.
+- Add IntelliJ plugin config validation for build numbers (reject non-existent branches like `255.*`) and sync `plugin.xml` metadata from `root.clj` during setup while preserving existing actions/extensions.
+- Add private config commands for publishing credentials (`jetbrains-marketplace-token`, `pypi-token`) and wire them into runtime config loading.
+- Extend the `intellij-plugin` feature schema with Marketplace/patching metadata (`sinceBuild`, `untilBuild`, IntelliJ version, bundled plugins, channel, token env var) while keeping one-argument usage backward compatible.
+- Render IntelliJ Gradle publish configuration during setup (`intellij.publish.token/channels`) and default plugin patching to `sinceBuild=232`.
+- Split publish flows by target into dedicated modules (`publish_jetpack.py`, `publish_intellij.py`, `publish_pypi.py`) with shared primitives in `publish_common.py` and a dispatcher-only `publish.py`.
 - Route commit/version AI calls through the Responses API so `gpt-5.3-codex` is used on a supported endpoint without model fallback logic.
 - Prevent `dev commit` setup flow from pushing to remotes: commit-mode setup now runs with `allow_push=False` so it never executes `git push --set-upstream`.
 - Raise Python `openai` dependency to `>=2.24.0,<3.0.0` (from workspace `root.clj`) so the CLI uses the same modern SDK API/types across environments.

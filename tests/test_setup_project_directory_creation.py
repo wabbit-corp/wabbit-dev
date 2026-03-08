@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import jinja2
@@ -82,6 +83,7 @@ def _make_setup_context(pyproject_template: str, codespell_words: str = "wabbit\
         subproject_settings_template=jinja2.Template(""),
         build_template=jinja2.Template(""),
         subproject_build_template=jinja2.Template(""),
+        subproject_build_kmp_template=jinja2.Template(""),
         gradle_gitignore_template=jinja2.Template(""),
         gradle_properties_template=jinja2.Template(""),
         python_gitignore_template=jinja2.Template("# python\n"),
@@ -330,3 +332,115 @@ def test_setup_python_project_merges_codespell_words_without_overwrite(
 
     content = (project.path / ".codespell-ignore-words.txt").read_text(encoding="utf-8").splitlines()
     assert content == ["langmu", "wabbit", "newword"]
+
+
+def test_targeted_prod_setup_omits_cross_repo_gradle_projects_from_root_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    import dev.tasks.setup as setup_module
+    from dev.config import Config, GradleProject, OwnershipType, Version
+    from mu.types import Document
+
+    def make_gradle_project(
+        path: Path,
+        *,
+        project_id: str,
+        repo_root_path: Path,
+        gradle_project_name: str,
+    ) -> GradleProject:
+        return GradleProject(
+            path=path,
+            group_name="one.wabbit",
+            name=path.name,
+            version=Version.parse("0.0.1"),
+            description=None,
+            authors=[],
+            license="AGPL",
+            quarantine=False,
+            publish=False,
+            github_repo="org/repo",
+            ownership=OwnershipType.WABBIT,
+            raw_dependencies=[],
+            raw_features=[],
+            resolved_dependencies=[],
+            resolved_maven_repositories=[],
+            resolved_features={},
+            platforms=["jvm"],
+            source_set_dependencies={},
+            project_id=project_id,
+            repo_id=project_id.split("/", 1)[0] if "/" in project_id else None,
+            repo_root=repo_root_path,
+            managed_by_setup=False,
+            gradle_root=repo_root_path,
+            module_dir=Path(path.name),
+            gradle_project_name=gradle_project_name,
+        )
+
+    jeeves_root = tmp_path / "jeeves"
+    external_root = tmp_path / "kotlin-dotenv-parser"
+    api_project = make_gradle_project(
+        jeeves_root / "api",
+        project_id="jeeves/api",
+        repo_root_path=jeeves_root,
+        gradle_project_name="jeeves-api",
+    )
+    server_project = make_gradle_project(
+        jeeves_root / "server",
+        project_id="jeeves/server",
+        repo_root_path=jeeves_root,
+        gradle_project_name="jeeves-server",
+    )
+    external_project = make_gradle_project(
+        external_root,
+        project_id="kotlin-dotenv-parser",
+        repo_root_path=external_root,
+        gradle_project_name="kotlin-dotenv-parser",
+    )
+
+    config = Config(raw=Document([]))
+    config.defined_projects = {
+        "jeeves/api": api_project,
+        "kotlin-dotenv-parser": external_project,
+        "jeeves/server": server_project,
+    }
+    config.plugins["kotlin-jvm"] = SimpleNamespace(version="2.2.20")
+
+    written_files: dict[str, str] = {}
+
+    def fake_load_config() -> Config:
+        return config
+
+    def fake_toposort_projects(_projects: object, target_project: str | None = None) -> list[str]:
+        assert target_project == "jeeves/server"
+        return ["jeeves/api", "kotlin-dotenv-parser", "jeeves/server"]
+
+    def fake_create_repo_setup_context(_config: Config, mode: object) -> object:
+        return SimpleNamespace(
+            config=config,
+            mode=mode,
+            build_template=jinja2.Template("ROOT_BUILD {{ kotlin_version }}"),
+            settings_template=jinja2.Template(
+                "{% for included_project in included_projects %}"
+                "{{ included_project.gradle_project_name }}={{ included_project.project_dir }}\n"
+                "{% endfor %}"
+            ),
+        )
+
+    def fake_write_text_file(path: Path, content: str) -> None:
+        written_files[path.as_posix()] = content
+
+    monkeypatch.setattr(setup_module, "load_config", fake_load_config)
+    monkeypatch.setattr(setup_module, "toposort_projects", fake_toposort_projects)
+    monkeypatch.setattr(setup_module, "create_repo_setup_context", fake_create_repo_setup_context)
+    monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module.dev.io, "write_text_file", fake_write_text_file)
+
+    setup_module.setup(setup_module.RepoSetupMode.PROD, interactive=False, project="jeeves/server")
+
+    settings_text = written_files["settings.gradle.kts"]
+    assert "jeeves-api=" in settings_text
+    assert "jeeves-server=" in settings_text
+    assert "kotlin-dotenv-parser=" not in settings_text

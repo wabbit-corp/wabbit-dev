@@ -7,7 +7,7 @@ from git.exc import InvalidGitRepositoryError, NoSuchPathError
 
 from dev.base import Scope
 from dev.build_order import toposort_projects
-from dev.config import Project, load_config
+from dev.config import Project, load_config, project_repo_root
 from dev.messages import error, info
 from dev.tasks.setup import (
     RepoSetupMode,
@@ -57,7 +57,7 @@ def commit(project_name: str | None = None) -> None:
             setup_project(setup_context, project, interactive=False, commit_changes=False, allow_push=False)
 
             try:
-                repo = Repo(project.path)
+                repo = Repo(project_repo_root(project))
             except (InvalidGitRepositoryError, NoSuchPathError) as ex:
                 error(f"Skipping commit for {project.name}: failed to open repository ({ex})")
                 continue
