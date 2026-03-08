@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Add explicit project copyright metadata in config (`:copyright-holder`, `:copyright-year-start`) and use it when rendering generated license notices, including year ranges such as `2019-2026`.
+- Make CLA generation license-aware by rendering the configured project license into both the full CLA and the simplified CLA explanations, instead of hardcoding AGPL wording for every managed repo.
+- Fix Purescript setup so configured Wabbit-owned Purescript repos get the standard generated legal/banner files, and register `purescript-stablename` plus `purescript-datareify` in `root.clj` with `MIT` licenses so scoped `setup <name>` produces `LICENSE.md`.
 - Align generated Android/KMP builds to Gradle `8.13` and AGP `8.13.2`, update generated wrapper/`gradle.properties` versions accordingly, and keep repo-local wrappers in sync with the managed toolchain version.
 - Fix generated KMP coverage config by upgrading Kover to `0.9.3`, which restores `:jeeves-api:koverGenerateArtifactJvm` on Android-backed KMP modules.
 - Stop generating deprecated `-Xcontext-receivers`, standardize generated Kotlin compiler flags on `-Xcontext-parameters`, and clean up default KMP source-set rendering to avoid hierarchy-template warnings.

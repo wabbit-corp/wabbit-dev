@@ -17,6 +17,8 @@ class _FakeProject:
     name: str
     description: str | None
     authors: list[str]
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
 
 
 @dataclass
@@ -47,8 +49,8 @@ def test_write_wabbit_legal_files_renders_license_template_variables(tmp_path: P
             )
         },
         coc="CODE OF CONDUCT\n",
-        cla=jinja2.Template("CLA\n"),
-        cla_explanations=jinja2.Template("CLA EXPLAIN\n"),
+        cla=jinja2.Template("CLA {{ project_primary_license_reference }}\n"),
+        cla_explanations=jinja2.Template("CLA EXPLAIN {{ project_primary_license_reference }}\n"),
         contributor_privacy_policy=jinja2.Template("PRIVACY\n"),
         repo_template=tmp_path,
     )
@@ -60,7 +62,7 @@ def test_write_wabbit_legal_files_renders_license_template_variables(tmp_path: P
     assert "demo-proj" in license_text
     assert "demo-proj: Example project" in license_text
 
-    assert (tmp_path / "CLA.md").read_text(encoding="utf-8") == "CLA\n"
-    assert (tmp_path / "CLA_EXPLANATIONS.md").read_text(encoding="utf-8") == "CLA EXPLAIN\n"
+    assert (tmp_path / "CLA.md").read_text(encoding="utf-8") == "CLA MIT License (MIT)\n"
+    assert (tmp_path / "CLA_EXPLANATIONS.md").read_text(encoding="utf-8") == "CLA EXPLAIN MIT License (MIT)\n"
     assert (tmp_path / "CONTRIBUTOR_PRIVACY.md").read_text(encoding="utf-8") == "PRIVACY\n"
     assert (tmp_path / "CODE_OF_CONDUCT.md").read_text(encoding="utf-8") == "CODE OF CONDUCT\n"

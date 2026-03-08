@@ -581,6 +581,8 @@ class Project(ABC):
     description: str | None
     authors: list[str]
     license: str | None
+    copyright_holder: str | None
+    copyright_year_start: int | None
     quarantine: bool
     publish: bool
     github_repo: str | None
@@ -665,6 +667,8 @@ class PythonProject(Project):
     repo_id: str | None = None
     repo_root: Path | None = None
     managed_by_setup: bool = True
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
     # (We keep a list of `Dependency` too if you want to unify anything across projects,
     #  but typically a pure Python project won't rely on Gradle dependencies.)
 
@@ -696,6 +700,8 @@ class PurescriptProject(Project):
     repo_id: str | None = None
     repo_root: Path | None = None
     managed_by_setup: bool = True
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
 
     def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
@@ -725,6 +731,8 @@ class PremakeProject(Project):
     repo_id: str | None = None
     repo_root: Path | None = None
     managed_by_setup: bool = True
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
 
     def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
@@ -754,6 +762,8 @@ class DataProject(Project):
     repo_id: str | None = None
     repo_root: Path | None = None
     managed_by_setup: bool = True
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
 
     def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
@@ -792,6 +802,8 @@ class GradleProject(Project):
     repo_id: str | None = None
     repo_root: Path | None = None
     managed_by_setup: bool = True
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
     gradle_root: Path | None = None
     module_dir: Path | None = None
     gradle_project_name: str | None = None
@@ -1619,6 +1631,10 @@ def load_config() -> Config:
 
     def verify_project(project: Project) -> None:
         project.license = canonicalize_license_key(project.license)
+        if project.copyright_holder is not None:
+            project.copyright_holder = project.copyright_holder.strip() or None
+        if project.copyright_year_start is not None and project.copyright_year_start <= 0:
+            raise ValueError(f"{project.name} has invalid copyright_year_start={project.copyright_year_start}")
 
         if isinstance(project, GradleProject):
             intellij_feature = project.resolved_features.get("intellij-plugin")
@@ -1794,6 +1810,8 @@ def load_config() -> Config:
                 repo_id=repo_id,
                 repo_root=repo_root_path,
                 managed_by_setup=managed_by_setup,
+                copyright_holder=command.copyright_holder,
+                copyright_year_start=command.copyright_year_start,
             )
             verify_project(python_project)
             register_project(project_id, python_project)
@@ -1819,6 +1837,8 @@ def load_config() -> Config:
                 repo_id=repo_id,
                 repo_root=repo_root_path,
                 managed_by_setup=managed_by_setup,
+                copyright_holder=command.copyright_holder,
+                copyright_year_start=command.copyright_year_start,
             )
             verify_project(purescript_project)
             register_project(project_id, purescript_project)
@@ -1844,6 +1864,8 @@ def load_config() -> Config:
                 repo_id=repo_id,
                 repo_root=repo_root_path,
                 managed_by_setup=managed_by_setup,
+                copyright_holder=command.copyright_holder,
+                copyright_year_start=command.copyright_year_start,
             )
             verify_project(data_project)
             register_project(project_id, data_project)
@@ -1869,6 +1891,8 @@ def load_config() -> Config:
                 repo_id=repo_id,
                 repo_root=repo_root_path,
                 managed_by_setup=managed_by_setup,
+                copyright_holder=command.copyright_holder,
+                copyright_year_start=command.copyright_year_start,
             )
             verify_project(premake_project)
             register_project(project_id, premake_project)
@@ -2041,6 +2065,8 @@ def load_config() -> Config:
                 repo_id=repo_id,
                 repo_root=repo_root_path,
                 managed_by_setup=managed_by_setup,
+                copyright_holder=command.copyright_holder,
+                copyright_year_start=command.copyright_year_start,
                 gradle_root=repo_root_path,
                 module_dir=Path(command.dir_name),
                 gradle_project_name=gradle_project_name,

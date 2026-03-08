@@ -10,7 +10,7 @@ import jinja2
 import dev.io
 from dev.banner import create_banner
 from dev.config import OwnershipType, Project
-from dev.licenses import canonicalize_license_key, render_project_license
+from dev.licenses import canonicalize_license_key, cla_primary_license_reference, render_project_license
 from dev.messages import error, warning
 
 
@@ -70,6 +70,7 @@ def write_wabbit_legal_files(ctx: CommonSetupContext, project: Project) -> None:
         return
 
     project_license = canonicalize_license_key(project.license)
+    primary_license_reference = cla_primary_license_reference(project_license)
     if project_license is not None:
         license_text = ctx.licenses.get(project_license)
         if license_text is None:
@@ -79,8 +80,14 @@ def write_wabbit_legal_files(ctx: CommonSetupContext, project: Project) -> None:
             rendered_license_text = render_project_license(license_text, project)
             dev.io.write_text_file(project.path / "LICENSE.md", rendered_license_text)
 
-    dev.io.write_text_file(project.path / "CLA.md", render_template(ctx.cla))
-    dev.io.write_text_file(project.path / "CLA_EXPLANATIONS.md", render_template(ctx.cla_explanations))
+    dev.io.write_text_file(
+        project.path / "CLA.md",
+        render_template(ctx.cla, project_primary_license_reference=primary_license_reference),
+    )
+    dev.io.write_text_file(
+        project.path / "CLA_EXPLANATIONS.md",
+        render_template(ctx.cla_explanations, project_primary_license_reference=primary_license_reference),
+    )
     dev.io.write_text_file(
         project.path / "CONTRIBUTOR_PRIVACY.md",
         render_template(ctx.contributor_privacy_policy),

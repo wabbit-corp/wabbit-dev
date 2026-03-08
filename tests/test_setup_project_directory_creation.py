@@ -11,7 +11,7 @@ import pytest
 from git import Repo
 
 if TYPE_CHECKING:
-    from dev.config import Config, PythonApplication, PythonProject
+    from dev.config import Config, PurescriptProject, PythonApplication, PythonProject
     from dev.tasks.setup import RepoSetupContext
 
 
@@ -55,6 +55,24 @@ def _make_python_project(
         quarantine=False,
         publish=False,
         ownership=OwnershipType.WABBIT,
+        resolved_dependencies=[],
+    )
+
+
+def _make_purescript_project(path: Path, github_repo: str | None = None) -> PurescriptProject:
+    from dev.config import OwnershipType, PurescriptProject
+
+    return PurescriptProject(
+        path=path,
+        name="pkg",
+        description=None,
+        authors=[],
+        quarantine=False,
+        publish=False,
+        license="MIT",
+        github_repo=github_repo,
+        ownership=OwnershipType.WABBIT,
+        version=None,
         resolved_dependencies=[],
     )
 
@@ -216,6 +234,40 @@ def test_setup_python_project_generates_docs_and_workflows(tmp_path: Path, monke
     assert "build>=1.2.0,<2.0.0" in requirements_dev
     assert "twine>=5.0.0,<6.0.0" in requirements_dev
     assert "pyinstaller>=6.9.0,<7.0.0" not in requirements_dev
+
+
+def test_setup_purescript_project_generates_legal_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    import dev.tasks.setup as setup_module
+
+    project = _make_purescript_project(tmp_path / "pkg", github_repo="org/pkg")
+    project.path.mkdir(parents=True, exist_ok=True)
+
+    wrote_legal_files = False
+    wrote_banner = False
+
+    def fake_write_wabbit_legal_files(_ctx: object, purescript_project: PurescriptProject) -> None:
+        nonlocal wrote_legal_files
+        wrote_legal_files = True
+        assert purescript_project is project
+
+    def fake_write_banner(_ctx: object, purescript_project: PurescriptProject) -> None:
+        nonlocal wrote_banner
+        wrote_banner = True
+        assert purescript_project is project
+
+    monkeypatch.setattr(setup_module, "_write_wabbit_legal_files", fake_write_wabbit_legal_files)
+    monkeypatch.setattr(setup_module, "_write_banner", fake_write_banner)
+
+    ctx = _make_setup_context('[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n')
+
+    setup_module.setup_purescript_project(ctx, project, interactive=False)
+
+    assert (project.path / ".gitignore").is_file()
+    assert wrote_legal_files
+    assert wrote_banner
 
 
 def test_setup_python_project_generates_app_build_script_for_python_application(

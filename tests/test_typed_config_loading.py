@@ -124,6 +124,49 @@ def test_dep_call_in_gradle_dependencies_is_resolved(tmp_path: Path) -> None:
     )
 
 
+def test_purescript_project_is_loaded_with_explicit_license(tmp_path: Path) -> None:
+    from dev.config import PurescriptProject
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(purescript "demo-purescript" :version "0.1.0" :license "MIT" :repo "wabbit-corp/demo-purescript")',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo-purescript"]
+    assert isinstance(project, PurescriptProject)
+    assert project.license == "MIT"
+
+
+def test_purescript_project_loads_explicit_copyright_metadata(tmp_path: Path) -> None:
+    from dev.config import PurescriptProject
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                "("
+                'purescript "demo-purescript" '
+                ':version "0.1.0" '
+                ':license "MIT" '
+                ':copyright-holder "Wabbit Consulting Corporation" '
+                ':copyright-year-start 2019 '
+                ':repo "wabbit-corp/demo-purescript")',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo-purescript"]
+    assert isinstance(project, PurescriptProject)
+    assert project.copyright_holder == "Wabbit Consulting Corporation"
+    assert project.copyright_year_start == 2019
+
+
 def test_unknown_top_level_tag_fails_decode(tmp_path: Path) -> None:
     from mu.typed import DecodeError
 

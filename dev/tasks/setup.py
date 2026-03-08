@@ -316,6 +316,8 @@ def setup_purescript_project(ctx: RepoSetupContext, project: PurescriptProject, 
         project.path / ".gitignore",
         render_template(ctx.gitignore_template) + "\n" + render_template(ctx.purescript_gitignore_template),
     )
+    _write_wabbit_legal_files(ctx, project)
+    _write_banner(ctx, project)
 
 
 def setup_gradle_project(ctx: RepoSetupContext, project: GradleProject, interactive: bool = True) -> None:

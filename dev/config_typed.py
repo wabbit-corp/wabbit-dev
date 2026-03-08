@@ -631,6 +631,8 @@ class PythonProjectCommand:
     description: str | None = None
     authors: list[str] | None = None
     license: str | None = "AGPL"
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
     quarantine: bool = False
     publish: bool = True
     requires_python: str | None = None
@@ -656,6 +658,8 @@ class PurescriptProjectCommand:
     authors: list[str] | None = None
     quarantine: bool = False
     license: str | None = "AGPL"
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
     publish: bool = True
     repo: str | None = None
     ownership: str | None = None
@@ -670,6 +674,8 @@ class DataProjectCommand:
     description: str | None = None
     authors: list[str] | None = None
     license: str | None = "AGPL"
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
     quarantine: bool = False
     publish: bool = True
     repo: str | None = None
@@ -685,6 +691,8 @@ class PremakeProjectCommand:
     description: str | None = None
     authors: list[str] | None = None
     license: str | None = "AGPL"
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
     quarantine: bool = False
     publish: bool = True
     repo: str | None = None
@@ -700,6 +708,8 @@ class GradleProjectCommand:
     description: str | None = None
     authors: list[str] | None = None
     license: str | None = "AGPL"
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
     quarantine: bool = False
     publish: bool = True
     buildModel: str | None = None

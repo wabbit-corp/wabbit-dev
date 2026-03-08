@@ -15,14 +15,15 @@ class LicenseDefinition:
     key: str
     template_file: str
     python_spdx: str
+    display_name: str
 
 
 SUPPORTED_LICENSES: tuple[LicenseDefinition, ...] = (
-    LicenseDefinition("AGPL", "AGPL.md", "AGPL-3.0-or-later"),
-    LicenseDefinition("CC0", "CC0.md", "CC0-1.0"),
-    LicenseDefinition("MIT", "MIT.md", "MIT"),
-    LicenseDefinition("BSD", "BSD.md", "BSD-3-Clause"),
-    LicenseDefinition("GPLv3", "GPLv3.md", "GPL-3.0-only"),
+    LicenseDefinition("AGPL", "AGPL.md", "AGPL-3.0-or-later", "GNU Affero General Public License v3.0 or later"),
+    LicenseDefinition("CC0", "CC0.md", "CC0-1.0", "Creative Commons Zero v1.0 Universal"),
+    LicenseDefinition("MIT", "MIT.md", "MIT", "MIT License"),
+    LicenseDefinition("BSD", "BSD.md", "BSD-3-Clause", "BSD 3-Clause License"),
+    LicenseDefinition("GPLv3", "GPLv3.md", "GPL-3.0-only", "GNU General Public License v3.0 only"),
 )
 
 _LICENSES_BY_KEY: dict[str, LicenseDefinition] = {item.key: item for item in SUPPORTED_LICENSES}
@@ -67,6 +68,28 @@ def python_spdx_for_license(license_key: str | None) -> str | None:
     return definition.python_spdx
 
 
+def license_display_name(license_key: str | None) -> str | None:
+    normalized = canonicalize_license_key(license_key)
+    if normalized is None:
+        return None
+
+    definition = _LICENSES_BY_KEY.get(normalized)
+    if definition is None:
+        return normalized
+    return definition.display_name
+
+
+def cla_primary_license_reference(license_key: str | None) -> str:
+    display_name = license_display_name(license_key)
+    spdx_identifier = python_spdx_for_license(license_key)
+
+    if display_name is None:
+        return "the project's configured open-source license"
+    if spdx_identifier is None or spdx_identifier == display_name:
+        return display_name
+    return f"{display_name} ({spdx_identifier})"
+
+
 def load_license_texts(licenses_dir: Path) -> dict[str, str]:
     return {item.key: dev.io.read_text_file(licenses_dir / item.template_file) for item in SUPPORTED_LICENSES}
 
@@ -75,6 +98,8 @@ class LicenseProjectLike(Protocol):
     name: str
     description: str | None
     authors: list[str]
+    copyright_holder: str | None
+    copyright_year_start: int | None
 
 
 def _normalize_author_name(author: str) -> str:
@@ -84,7 +109,7 @@ def _normalize_author_name(author: str) -> str:
     return value
 
 
-def _copyright_holder(authors: list[str]) -> str:
+def _default_copyright_holder(authors: list[str]) -> str:
     normalized_authors: list[str] = []
     for author in authors:
         normalized = _normalize_author_name(author)
@@ -95,6 +120,20 @@ def _copyright_holder(authors: list[str]) -> str:
     if len(normalized_authors) == 1:
         return normalized_authors[0]
     return ", ".join(normalized_authors)
+
+
+def _copyright_holder(authors: list[str], explicit_holder: str | None) -> str:
+    if explicit_holder is not None and explicit_holder.strip():
+        return explicit_holder.strip()
+    return _default_copyright_holder(authors)
+
+
+def _copyright_year_text(*, current_year: int, year_start: int | None) -> str:
+    if year_start is None or year_start == current_year:
+        return str(current_year)
+    if year_start > current_year:
+        raise ValueError(f"copyright year start {year_start} is after current year {current_year}")
+    return f"{year_start}-{current_year}"
 
 
 def _standardize_license_template_text(template_text: str) -> str:
@@ -122,6 +161,8 @@ def render_license_text(
     project_name: str,
     project_description: str | None,
     project_authors: list[str],
+    project_copyright_holder: str | None = None,
+    project_copyright_year_start: int | None = None,
     current_year: int | None = None,
 ) -> str:
     year = current_year if current_year is not None else datetime.now().year
@@ -131,8 +172,8 @@ def render_license_text(
 
     template = jinja2.Template(_standardize_license_template_text(template_text))
     rendered = template.render(
-        copyright_year=year,
-        copyright_holder=_copyright_holder(project_authors),
+        copyright_year=_copyright_year_text(current_year=year, year_start=project_copyright_year_start),
+        copyright_holder=_copyright_holder(project_authors, project_copyright_holder),
         project_name=project_name,
         project_description=project_description or "",
         project_header_line=header_line,
@@ -146,5 +187,7 @@ def render_project_license(template_text: str, project: LicenseProjectLike, *, c
         project_name=project.name,
         project_description=project.description,
         project_authors=project.authors,
+        project_copyright_holder=project.copyright_holder,
+        project_copyright_year_start=project.copyright_year_start,
         current_year=current_year,
     )
