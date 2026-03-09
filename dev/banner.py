@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from PIL import Image, ImageColor, ImageDraw, ImageFont
+from PIL import Image, ImageColor, ImageDraw, ImageFont, PngImagePlugin
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,8 +47,8 @@ def prepare_icon(icon_path: str | Path, target_size: int, corner_radius_factor: 
     :param corner_radius_factor: Factor of the smaller dimension of the resized icon to use for corner radius.
     :return: Processed icon as an RGBA PIL Image.
     """
-    icon_source = Image.open(icon_path)
-    icon = icon_source.convert("RGBA")  # Ensure icon has an alpha channel
+    with Image.open(icon_path) as icon_source:
+        icon = icon_source.convert("RGBA")  # Ensure icon has an alpha channel
 
     original_width, original_height = icon.size
     aspect_ratio = original_width / original_height
@@ -106,13 +106,108 @@ def prepare_icon(icon_path: str | Path, target_size: int, corner_radius_factor: 
     return rounded_icon_with_original_alpha
 
 
+def _render_banner(
+    image_path: str | Path,
+    main_text: str,
+    subtitle_text: str | None,
+    background_color: str | tuple[int, int, int] | tuple[int, int, int, int],
+    font_path: str | Path,
+    icon_target_size: int,
+    font_size: int,
+    subtitle_font_size: int | None,
+    text_color: str,
+    padding: int,
+    space_between_img_text_factor: float,
+) -> Image.Image:
+    main_font = ImageFont.truetype(str(font_path), font_size)
+    if subtitle_font_size and subtitle_text:
+        subtitle_font = ImageFont.truetype(str(font_path), subtitle_font_size)
+    else:
+        subtitle_font = None
+
+    img = prepare_icon(image_path, target_size=icon_target_size)
+    img_width, img_height = img.size
+
+    main_text_width, main_text_height = get_text_dimensions(main_font, main_text)
+    space_width = int(padding * space_between_img_text_factor)
+
+    subtitle_text_width, subtitle_text_height = 0, 0
+    if subtitle_text and subtitle_font:
+        subtitle_text_width, subtitle_text_height = get_text_dimensions(subtitle_font, subtitle_text)
+
+    text_block_width = max(main_text_width, subtitle_text_width)
+    text_block_height = main_text_height
+    if subtitle_text and subtitle_font:
+        assert subtitle_font_size is not None
+        text_block_height += int(subtitle_font_size * 0.2) + subtitle_text_height
+
+    banner_width = padding + img_width + space_width + text_block_width + padding
+    banner_height = max(img_height, text_block_height) + 2 * padding
+
+    final_banner_bg_color = _to_rgba(background_color)
+    banner = Image.new("RGBA", (banner_width, banner_height), color=final_banner_bg_color)
+    draw = ImageDraw.Draw(banner)
+
+    img_y_position = (banner_height - img_height) // 2
+    banner.paste(img, (padding, img_y_position), mask=img)
+
+    text_color_rgb = ImageColor.getrgb(text_color)
+    text_start_x = padding + img_width + space_width
+    text_block_y_start = (banner_height - text_block_height) // 2
+
+    main_text_x = text_start_x
+    main_text_y = text_block_y_start
+    draw.text((main_text_x, main_text_y), main_text, font=main_font, fill=text_color_rgb)
+
+    if subtitle_text and subtitle_font:
+        subtitle_text_x = text_start_x
+        assert subtitle_font_size is not None
+        subtitle_text_y = main_text_y + main_text_height + int(subtitle_font_size * 0.2)
+        draw.text(
+            (subtitle_text_x, subtitle_text_y),
+            subtitle_text,
+            font=subtitle_font,
+            fill=text_color_rgb,
+        )
+
+    return banner
+
+
+def _rgba_signature(image: Image.Image) -> tuple[tuple[int, int], bytes]:
+    rgba = image if image.mode == "RGBA" else image.convert("RGBA")
+    return rgba.size, rgba.tobytes()
+
+
+def _existing_banner_matches(output_path: Path, banner: Image.Image) -> bool:
+    if not output_path.is_file():
+        return False
+
+    try:
+        with Image.open(output_path) as existing_banner:
+            return _rgba_signature(existing_banner) == _rgba_signature(banner)
+    except OSError:
+        _LOGGER.warning("Unable to read existing banner %s; rewriting it.", output_path)
+        return False
+
+
+def _save_banner_png(banner: Image.Image, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    banner.save(
+        output_path,
+        format="PNG",
+        optimize=False,
+        compress_level=9,
+        pnginfo=PngImagePlugin.PngInfo(),
+    )
+
+
 def create_banner(
     image_path: str | Path,
     main_text: str,
     subtitle_text: str | None = "",
     background_color: str | tuple[int, int, int] | tuple[int, int, int, int] = "black",  # Default banner background
-    font_path: str = "CooperHewitt-Light.otf",  # Ensure this font is available
-    output_path: str = "banner_output.png",
+    font_path: str | Path = "CooperHewitt-Light.otf",  # Ensure this font is available
+    output_path: str | Path = "banner_output.png",
     icon_target_size: int = 300,  # Max dimension for the icon
     font_size: int = 50,
     subtitle_font_size: int | None = 30,
@@ -135,85 +230,28 @@ def create_banner(
     :param subtitle_font_size: Font size for subtitle.
     :param padding: Horizontal/vertical padding around texts.
     """
-    # 1. Download (if needed) and load the font
-    # font_path = download_font(font_url, "banner_font.ttf")
-    main_font = ImageFont.truetype(font_path, font_size)
-    if subtitle_font_size and subtitle_text:
-        subtitle_font = ImageFont.truetype(font_path, subtitle_font_size)
-    else:
-        subtitle_font = None
+    banner = _render_banner(
+        image_path=image_path,
+        main_text=main_text,
+        subtitle_text=subtitle_text,
+        background_color=background_color,
+        font_path=font_path,
+        icon_target_size=icon_target_size,
+        font_size=font_size,
+        subtitle_font_size=subtitle_font_size,
+        text_color=text_color,
+        padding=padding,
+        space_between_img_text_factor=space_between_img_text_factor,
+    )
+    output = Path(output_path)
 
-    # 2. Load the original PNG
-    img = prepare_icon(image_path, target_size=icon_target_size)
-    img_width, img_height = img.size
-
-    # 3. Compute text sizes
-    main_text_width, main_text_height = get_text_dimensions(main_font, main_text)
-
-    # Calculate width of a space character to put between image and text
-    # Using 'm' as a typical wide character for spacing, or just a fixed portion of padding
-    space_width = int(padding * space_between_img_text_factor)
-
-    subtitle_text_width, subtitle_text_height = 0, 0
-    if subtitle_text and subtitle_font:
-        subtitle_text_width, subtitle_text_height = get_text_dimensions(subtitle_font, subtitle_text)
-
-    # 4. Calculate total banner width & height
-    text_block_width = max(main_text_width, subtitle_text_width)
-    text_block_height = main_text_height
-    if subtitle_text and subtitle_font:  # Add subtitle height and a small gap
-        assert subtitle_font_size is not None
-        text_block_height += int(subtitle_font_size * 0.2) + subtitle_text_height
-
-    banner_width = padding + img_width + space_width + text_block_width + padding
-    # Height considers padding around the taller of the two: image or text block
-    banner_height = max(img_height, text_block_height) + 2 * padding
-
-    # 5. Determine banner background color
-    final_banner_bg_color = _to_rgba(background_color)
-
-    # Create the blank banner
-    banner = Image.new("RGBA", (banner_width, banner_height), color=final_banner_bg_color)
-    draw = ImageDraw.Draw(banner)
-
-    # 6. Paste the image into the banner (vertically centered)
-    img_y_position = (banner_height - img_height) // 2
-    # Paste with alpha compositing using the image's own alpha channel as the mask
-    banner.paste(img, (padding, img_y_position), mask=img)
-
-    # 7. Draw text (text block vertically centered)
-    text_color_rgb = ImageColor.getrgb(text_color)  # Ensure text_color is RGB
-
-    text_start_x = padding + img_width + space_width
-    text_block_y_start = (banner_height - text_block_height) // 2
-
-    # Draw the main text (horizontally centered within its part of the text_block_width if desired, or left-aligned)
-    # For this layout, usually left-aligning text in its block is cleaner.
-    # main_text_x = text_start_x + (text_block_width - main_text_width) // 2 # Centered in text block
-    main_text_x = text_start_x  # Left-aligned in text block
-    main_text_y = text_block_y_start
-    draw.text((main_text_x, main_text_y), main_text, font=main_font, fill=text_color_rgb)
-
-    if subtitle_text and subtitle_font:
-        # subtitle_text_x = text_start_x + (text_block_width - subtitle_text_width) // 2 # Centered
-        subtitle_text_x = text_start_x  # Left-aligned
-        assert subtitle_font_size is not None
-        subtitle_text_y = (
-            main_text_y + main_text_height + int(subtitle_font_size * 0.2)
-        )  # Position below main text with a small gap
-        draw.text(
-            (subtitle_text_x, subtitle_text_y),
-            subtitle_text,
-            font=subtitle_font,
-            fill=text_color_rgb,
-        )
-
-    # 8. Save the final banner
     try:
-        banner.save(output_path)
-        # print(f"Banner created and saved to {output_path}")
+        if _existing_banner_matches(output, banner):
+            _LOGGER.debug("Skipping banner rewrite for %s because the RGBA pixels are unchanged.", output)
+            return
+        _save_banner_png(banner, output)
     except Exception as e:
-        _LOGGER.exception("Error saving banner to %s: %s", output_path, e)
+        _LOGGER.exception("Error saving banner to %s: %s", output, e)
 
 
 if __name__ == "__main__":

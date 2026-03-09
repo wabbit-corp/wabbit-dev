@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Avoid banner churn during setup by comparing rendered RGBA pixels before overwriting `.banner.png`, so equivalent images are left byte-for-byte untouched even when Pillow/zlib would re-encode PNG metadata or IDAT streams differently.
 - Add a config-wide `default-company-email` setting, use it when rendering generated Wabbit legal documents, and fail legal generation if the company contact email is missing instead of hardcoding `wabbit@wabbit.one` in setup code.
 - Fix generated Kotlin Dokka source links by deriving per-project GitHub source roots from each Gradle project's `github_repo` and repo-relative module path, removing the hardcoded `https://example.com/src` placeholder from both JVM and KMP templates.
 - Keep Python setup aligned with the uniform QA toolchain by restoring explicit `python-jeeves` checker declarations in `root.clj`, making curated deptry module aliases override weaker import auto-discovery guesses, and recovering tracked `.gitignore` rules during regeneration so repo-specific ignores are not lost after a bad setup run.
