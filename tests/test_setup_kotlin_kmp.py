@@ -33,7 +33,7 @@ class _Context:
     mode: RepoSetupMode
     repo_template: Path
     licenses: dict[str, str]
-    coc: str
+    coc: jinja2.Template
     cla: jinja2.Template
     cla_explanations: jinja2.Template
     contributor_privacy_policy: jinja2.Template
@@ -54,6 +54,8 @@ def _make_context(
 ) -> _Context:
     config = Config(raw=Document([]))
     config.jvm_version = 21
+    config.default_company_legal_name = "Example Legal Co"
+    config.default_company_short_name = "Example Co"
     config.plugins.update(
         {
             "kotlin-jvm": KotlinPluginDefinition(name="org.jetbrains.kotlin.jvm", version="2.2.20"),
@@ -79,7 +81,7 @@ def _make_context(
         mode=RepoSetupMode.LOCAL,
         repo_template=tmp_path / "repo-template",
         licenses={},
-        coc="",
+        coc=jinja2.Template(""),
         cla=jinja2.Template(""),
         cla_explanations=jinja2.Template(""),
         contributor_privacy_policy=jinja2.Template(""),
@@ -365,3 +367,70 @@ def test_render_dependency_keeps_cross_repo_project_dependency_in_local_mode(tmp
     rendered = _render_dependency_for_mode(ctx, owner, dependency)
 
     assert rendered == 'implementation(project(":kotlin-dotenv-parser")) // 0.0.1'
+
+
+def test_setup_gradle_project_renders_dokka_source_link_for_standalone_jvm_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "kotlin-demo", platforms=["jvm"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.github_repo = "wabbit-corp/kotlin-demo"
+    ctx = _make_context(
+        tmp_path,
+        jvm_template=(
+            "{% if has_dokka_source_link %}{{ dokka_source_link_remote_url }}{% else %}NO_SOURCE_LINK{% endif %}"
+        ),
+        kmp_template="KMP_TEMPLATE",
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8").strip()
+    assert build_text == "https://github.com/wabbit-corp/kotlin-demo/tree/master/src/main/kotlin"
+
+
+def test_setup_gradle_project_renders_repo_relative_dokka_source_link_for_nested_kmp_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    repo_root = tmp_path / "jeeves"
+    project = _make_project(repo_root / "client", platforms=["jvm", "iosArm64"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.repo_root = repo_root
+    project.github_repo = "wabbit-corp/jeeves"
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template=(
+            "{% if has_dokka_source_link %}{{ dokka_source_link_remote_url }}{% else %}NO_SOURCE_LINK{% endif %}"
+        ),
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8").strip()
+    assert build_text == "https://github.com/wabbit-corp/jeeves/tree/master/client/src"
+
+
+def test_setup_gradle_project_omits_dokka_source_link_without_github_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "standalone", platforms=["jvm"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    ctx = _make_context(
+        tmp_path,
+        jvm_template=(
+            "{% if has_dokka_source_link %}{{ dokka_source_link_remote_url }}{% else %}NO_SOURCE_LINK{% endif %}"
+        ),
+        kmp_template="KMP_TEMPLATE",
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8").strip()
+    assert build_text == "NO_SOURCE_LINK"

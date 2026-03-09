@@ -15,16 +15,13 @@ if TYPE_CHECKING:
 
 
 def _patch_template_io(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_get_coc_file() -> str:
-        return "CODE_OF_CONDUCT\n"
-
     def fake_read_text_file(_path: str) -> str:
         return "TEXT\n"
 
-    def fake_read_template(_path: str) -> jinja2.Template:
+    def fake_read_template(_path: str, *, strict: bool = False) -> jinja2.Template:
+        del strict
         return jinja2.Template("")
 
-    monkeypatch.setattr(setup_task_module, "get_coc_file", fake_get_coc_file)
     monkeypatch.setattr("dev.io.read_text_file", fake_read_text_file)
     monkeypatch.setattr("dev.io.read_template", fake_read_template)
 
@@ -87,3 +84,38 @@ def test_create_repo_setup_context_handles_github_api_errors(monkeypatch: pytest
     assert ctx.is_github_api_available is False
     assert ctx.known_repo_names == []
     assert ctx.known_github_repos == {}
+
+
+def test_create_repo_setup_context_loads_legal_templates_strictly(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Path, bool]] = []
+
+    def fake_read_text_file(_path: str) -> str:
+        return "TEXT\n"
+
+    def fake_read_template(path: Path, *, strict: bool = False) -> jinja2.Template:
+        calls.append((path, strict))
+        return jinja2.Template("")
+
+    monkeypatch.setattr("dev.io.read_text_file", fake_read_text_file)
+    monkeypatch.setattr("dev.io.read_template", fake_read_template)
+
+    github_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    class DummyGithub:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            github_calls.append((args, kwargs))
+
+    monkeypatch.setattr("github.Github", DummyGithub)
+
+    config = _load_repo_config()
+    config.github_token = None
+    setup_task_module.create_repo_setup_context(config, setup_task_module.RepoSetupMode.LOCAL)
+
+    assert github_calls == []
+    strict_paths = {path.as_posix() for path, strict in calls if strict}
+    assert strict_paths == {
+        "data-repo-template/legal/cla/v1.0.0/CLA.md",
+        "data-repo-template/legal/cla/v1.0.0/CLA_EXPLANATIONS.md",
+        "data-repo-template/legal/code-of-conduct/v1.0.0/CODE_OF_CONDUCT.md",
+        "data-repo-template/legal/contributor-privacy/v1.0.0/CONTRIBUTOR_PRIVACY.md",
+    }

@@ -139,7 +139,7 @@ def _decode_maven_coordinate_expr(expr: Expr, ctx: DecodeContext) -> MavenCoordi
     )
 
 
-def _decode_gradle_target_commands(expr: Expr, ctx: DecodeContext) -> list["GradleTargetCommand"]:
+def _decode_gradle_target_commands(expr: Expr, ctx: DecodeContext) -> list[GradleTargetCommand]:
     if not isinstance(expr, SequenceExpr):
         raise DecodeError(
             path=ctx.path,
@@ -222,7 +222,7 @@ def _decode_gradle_target_commands(expr: Expr, ctx: DecodeContext) -> list["Grad
     return result
 
 
-def _decode_kmp_jvm_run_entries(expr: Expr, ctx: DecodeContext) -> list["KmpJvmRunEntryCommand"]:
+def _decode_kmp_jvm_run_entries(expr: Expr, ctx: DecodeContext) -> list[KmpJvmRunEntryCommand]:
     if not isinstance(expr, SequenceExpr):
         raise DecodeError(
             path=ctx.path,
@@ -285,7 +285,7 @@ def _decode_kmp_jvm_run_entries(expr: Expr, ctx: DecodeContext) -> list["KmpJvmR
     return result
 
 
-def _decode_gradle_source_sets(expr: Expr, ctx: DecodeContext) -> dict[str, "GradleSourceSetCommand"]:
+def _decode_gradle_source_sets(expr: Expr, ctx: DecodeContext) -> dict[str, GradleSourceSetCommand]:
     if not isinstance(expr, MappingExpr):
         raise DecodeError(
             path=ctx.path,
@@ -393,6 +393,24 @@ class JitpackCookieCommand:
 @dataclass(frozen=True)
 class DefaultMavenProjectGroupCommand:
     group: str
+
+
+@tag("default-company-email")
+@dataclass(frozen=True)
+class DefaultCompanyEmailCommand:
+    email: str
+
+
+@tag("default-company-legal-name")
+@dataclass(frozen=True)
+class DefaultCompanyLegalNameCommand:
+    name: str
+
+
+@tag("default-company-short-name")
+@dataclass(frozen=True)
+class DefaultCompanyShortNameCommand:
+    name: str
 
 
 @tag("git-user")
@@ -521,7 +539,7 @@ class KmpJvmRunsCommand:
 @dataclass(frozen=True)
 class GradleSourceSetCommand:
     dependsOn: list[str] | None = None
-    dependencies: list["DependencyInput"] | None = None
+    dependencies: list[DependencyInput] | None = None
 
 
 @dataclass(frozen=True)
@@ -731,11 +749,7 @@ class GradleProjectCommand:
 
 
 RepoProjectCommand = (
-    PythonProjectCommand
-    | PurescriptProjectCommand
-    | DataProjectCommand
-    | PremakeProjectCommand
-    | GradleProjectCommand
+    PythonProjectCommand | PurescriptProjectCommand | DataProjectCommand | PremakeProjectCommand | GradleProjectCommand
 )
 
 
@@ -760,6 +774,9 @@ BuiltinTopLevelCommand = (
     | PypiTokenCommand
     | JitpackCookieCommand
     | DefaultMavenProjectGroupCommand
+    | DefaultCompanyEmailCommand
+    | DefaultCompanyLegalNameCommand
+    | DefaultCompanyShortNameCommand
     | GitUserCommand
     | GitCensorCommand
     | JvmVersionCommand
@@ -789,6 +806,9 @@ BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[object], ...] = (
     PypiTokenCommand,
     JitpackCookieCommand,
     DefaultMavenProjectGroupCommand,
+    DefaultCompanyEmailCommand,
+    DefaultCompanyLegalNameCommand,
+    DefaultCompanyShortNameCommand,
     GitUserCommand,
     GitCensorCommand,
     JvmVersionCommand,

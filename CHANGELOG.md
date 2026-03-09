@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Add a config-wide `default-company-email` setting, use it when rendering generated Wabbit legal documents, and fail legal generation if the company contact email is missing instead of hardcoding `wabbit@wabbit.one` in setup code.
+- Fix generated Kotlin Dokka source links by deriving per-project GitHub source roots from each Gradle project's `github_repo` and repo-relative module path, removing the hardcoded `https://example.com/src` placeholder from both JVM and KMP templates.
+- Keep Python setup aligned with the uniform QA toolchain by restoring explicit `python-jeeves` checker declarations in `root.clj`, making curated deptry module aliases override weaker import auto-discovery guesses, and recovering tracked `.gitignore` rules during regeneration so repo-specific ignores are not lost after a bad setup run.
+- Extend the shared Python `.gitignore` template with standard QA/test artifacts (`.hypothesis/`, `coverage.xml`) and add regression tests that cover template contents, deptry alias precedence, and tracked-ignore recovery.
+- Make Python setup safer on real repos by preserving existing custom `.gitignore` rules during regeneration, honoring `.gitignore` when discovering packages/tests/source files, and expanding the built-in deptry module-name map for common Python packages such as `djangorestframework`, `scikit-learn`, and `discord-ext-voice-recv`.
+- Stop pulling `CODE_OF_CONDUCT.md` from a remote raw URL during setup; legal files now come from versioned local Jinja templates with strict undefined-variable checking so unresolved placeholders fail generation instead of silently shipping.
+- Fix generated contributor privacy and code-of-conduct legal text so contact details are rendered consistently via template variables and no unresolved placeholder fragments (for example `{{COMPANY_EMAIL}}`, `[insert link]`, or `[Project Lead's email...]`) remain in generated docs.
+- Add config-wide default company legal and short names, use them across generated Wabbit legal text, IntelliJ plugin vendor fallbacks, and Dokka HTML footers, and template the commercial-contact sentence from those values plus `default-company-email` instead of hardcoding it.
+- Regenerate Wabbit legal documents for repo-managed Gradle repo roots as well as standalone projects, so multi-module repos such as `jeeves` no longer keep stale root `CODE_OF_CONDUCT.md` or `CONTRIBUTOR_PRIVACY.md` files after setup.
 - Add explicit project copyright metadata in config (`:copyright-holder`, `:copyright-year-start`) and use it when rendering generated license notices, including year ranges such as `2019-2026`.
 - Make CLA generation license-aware by rendering the configured project license into both the full CLA and the simplified CLA explanations, instead of hardcoding AGPL wording for every managed repo.
 - Fix Purescript setup so configured Wabbit-owned Purescript repos get the standard generated legal/banner files, and register `purescript-stablename` plus `purescript-datareify` in `root.clj` with `MIT` licenses so scoped `setup <name>` produces `LICENSE.md`.

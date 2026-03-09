@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import jinja2
 
@@ -23,8 +24,9 @@ class _FakeProject:
 
 @dataclass
 class _FakeContext:
+    config: object
     licenses: dict[str, str]
-    coc: str
+    coc: jinja2.Template
     cla: jinja2.Template
     cla_explanations: jinja2.Template
     contributor_privacy_policy: jinja2.Template
@@ -41,6 +43,11 @@ def test_write_wabbit_legal_files_renders_license_template_variables(tmp_path: P
         authors=["Alice Example <alice@example.com>"],
     )
     context = _FakeContext(
+        config=SimpleNamespace(
+            default_company_email="legal@example.com",
+            default_company_legal_name="Example Legal Co",
+            default_company_short_name="Example Co",
+        ),
         licenses={
             "MIT": (
                 "Copyright (c) {{ copyright_year }} {{ copyright_holder }}\n"
@@ -48,10 +55,16 @@ def test_write_wabbit_legal_files_renders_license_template_variables(tmp_path: P
                 "{{ project_header_line }}\n"
             )
         },
-        coc="CODE OF CONDUCT\n",
-        cla=jinja2.Template("CLA {{ project_primary_license_reference }}\n"),
-        cla_explanations=jinja2.Template("CLA EXPLAIN {{ project_primary_license_reference }}\n"),
-        contributor_privacy_policy=jinja2.Template("PRIVACY\n"),
+        coc=jinja2.Template("CODE OF CONDUCT {{ company_short_name }} {{ legal_contact_email }}\n"),
+        cla=jinja2.Template(
+            "CLA {{ company_legal_name }} {{ company_short_name }} {{ project_primary_license_reference }} {{ legal_contact_email }}\n"
+        ),
+        cla_explanations=jinja2.Template(
+            "CLA EXPLAIN {{ company_short_name }} {{ project_primary_license_reference }} {{ legal_contact_email }}\n"
+        ),
+        contributor_privacy_policy=jinja2.Template(
+            "PRIVACY {{ company_legal_name }} {{ company_short_name }} {{ legal_contact_email }}\n"
+        ),
         repo_template=tmp_path,
     )
 
@@ -62,7 +75,15 @@ def test_write_wabbit_legal_files_renders_license_template_variables(tmp_path: P
     assert "demo-proj" in license_text
     assert "demo-proj: Example project" in license_text
 
-    assert (tmp_path / "CLA.md").read_text(encoding="utf-8") == "CLA MIT License (MIT)\n"
-    assert (tmp_path / "CLA_EXPLANATIONS.md").read_text(encoding="utf-8") == "CLA EXPLAIN MIT License (MIT)\n"
-    assert (tmp_path / "CONTRIBUTOR_PRIVACY.md").read_text(encoding="utf-8") == "PRIVACY\n"
-    assert (tmp_path / "CODE_OF_CONDUCT.md").read_text(encoding="utf-8") == "CODE OF CONDUCT\n"
+    assert (tmp_path / "CLA.md").read_text(
+        encoding="utf-8"
+    ) == "CLA Example Legal Co Example Co MIT License (MIT) legal@example.com\n"
+    assert (tmp_path / "CLA_EXPLANATIONS.md").read_text(
+        encoding="utf-8"
+    ) == "CLA EXPLAIN Example Co MIT License (MIT) legal@example.com\n"
+    assert (tmp_path / "CONTRIBUTOR_PRIVACY.md").read_text(
+        encoding="utf-8"
+    ) == "PRIVACY Example Legal Co Example Co legal@example.com\n"
+    assert (tmp_path / "CODE_OF_CONDUCT.md").read_text(
+        encoding="utf-8"
+    ) == "CODE OF CONDUCT Example Co legal@example.com\n"

@@ -124,6 +124,31 @@ def test_dep_call_in_gradle_dependencies_is_resolved(tmp_path: Path) -> None:
     )
 
 
+def test_default_company_email_is_loaded(tmp_path: Path) -> None:
+    config = _load_from_temp_root(
+        tmp_path,
+        '(default-company-email "legal@example.com")\n',
+    )
+
+    assert config.default_company_email == "legal@example.com"
+
+
+def test_default_company_names_are_loaded(tmp_path: Path) -> None:
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-company-legal-name "Example Legal Co")',
+                '(default-company-short-name "Example Co")',
+                "",
+            ]
+        ),
+    )
+
+    assert config.default_company_legal_name == "Example Legal Co"
+    assert config.default_company_short_name == "Example Co"
+
+
 def test_purescript_project_is_loaded_with_explicit_license(tmp_path: Path) -> None:
     from dev.config import PurescriptProject
 
@@ -154,7 +179,7 @@ def test_purescript_project_loads_explicit_copyright_metadata(tmp_path: Path) ->
                 ':version "0.1.0" '
                 ':license "MIT" '
                 ':copyright-holder "Wabbit Consulting Corporation" '
-                ':copyright-year-start 2019 '
+                ":copyright-year-start 2019 "
                 ':repo "wabbit-corp/demo-purescript")',
                 "",
             ]

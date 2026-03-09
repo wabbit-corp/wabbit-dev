@@ -63,7 +63,7 @@ def test_sync_intellij_plugin_xml_updates_metadata_and_preserves_actions(tmp_pat
         depends=["com.intellij.modules.platform"],
     )
 
-    _sync_intellij_plugin_xml(project, feature)
+    _sync_intellij_plugin_xml(project, feature, "Example Co")
 
     plugin_xml = plugin_xml_path.read_text(encoding="utf-8")
     assert "<id>one.wabbit.diffpaste</id>" in plugin_xml
@@ -76,3 +76,25 @@ def test_sync_intellij_plugin_xml_updates_metadata_and_preserves_actions(tmp_pat
     assert '<idea-version since-build="232" />' in plugin_xml
     assert "until-build=" not in plugin_xml
     assert '<action id="ApplyDiffAction" class="one.wabbit.diffpaste.ApplyDiffAction" />' in plugin_xml
+
+
+def test_sync_intellij_plugin_xml_uses_default_vendor_name_when_missing(tmp_path: Path) -> None:
+    project = _make_gradle_project(tmp_path)
+    feature = IntellijPlugin(
+        pluginName="DiffPaste",
+        pluginId="one.wabbit.diffpaste",
+        sinceBuild="232",
+        untilBuild=None,
+        vendorName=None,
+        vendorEmail=None,
+        vendorUrl=None,
+        pluginDescription="Applies clipboard diff patches directly to your open file.",
+        pluginChangeNotes="Initial release.",
+        depends=["com.intellij.modules.platform"],
+    )
+
+    _sync_intellij_plugin_xml(project, feature, "Example Co")
+
+    plugin_xml_path = project.path / "src" / "main" / "resources" / "META-INF" / "plugin.xml"
+    plugin_xml = plugin_xml_path.read_text(encoding="utf-8")
+    assert "<vendor>Example Co</vendor>" in plugin_xml

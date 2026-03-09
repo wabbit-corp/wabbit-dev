@@ -104,7 +104,7 @@ def _make_render_context(pyproject_template: str | None = None) -> RepoSetupCont
         is_github_api_available=False,
         repo_template=Path("."),
         licenses={},
-        coc="",
+        coc=jinja2.Template(""),
         gitignore_template=jinja2.Template(""),
         cla=jinja2.Template(""),
         cla_explanations=jinja2.Template(""),
@@ -234,6 +234,97 @@ def test_render_python_pyproject_preserves_existing_metadata_when_config_omits_i
     assert 'classifiers = ["Topic :: Software Development :: Libraries :: Python Modules"]' in rendered
 
 
+def test_render_python_pyproject_ignores_gitignored_packages(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    from dev.tasks.setup import render_python_pyproject
+
+    project_path = tmp_path / "demo"
+    project_path.mkdir(parents=True, exist_ok=True)
+    (project_path / "README.md").write_text("# demo\n", encoding="utf-8")
+    (project_path / ".gitignore").write_text("/scratch/\n", encoding="utf-8")
+    (project_path / "demo").mkdir(parents=True, exist_ok=True)
+    (project_path / "demo" / "__init__.py").write_text("", encoding="utf-8")
+    (project_path / "scratch").mkdir(parents=True, exist_ok=True)
+    (project_path / "scratch" / "__init__.py").write_text("", encoding="utf-8")
+
+    project = _make_python_project_for_render(project_path)
+    rendered = render_python_pyproject(
+        _make_render_context(
+            '[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n'
+            "{% if packages_toml %}packages = {{ packages_toml }}\n{% endif %}\n"
+            "[tool.coverage.run]\nsource = {{ coverage_source_toml }}\n"
+        ),
+        project,
+    )
+
+    assert '{ include = "demo" }' in rendered
+    assert "scratch" not in rendered
+
+
+def test_default_deptry_map_includes_common_python_package_aliases(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    from dev.tasks.setup_python import _default_deptry_map
+
+    deptry_map = _default_deptry_map(
+        tmp_path,
+        [
+            "discord-ext-voice-recv>=0.5.2a179,<0.6.0",
+            "djangorestframework>=3.16.1,<4.0.0",
+            "imbalanced-learn>=0.14.1,<1.0.0",
+            "levenshtein>=0.27.3,<1.0.0",
+            "pynacl>=1.6.2,<2.0.0",
+            "scikit-learn>=1.8.0,<2.0.0",
+        ],
+    )
+
+    assert deptry_map == {
+        "discord-ext-voice-recv": "discord.ext.voice_recv",
+        "djangorestframework": "rest_framework",
+        "imbalanced-learn": "imblearn",
+        "levenshtein": "Levenshtein",
+        "pynacl": "nacl",
+        "scikit-learn": "sklearn",
+    }
+
+
+def test_default_deptry_map_prefers_curated_aliases_over_auto_discovery(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    from dev.tasks.setup_python import _default_deptry_map
+
+    package_path = tmp_path / "demo"
+    package_path.mkdir(parents=True, exist_ok=True)
+    (package_path / "__init__.py").write_text("", encoding="utf-8")
+    (package_path / "imports.py").write_text(
+        "\n".join(
+            [
+                "import django",
+                "import discord",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    deptry_map = _default_deptry_map(
+        tmp_path,
+        [
+            "discord-ext-voice-recv>=0.5.2a179,<0.6.0",
+            "discord.py>=2.6.4,<3.0.0",
+            "djangorestframework>=3.16.1,<4.0.0",
+        ],
+    )
+
+    assert deptry_map["discord-ext-voice-recv"] == "discord.ext.voice_recv"
+    assert deptry_map["discord.py"] == "discord"
+    assert deptry_map["djangorestframework"] == "rest_framework"
+
+
 @pytest.mark.parametrize(
     ("project_license", "expected_spdx"),
     [
@@ -330,7 +421,6 @@ def test_setup_generates_python_docs_and_quality_defaults(tmp_path: Path, monkey
         return None
 
     monkeypatch.setattr("github.Github", DummyGithub)
-    monkeypatch.setattr("dev.tasks.setup.get_coc_file", lambda: "CODE_OF_CONDUCT\n")
     monkeypatch.setattr("dev.tasks.setup.create_banner", fake_create_banner)
 
     cwd = os.getcwd()

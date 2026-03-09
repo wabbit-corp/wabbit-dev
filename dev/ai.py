@@ -8,6 +8,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+import jinja2
 import openai
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
@@ -24,6 +25,7 @@ from openai.types.responses.response_input_param import ResponseInputParam
 from openai.types.shared_params.reasoning import Reasoning
 
 from dev.caching import DEFAULT_CACHE_DB_PATH, cache
+from dev.config import load_config
 from dev.io import read_ignore_file, read_text_file, walk_files
 from dev.json_utils import as_dict, as_list
 
@@ -75,6 +77,13 @@ Finally, at the end of the commit message, explicitly include a line stating the
 
 COMMITTING_MODEL = "gpt-5.3-codex"
 CHAT_MODEL = "gpt-5-chat-latest"
+README_PROMPT_TEMPLATE_ENV = jinja2.Environment(
+    autoescape=False,
+    keep_trailing_newline=True,
+    undefined=jinja2.StrictUndefined,
+    variable_start_string="<<",
+    variable_end_string=">>",
+)
 
 
 SEMVER_IMPACT_PATTERN = re.compile(r"^Semver Impact:\s*(MAJOR|MINOR|PATCH|NONE)\s*$", re.MULTILINE | re.IGNORECASE)
@@ -113,6 +122,29 @@ def _clip_tool_output(text: str) -> str:
 def is_allowed_git_tool_command(command: str) -> bool:
     normalized = _normalize_tool_command(command)
     return any(pattern.fullmatch(normalized) for pattern in GIT_TOOL_ALLOWED_PATTERNS)
+
+
+def _required_readme_template_value(value: str | None, setting_name: str) -> str:
+    if value is None or not value.strip():
+        raise ValueError(f"{setting_name} is required to render the README prompt template")
+    return value.strip()
+
+
+def _render_readme_prompt_template(template_text: str, *, project_id: str, notes: str) -> str:
+    config = load_config()
+    template = README_PROMPT_TEMPLATE_ENV.from_string(template_text)
+    return template.render(
+        project_id=project_id,
+        notes=notes,
+        company_legal_name=_required_readme_template_value(
+            config.default_company_legal_name,
+            "default-company-legal-name",
+        ),
+        legal_contact_email=_required_readme_template_value(
+            config.default_company_email,
+            "default-company-email",
+        ),
+    )
 
 
 def run_safe_git_tool_command(command: str, /, repo_path: Path | str | None) -> dict[str, object]:
@@ -694,9 +726,11 @@ def create_readme(project_name: str, root: Path, /, api_key: str) -> str:
      <usage>{usage}</usage>
      """).strip().replace("{overview}", overview).replace("{usage}", usage)
 
-    prompt_template = read_text_file(Path("data-repo-template/repo_template_prompt.txt"))
-    prompt_template = prompt_template.replace("{{project-id}}", project_name)
-    prompt_template = prompt_template.replace("{{notes}}", notes)
+    prompt_template = _render_readme_prompt_template(
+        read_text_file(Path("data-repo-template/repo_template_prompt.txt")),
+        project_id=project_name,
+        notes=notes,
+    )
 
     response = client.chat.completions.create(
         messages=[

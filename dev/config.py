@@ -1156,9 +1156,10 @@ def _legacy_targets_from_platforms(
 
 
 def _is_valid_gradle_source_set_name(source_set_name: str) -> bool:
-    return source_set_name in CANONICAL_KMP_SOURCE_SET_REQUIREMENTS or GRADLE_SOURCE_SET_NAME_RE.fullmatch(
-        source_set_name
-    ) is not None
+    return (
+        source_set_name in CANONICAL_KMP_SOURCE_SET_REQUIREMENTS
+        or GRADLE_SOURCE_SET_NAME_RE.fullmatch(source_set_name) is not None
+    )
 
 
 def _normalize_gradle_platforms(project_name: str, platforms: list[str] | None) -> list[str]:
@@ -1207,6 +1208,9 @@ class Config:
     jitpack_cookie: str | None = None
 
     default_maven_project_group: str | None = None
+    default_company_email: str | None = None
+    default_company_legal_name: str | None = None
+    default_company_short_name: str | None = None
     default_git_user_email: str | None = None
     default_git_user_name: str | None = None
 
@@ -1366,7 +1370,7 @@ def load_config() -> Config:
             )
         if isinstance(command, config_typed.KmpJvmRunsCommand):
             run_entries: list[KmpJvmRunEntry] = []
-            for index, entry in enumerate(command.entries):
+            for _index, entry in enumerate(command.entries):
                 task_name = entry.taskName
                 main_class = entry.mainClass
                 description = entry.description
@@ -1951,7 +1955,9 @@ def load_config() -> Config:
                 if command.sourceSets is not None:
                     for source_set_name, source_set_command in command.sourceSets.items():
                         if not _is_valid_gradle_source_set_name(source_set_name):
-                            raise ValueError(f"Gradle project {display_name} has invalid source set {source_set_name!r}")
+                            raise ValueError(
+                                f"Gradle project {display_name} has invalid source set {source_set_name!r}"
+                            )
                         if (
                             source_set_name in CANONICAL_KMP_SOURCE_SET_REQUIREMENTS
                             and not _source_set_is_allowed_for_platforms(source_set_name, platforms)
@@ -2002,7 +2008,10 @@ def load_config() -> Config:
 
                 for source_set_name, source_set in source_sets.items():
                     for parent_source_set in source_set.depends_on:
-                        if parent_source_set not in source_sets and parent_source_set not in CANONICAL_KMP_SOURCE_SET_REQUIREMENTS:
+                        if (
+                            parent_source_set not in source_sets
+                            and parent_source_set not in CANONICAL_KMP_SOURCE_SET_REQUIREMENTS
+                        ):
                             raise ValueError(
                                 f"Gradle project {display_name}.{source_set_name} dependsOn unknown source set "
                                 f"{parent_source_set}"
@@ -2122,6 +2131,18 @@ def load_config() -> Config:
 
         if isinstance(command, config_typed.DefaultMavenProjectGroupCommand):
             config.default_maven_project_group = command.group
+            return
+
+        if isinstance(command, config_typed.DefaultCompanyEmailCommand):
+            config.default_company_email = command.email
+            return
+
+        if isinstance(command, config_typed.DefaultCompanyLegalNameCommand):
+            config.default_company_legal_name = command.name
+            return
+
+        if isinstance(command, config_typed.DefaultCompanyShortNameCommand):
+            config.default_company_short_name = command.name
             return
 
         if isinstance(command, config_typed.GitUserCommand):

@@ -66,9 +66,12 @@ def read_text_file(path: Path) -> str:
         return f.read()
 
 
-def read_template(path: Path) -> jinja2.Template:
+def read_template(path: Path, *, strict: bool = False) -> jinja2.Template:
     assert isinstance(path, Path), f"Expected Path, got {type(path)}"
-    return jinja2.Template(read_text_file(path))
+    template_text = read_text_file(path)
+    if strict:
+        return jinja2.Environment(undefined=jinja2.StrictUndefined).from_string(template_text)
+    return jinja2.Template(template_text)
 
 
 def delete_if_exists(path: Path) -> None:

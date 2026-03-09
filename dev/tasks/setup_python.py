@@ -9,6 +9,8 @@ from typing import Protocol, cast
 from urllib.parse import urlparse
 
 import jinja2
+from git import Repo
+from git.exc import BadName, GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion
@@ -34,7 +36,7 @@ class PythonSetupContext(Protocol):
     config: Config
     repo_template: Path
     licenses: dict[str, str]
-    coc: str
+    coc: jinja2.Template
     cla: jinja2.Template
     cla_explanations: jinja2.Template
     contributor_privacy_policy: jinja2.Template
@@ -80,11 +82,12 @@ def _discover_python_packages(project_path: Path) -> list[str]:
         "dist",
         "venv",
     }
+    ignore_paths = dev.io.read_ignore_file(project_path / ".gitignore")
     packages: list[str] = []
     for child in project_path.iterdir():
         if not child.is_dir():
             continue
-        if child.name.startswith(".") or child.name in ignore_dirs:
+        if child.name.startswith(".") or child.name in ignore_dirs or ignore_paths(child):
             continue
         if (child / "__init__.py").exists():
             packages.append(child.name)
@@ -102,6 +105,7 @@ def _discover_test_paths(project_path: Path) -> list[str]:
         "dist",
         "venv",
     }
+    ignore_paths = dev.io.read_ignore_file(project_path / ".gitignore")
     test_paths: list[str] = []
     for root, dirs, _ in os.walk(project_path):
         root_path = Path(root)
@@ -112,6 +116,7 @@ def _discover_test_paths(project_path: Path) -> list[str]:
             and not d.startswith(".")
             and not d.startswith("tmp.")
             and not d.startswith("tmp-setup-")
+            and not ignore_paths(root_path / d)
         ]
         for name in dirs:
             if name in {"tests", "test"}:
@@ -123,9 +128,10 @@ def _discover_test_paths(project_path: Path) -> list[str]:
 
 
 def _discover_top_level_python_files(project_path: Path) -> list[str]:
+    ignore_paths = dev.io.read_ignore_file(project_path / ".gitignore")
     files: list[str] = []
     for child in project_path.iterdir():
-        if child.is_file() and child.suffix == ".py":
+        if child.is_file() and child.suffix == ".py" and not ignore_paths(child):
             files.append(child.name)
     return sorted(files)
 
@@ -141,6 +147,7 @@ def _iter_python_files(project_path: Path) -> list[Path]:
         "dist",
         "venv",
     }
+    ignore_paths = dev.io.read_ignore_file(project_path / ".gitignore")
     files: list[Path] = []
     for root, dirs, filenames in os.walk(project_path):
         root_path = Path(root)
@@ -151,11 +158,15 @@ def _iter_python_files(project_path: Path) -> list[Path]:
             and not d.startswith(".")
             and not d.startswith("tmp.")
             and not d.startswith("tmp-setup-")
+            and not ignore_paths(root_path / d)
         ]
         for name in filenames:
             if not name.endswith(".py"):
                 continue
-            files.append(root_path / name)
+            file_path = root_path / name
+            if ignore_paths(file_path):
+                continue
+            files.append(file_path)
     return files
 
 
@@ -401,11 +412,53 @@ def _default_deptry_map(project_path: Path, dependencies: list[str]) -> dict[str
         "pyyaml": "yaml",
         "pillow": "PIL",
         "beautifulsoup4": "bs4",
+        "discord-ext-voice-recv": "discord.ext.voice_recv",
+        "djangorestframework": "rest_framework",
+        "imbalanced-learn": "imblearn",
+        "levenshtein": "Levenshtein",
+        "pynacl": "nacl",
+        "scikit-learn": "sklearn",
     }
     auto_map = _derive_deptry_package_map(project_path, dependencies)
-    merged = {**common_map, **auto_map}
+    # Keep curated aliases authoritative when import auto-discovery would pick a broader module.
+    merged = {**auto_map, **common_map}
     present_dependency_names = {_dependency_name(dep) for dep in dependencies}
     return {pkg: module for pkg, module in merged.items() if pkg in present_dependency_names}
+
+
+def _merge_gitignore_content(generated_content: str, existing_content: str | None) -> str:
+    generated_lines = generated_content.rstrip("\n").splitlines()
+    if not existing_content:
+        return "\n".join(generated_lines).rstrip("\n") + "\n"
+
+    merged_lines = list(generated_lines)
+    seen = set(generated_lines)
+    extra_lines = [line for line in existing_content.rstrip("\n").splitlines() if line not in seen]
+    if extra_lines:
+        if merged_lines and merged_lines[-1] != "":
+            merged_lines.append("")
+        merged_lines.extend(extra_lines)
+    return "\n".join(merged_lines).rstrip("\n") + "\n"
+
+
+def _load_tracked_gitignore(project_path: Path) -> str | None:
+    if not (project_path / ".git").exists():
+        return None
+
+    try:
+        repo = Repo(project_path)
+    except (InvalidGitRepositoryError, NoSuchPathError, OSError, ValueError):
+        return None
+
+    try:
+        if not repo.head.is_valid():
+            return None
+        tracked_gitignore = repo.git.show("HEAD:.gitignore")
+        return tracked_gitignore if isinstance(tracked_gitignore, str) else None
+    except (BadName, GitCommandError, OSError, ValueError):
+        return None
+    finally:
+        repo.close()
 
 
 def _load_existing_poetry_metadata(project_path: Path) -> dict[str, object]:
@@ -780,9 +833,18 @@ def _write_python_application_files(ctx: PythonSetupContext, project: PythonProj
 
 
 def setup_python_project(ctx: PythonSetupContext, project: PythonProject, interactive: bool = True) -> None:
+    existing_gitignore_path = project.path / ".gitignore"
+    existing_gitignore = (
+        existing_gitignore_path.read_text(encoding="utf-8") if existing_gitignore_path.is_file() else None
+    )
+    tracked_gitignore = _load_tracked_gitignore(project.path)
+    generated_gitignore = clean_text(
+        render_template(ctx.gitignore_template) + "\n" + render_template(ctx.python_gitignore_template)
+    )
+    merged_gitignore = _merge_gitignore_content(generated_gitignore, tracked_gitignore)
     dev.io.write_text_file(
         project.path / ".gitignore",
-        render_template(ctx.gitignore_template) + "\n" + render_template(ctx.python_gitignore_template),
+        _merge_gitignore_content(merged_gitignore, existing_gitignore),
     )
 
     write_wabbit_legal_files(ctx, project)

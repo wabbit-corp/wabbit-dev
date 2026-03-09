@@ -14,11 +14,11 @@ from dev.config import (
     DataProject,
     Dependency,
     DependencyTarget,
-    GradleTargetSpec,
     GradleProject,
+    GradleTargetSpec,
     IntellijPlugin,
-    KmpAndroidLibrary,
     JarFileDependencyTarget,
+    KmpAndroidLibrary,
     KmpJvmRuns,
     MavenDependencyTarget,
     PremakeProject,
@@ -38,6 +38,8 @@ INTELLIJ_GRADLE_PLUGIN_VERSION = "1.17.2"
 PAPERWEIGHT_USERDEV_PLUGIN_VERSION = "1.7.2"
 BUKKIT_PLUGIN_YML_VERSION = "0.6.0"
 CONTEXT_PARAMETERS_COMPILER_FLAG = "-Xcontext-parameters"
+GITHUB_SOURCE_ROOT = "https://github.com"
+GITHUB_DEFAULT_BRANCH = "master"
 COMPOSE_ACCESSOR_PREFIXES: tuple[tuple[str, str], ...] = (
     ("org.jetbrains.compose.runtime:runtime:", "compose.runtime"),
     ("org.jetbrains.compose.foundation:foundation:", "compose.foundation"),
@@ -64,7 +66,7 @@ class GradleSetupContext(Protocol):
     def licenses(self) -> dict[str, str]: ...
 
     @property
-    def coc(self) -> str: ...
+    def coc(self) -> jinja2.Template: ...
 
     @property
     def cla(self) -> jinja2.Template: ...
@@ -111,7 +113,7 @@ def _project_version_for_comment(project: Project) -> object | None:
 def _render_dependency_for_mode(ctx: GradleSetupContext, project: Project, dependency: Dependency) -> str:
     target = dependency.target
     if isinstance(target, MavenDependencyTarget):
-        if isinstance(project, GradleProject) and "kmp-compose" in project.resolved_features:
+        if isinstance(project, GradleProject) and "kmp-compose" in project.resolved_features and target.artifact:
             for prefix, accessor in COMPOSE_ACCESSOR_PREFIXES:
                 if target.artifact.startswith(prefix):
                     modifier = dependency.scope or "implementation"
@@ -209,6 +211,8 @@ def settings_plugin_versions(ctx: GradleSetupContext) -> dict[str, str]:
         "paperweight_userdev_plugin_version": PAPERWEIGHT_USERDEV_PLUGIN_VERSION,
         "bukkit_plugin_yml_version": BUKKIT_PLUGIN_YML_VERSION,
     }
+
+
 def _effective_targets(project: GradleProject) -> list[GradleTargetSpec]:
     if project.targets:
         return project.targets
@@ -246,6 +250,43 @@ def _needs_google_repository(project: GradleProject) -> bool:
 
 def _has_apple_targets(project: GradleProject) -> bool:
     return any(target.kind in ("iosArm64", "iosSimulatorArm64", "macosArm64") for target in _effective_targets(project))
+
+
+def _dokka_source_link_remote_url(project: GradleProject, source_root: str) -> str | None:
+    github_repo = project.github_repo
+    if github_repo is None:
+        return None
+
+    repo_relative_path = Path(".")
+    repo_root = project.effective_repo_root
+    if project.path.is_relative_to(repo_root):
+        repo_relative_path = project.path.relative_to(repo_root)
+
+    path_segments: list[str] = []
+    repo_relative_posix = repo_relative_path.as_posix().strip("/")
+    if repo_relative_posix not in {"", "."}:
+        path_segments.append(repo_relative_posix)
+
+    source_root_posix = source_root.strip("/")
+    if source_root_posix:
+        path_segments.append(source_root_posix)
+
+    remote_path = "/".join(path_segments)
+    return f"{GITHUB_SOURCE_ROOT}/{github_repo}/tree/{GITHUB_DEFAULT_BRANCH}/{remote_path}"
+
+
+def _company_legal_name(ctx: GradleSetupContext) -> str:
+    company_name = ctx.config.default_company_legal_name
+    if company_name is None or not company_name.strip():
+        raise ValueError("default-company-legal-name is required to render Kotlin project templates")
+    return company_name.strip()
+
+
+def _company_short_name(ctx: GradleSetupContext) -> str:
+    company_name = ctx.config.default_company_short_name
+    if company_name is None or not company_name.strip():
+        raise ValueError("default-company-short-name is required to render Kotlin project templates")
+    return company_name.strip()
 
 
 def _default_source_set_names(project: GradleProject) -> set[str]:
@@ -364,9 +405,7 @@ def _source_set_entries(
         return None
 
     for source_set_name, source_set in project.source_sets.items():
-        depends_on = [
-            parent for parent in source_set.depends_on if parent != implicit_parent(source_set_name)
-        ]
+        depends_on = [parent for parent in source_set.depends_on if parent != implicit_parent(source_set_name)]
         entries.append(
             {
                 "name": source_set_name,
@@ -478,7 +517,7 @@ def _existing_depends(root: ET.Element) -> list[str]:
     return result
 
 
-def _sync_intellij_plugin_xml(project: GradleProject, feature: IntellijPlugin) -> None:
+def _sync_intellij_plugin_xml(project: GradleProject, feature: IntellijPlugin, default_vendor_name: str) -> None:
     plugin_xml_path = project.path / "src" / "main" / "resources" / "META-INF" / "plugin.xml"
 
     if plugin_xml_path.exists():
@@ -511,7 +550,7 @@ def _sync_intellij_plugin_xml(project: GradleProject, feature: IntellijPlugin) -
     if vendor_element is None:
         vendor_element = ET.SubElement(root, "vendor")
     vendor_name = (
-        _normalize_xml_text(feature.vendorName) or _normalize_xml_text(vendor_element.text) or "Wabbit Corporation"
+        _normalize_xml_text(feature.vendorName) or _normalize_xml_text(vendor_element.text) or default_vendor_name
     )
     vendor_element.text = vendor_name
     vendor_email = _normalize_xml_text(feature.vendorEmail) or _normalize_xml_text(vendor_element.get("email"))
@@ -578,6 +617,8 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
     kotlin_free_compiler_args = [CONTEXT_PARAMETERS_COMPILER_FLAG]
 
     if project.is_kmp:
+        dokka_source_link_remote_url = _dokka_source_link_remote_url(project, "src")
+        company_legal_name = _company_legal_name(ctx)
         targets = _effective_targets(project)
         source_set_dependencies = _make_source_set_dependency_strings(ctx, project)
         source_set_entries = _source_set_entries(project, source_set_dependencies)
@@ -617,8 +658,13 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             kmp_jvm_runs=kmp_jvm_runs,
             native_framework_base_name=_native_framework_base_name(project),
             kotlin_free_compiler_args=kotlin_free_compiler_args,
+            dokka_source_link_remote_url=dokka_source_link_remote_url or "",
+            has_dokka_source_link=dokka_source_link_remote_url is not None,
+            company_legal_name=company_legal_name,
         )
     else:
+        dokka_source_link_remote_url = _dokka_source_link_remote_url(project, "src/main/kotlin")
+        company_legal_name = _company_legal_name(ctx)
         project_dependencies, other_dependencies = _make_dependency_strings(ctx, project)
         result = render_template(
             ctx.subproject_build_template,
@@ -639,6 +685,9 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             mode=mode_value,
             serialization_library=ctx.config.libraries["kotlinx-serialization-core"].maven_urn.__str__(),
             kotlin_free_compiler_args=kotlin_free_compiler_args,
+            dokka_source_link_remote_url=dokka_source_link_remote_url or "",
+            has_dokka_source_link=dokka_source_link_remote_url is not None,
+            company_legal_name=company_legal_name,
         )
     result = clean_gradle_build_text(result)
     dev.io.write_text_file(project.path / "build.gradle.kts", result)
@@ -691,7 +740,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
 
     intellij_feature = project.resolved_features.get("intellij-plugin")
     if isinstance(intellij_feature, IntellijPlugin):
-        _sync_intellij_plugin_xml(project, intellij_feature)
+        _sync_intellij_plugin_xml(project, intellij_feature, _company_short_name(ctx))
 
     if not nested_gradle_project:
         write_wabbit_legal_files(ctx, project)

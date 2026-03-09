@@ -92,7 +92,7 @@ def _make_setup_context(pyproject_template: str, codespell_words: str = "wabbit\
         is_github_api_available=True,
         repo_template=Path("."),
         licenses={},
-        coc="",
+        coc=jinja2.Template(""),
         gitignore_template=jinja2.Template("# base\n"),
         cla=jinja2.Template(""),
         cla_explanations=jinja2.Template(""),
@@ -314,6 +314,76 @@ def test_setup_python_project_generates_app_build_script_for_python_application(
     assert "pyinstaller>=6.9.0,<7.0.0" in requirements_dev
 
 
+def test_setup_python_project_preserves_existing_gitignore_rules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    import dev.tasks.setup as setup_module
+
+    project = _make_python_project(tmp_path / "pkg", github_repo="org/pkg")
+    project.path.mkdir(parents=True, exist_ok=True)
+    (project.path / "README.md").write_text("# pkg\n", encoding="utf-8")
+    (project.path / ".gitignore").write_text("# custom\n/custom-data/\n", encoding="utf-8")
+
+    monkeypatch.setattr(setup_module, "_write_wabbit_legal_files", _noop_write_callback)
+    monkeypatch.setattr(setup_module, "_write_banner", _noop_write_callback)
+
+    ctx = _make_setup_context(
+        pyproject_template=(
+            '[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n\n'
+            '[tool.poetry.dependencies]\npython = "{{ python_version }}"\n'
+        ),
+    )
+
+    setup_module.setup_python_project(ctx, project, interactive=False)
+
+    gitignore_content = (project.path / ".gitignore").read_text(encoding="utf-8")
+    assert "# custom" in gitignore_content
+    assert "/custom-data/" in gitignore_content
+    assert "# base" in gitignore_content
+    assert "# python" in gitignore_content
+
+
+def test_setup_python_project_recovers_tracked_gitignore_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    import dev.tasks.setup as setup_module
+
+    project = _make_python_project(tmp_path / "pkg", github_repo="org/pkg")
+    project.path.mkdir(parents=True, exist_ok=True)
+    (project.path / "README.md").write_text("# pkg\n", encoding="utf-8")
+    (project.path / ".gitignore").write_text("# tracked\n/.private.yml\n/custom-data/\n", encoding="utf-8")
+
+    repo = Repo.init(project.path)
+    repo.index.add([".gitignore", "README.md"])
+    repo.index.commit("Initial commit")
+    repo.close()
+
+    (project.path / ".gitignore").write_text("# stale generated copy\n# python\n", encoding="utf-8")
+
+    monkeypatch.setattr(setup_module, "_write_wabbit_legal_files", _noop_write_callback)
+    monkeypatch.setattr(setup_module, "_write_banner", _noop_write_callback)
+
+    ctx = _make_setup_context(
+        pyproject_template=(
+            '[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n\n'
+            '[tool.poetry.dependencies]\npython = "{{ python_version }}"\n'
+        ),
+    )
+
+    setup_module.setup_python_project(ctx, project, interactive=False)
+
+    gitignore_content = (project.path / ".gitignore").read_text(encoding="utf-8")
+    assert "# tracked" in gitignore_content
+    assert "/.private.yml" in gitignore_content
+    assert "/custom-data/" in gitignore_content
+    assert "# base" in gitignore_content
+    assert "# python" in gitignore_content
+
+
 def test_setup_python_project_preserves_existing_docs_and_workflows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -392,9 +462,10 @@ def test_targeted_prod_setup_omits_cross_repo_gradle_projects_from_root_settings
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
 
+    from mu.types import Document
+
     import dev.tasks.setup as setup_module
     from dev.config import Config, GradleProject, OwnershipType, Version
-    from mu.types import Document
 
     def make_gradle_project(
         path: Path,
@@ -496,3 +567,91 @@ def test_targeted_prod_setup_omits_cross_repo_gradle_projects_from_root_settings
     assert "jeeves-api=" in settings_text
     assert "jeeves-server=" in settings_text
     assert "kotlin-dotenv-parser=" not in settings_text
+
+
+def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    from dev.config import Config, GradleProject, OwnershipType, RepoDefinition, Version
+
+    def make_gradle_project(
+        path: Path,
+        *,
+        project_id: str,
+        repo_root_path: Path,
+    ) -> GradleProject:
+        return GradleProject(
+            path=path,
+            group_name="one.wabbit",
+            name=path.name,
+            version=Version.parse("0.0.1"),
+            description=None,
+            authors=[],
+            license="AGPL",
+            quarantine=False,
+            publish=False,
+            github_repo="org/repo",
+            ownership=OwnershipType.WABBIT,
+            raw_dependencies=[],
+            raw_features=[],
+            resolved_dependencies=[],
+            resolved_maven_repositories=[],
+            resolved_features={},
+            platforms=["jvm"],
+            source_set_dependencies={},
+            project_id=project_id,
+            repo_id=project_id.split("/", 1)[0],
+            repo_root=repo_root_path,
+            managed_by_setup=False,
+            gradle_root=repo_root_path,
+            module_dir=Path(path.name),
+            gradle_project_name=path.name,
+        )
+
+    jeeves_root = tmp_path / "jeeves"
+    api_project = make_gradle_project(
+        jeeves_root / "api",
+        project_id="jeeves/api",
+        repo_root_path=jeeves_root,
+    )
+
+    config = Config(raw=Document([]))
+    config.defined_projects = {"jeeves/api": api_project}
+    config.defined_repos = {
+        "jeeves": RepoDefinition(
+            repo_id="jeeves",
+            path=jeeves_root,
+            github_repo="org/jeeves",
+            gradle_root_project_name="one.wabbit",
+            jvm_policy=None,
+            project_ids=["jeeves/api"],
+        )
+    }
+    config.plugins["kotlin-jvm"] = SimpleNamespace(version="2.2.20")
+
+    written_paths: list[Path] = []
+
+    monkeypatch.setattr(setup_module, "load_config", lambda: config)
+    monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["jeeves/api"])
+    monkeypatch.setattr(
+        setup_module,
+        "create_repo_setup_context",
+        lambda _config, mode: SimpleNamespace(config=config, mode=mode),
+    )
+    monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        setup_module.setup_common,
+        "write_wabbit_legal_documents",
+        lambda _ctx, project: written_paths.append(project.path),
+    )
+
+    setup_module.setup(setup_module.RepoSetupMode.LOCAL, interactive=False, project="jeeves/api")
+
+    assert written_paths == [jeeves_root]

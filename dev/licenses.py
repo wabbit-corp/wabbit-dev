@@ -170,7 +170,9 @@ def render_license_text(
     if isinstance(project_description, str) and project_description.strip():
         header_line = f"{project_name}: {project_description.strip()}"
 
-    template = jinja2.Template(_standardize_license_template_text(template_text))
+    template = jinja2.Environment(undefined=jinja2.StrictUndefined).from_string(
+        _standardize_license_template_text(template_text)
+    )
     rendered = template.render(
         copyright_year=_copyright_year_text(current_year=year, year_start=project_copyright_year_start),
         copyright_holder=_copyright_holder(project_authors, project_copyright_holder),

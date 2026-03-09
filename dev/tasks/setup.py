@@ -1,3 +1,4 @@
+import dataclasses
 import io
 import os
 from dataclasses import dataclass
@@ -10,14 +11,14 @@ import dev.io
 from dev.ai import ensure_semver_impact_line, suggest_commit_name
 from dev.base import Scope
 from dev.build_order import toposort_projects
-from dev.caching import DEFAULT_CACHE_DB_PATH, cache
 from dev.config import (
     Config,
     DataProject,
     GradleProject,
+    OwnershipType,
     PremakeProject,
-    ProjectDependencyTarget,
     Project,
+    ProjectDependencyTarget,
     PurescriptProject,
     PythonProject,
     load_config,
@@ -55,7 +56,7 @@ class RepoSetupContext:
     repo_template: Path
 
     licenses: dict[str, str]
-    coc: str
+    coc: jinja2.Template
 
     gitignore_template: jinja2.Template
     cla: jinja2.Template
@@ -289,6 +290,21 @@ def setup_project(
 
 def _write_wabbit_legal_files(ctx: setup_common.CommonSetupContext, project: Project) -> None:
     setup_common.write_wabbit_legal_files(ctx, project)
+
+
+def _write_repo_root_wabbit_legal_documents(
+    ctx: setup_common.CommonSetupContext,
+    repo_projects: list[GradleProject],
+) -> None:
+    if not repo_projects:
+        return
+
+    representative_project = repo_projects[0]
+    if representative_project.ownership != OwnershipType.WABBIT:
+        return
+
+    repo_root_project = dataclasses.replace(representative_project, path=representative_project.effective_repo_root)
+    setup_common.write_wabbit_legal_documents(ctx, repo_root_project)
 
 
 def _write_banner(ctx: setup_common.CommonSetupContext, project: Project) -> None:
@@ -711,27 +727,6 @@ def commit_repo_changes(
             repo.index.commit(commit_name)
 
 
-def get_coc_file() -> str:
-    import requests
-
-    # https://raw.githubusercontent.com/wabbit-corp/code-of-excellence/refs/heads/master/CODE_OF_CONDUCT.md
-    coc_url = (
-        "https://raw.githubusercontent.com/wabbit-corp/code-of-excellence/"  # check:ignore E_HARDCODED_URL
-        "refs/heads/master/CODE_OF_CONDUCT.md"
-    )
-    try:
-        response = requests.get(coc_url, timeout=10)
-        response.raise_for_status()
-    except requests.RequestException as ex:
-        error(f"Failed to fetch CoC file: {ex}")
-        raise RuntimeError("Failed to fetch CoC file") from ex
-
-    return str(response.text)
-
-
-get_coc_file = cache(path=DEFAULT_CACHE_DB_PATH, ttl=7 * 24 * 3600)(get_coc_file)
-
-
 def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupContext:
     from github import Github
     from github.GithubException import GithubException
@@ -779,8 +774,6 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
 
     repo_template = Path("data-repo-template")
 
-    coc = get_coc_file()
-
     return RepoSetupContext(
         config=config,
         known_repo_names=known_repo_names,
@@ -789,11 +782,18 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
         is_github_api_available=is_github_api_available,
         licenses=load_license_texts(repo_template / "legal" / "licenses"),
         gitignore_template=dev.io.read_template(repo_template / "gitignore.jinja2"),
-        cla=dev.io.read_template(repo_template / "legal" / "cla" / "v1.0.0" / "CLA.md"),
-        cla_explanations=dev.io.read_template(repo_template / "legal" / "cla" / "v1.0.0" / "CLA_EXPLANATIONS.md"),
-        coc=coc,
+        cla=dev.io.read_template(repo_template / "legal" / "cla" / "v1.0.0" / "CLA.md", strict=True),
+        cla_explanations=dev.io.read_template(
+            repo_template / "legal" / "cla" / "v1.0.0" / "CLA_EXPLANATIONS.md",
+            strict=True,
+        ),
+        coc=dev.io.read_template(
+            repo_template / "legal" / "code-of-conduct" / "v1.0.0" / "CODE_OF_CONDUCT.md",
+            strict=True,
+        ),
         contributor_privacy_policy=dev.io.read_template(
-            repo_template / "legal" / "contributor-privacy" / "v1.0.0" / "CONTRIBUTOR_PRIVACY.md"
+            repo_template / "legal" / "contributor-privacy" / "v1.0.0" / "CONTRIBUTOR_PRIVACY.md",
+            strict=True,
         ),
         gradle_gitignore_template=dev.io.read_template(repo_template / "gradle-files" / "gitignore.jinja2"),
         settings_template=dev.io.read_template(repo_template / "gradle-files" / "settings.gradle.kts.jinja2"),
@@ -899,6 +899,7 @@ def setup(mode: RepoSetupMode, *, interactive: bool = True, project: str | None 
                 write_wrapper=True,
                 write_build=False,
             )
+            _write_repo_root_wabbit_legal_documents(ctx, repo_gradle_projects)
 
     for setup_project_item in selected_projects:
         setup_project(ctx, setup_project_item, interactive=interactive)
