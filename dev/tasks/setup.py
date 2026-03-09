@@ -64,6 +64,7 @@ class RepoSetupContext:
     contributor_privacy_policy: jinja2.Template
 
     settings_template: jinja2.Template
+    settings_local_template: jinja2.Template
     subproject_settings_template: jinja2.Template
     build_template: jinja2.Template
     subproject_build_template: jinja2.Template
@@ -85,6 +86,24 @@ class RepoSetupContext:
     python_build_executable_template: jinja2.Template
 
     mode: RepoSetupMode
+
+
+@dataclass(frozen=True)
+class WorkspaceDependencySubstitution:
+    module_coordinate: str
+    gradle_project_name: str
+
+
+@dataclass(frozen=True)
+class LocalIncludedBuildSubstitution:
+    module_coordinate: str
+    project_path: str
+
+
+@dataclass(frozen=True)
+class LocalIncludedBuild:
+    build_path: str
+    substitutions: list[LocalIncludedBuildSubstitution]
 
 
 def setup_project(
@@ -344,6 +363,10 @@ def _relative_project_dir(root_path: Path, project_path: Path) -> str:
     return Path(os.path.relpath(project_path.resolve(), start=root_path.resolve())).as_posix()
 
 
+def _gradle_project_key(project: GradleProject) -> str:
+    return project.project_id or project.effective_gradle_project_name
+
+
 def _gradle_project_dependencies(config: Config, project: GradleProject) -> list[GradleProject]:
     result: list[GradleProject] = []
     for dependency in project.resolved_dependencies:
@@ -359,7 +382,8 @@ def _gradle_project_dependencies(config: Config, project: GradleProject) -> list
 def _collect_included_gradle_projects(
     config: Config,
     seed_projects: list[GradleProject],
-    mode: RepoSetupMode,
+    *,
+    include_external_dependencies: bool,
 ) -> list[GradleProject]:
     included: list[GradleProject] = []
     seen: set[str] = set()
@@ -367,7 +391,7 @@ def _collect_included_gradle_projects(
 
     while queue:
         project = queue.pop(0)
-        project_key = project.project_id or project.effective_gradle_project_name
+        project_key = _gradle_project_key(project)
         if project_key in seen:
             continue
         seen.add(project_key)
@@ -375,10 +399,124 @@ def _collect_included_gradle_projects(
 
         for dependency_project in _gradle_project_dependencies(config, project):
             same_repo = dependency_project.effective_repo_root == project.effective_repo_root
-            if same_repo or mode == RepoSetupMode.LOCAL:
+            if same_repo or include_external_dependencies:
                 queue.append(dependency_project)
 
     return included
+
+
+def _collect_reachable_gradle_projects(config: Config, seed_projects: list[GradleProject]) -> list[GradleProject]:
+    reachable: list[GradleProject] = []
+    seen: set[str] = set()
+    queue = list(seed_projects)
+
+    while queue:
+        project = queue.pop(0)
+        project_key = _gradle_project_key(project)
+        if project_key in seen:
+            continue
+        seen.add(project_key)
+        reachable.append(project)
+        queue.extend(_gradle_project_dependencies(config, project))
+
+    return reachable
+
+
+def _workspace_dependency_substitutions(
+    config: Config,
+    included_projects: list[GradleProject],
+) -> list[WorkspaceDependencySubstitution]:
+    substitutions: list[WorkspaceDependencySubstitution] = []
+    seen: set[str] = set()
+    reachable_keys = {_gradle_project_key(project) for project in _collect_reachable_gradle_projects(config, included_projects)}
+
+    for project in included_projects:
+        project_key = _gradle_project_key(project)
+        if project_key not in reachable_keys:
+            continue
+        module_coordinate = project.artifact_name.rsplit(":", 1)[0]
+        if module_coordinate in seen:
+            continue
+        seen.add(module_coordinate)
+        substitutions.append(
+            WorkspaceDependencySubstitution(
+                module_coordinate=module_coordinate,
+                gradle_project_name=project.effective_gradle_project_name,
+            )
+        )
+
+    return substitutions
+
+
+def _included_build_project_path(project: GradleProject) -> str:
+    if project.path.resolve() == project.effective_gradle_root.resolve():
+        return ":"
+    return f":{project.effective_gradle_project_name}"
+
+
+def _local_included_builds(
+    config: Config,
+    *,
+    root_path: Path,
+    seed_projects: list[GradleProject],
+) -> list[LocalIncludedBuild]:
+    reachable_projects = _collect_reachable_gradle_projects(config, seed_projects)
+    local_repo_roots = {project.effective_repo_root.resolve() for project in seed_projects}
+
+    grouped_projects: dict[Path, list[GradleProject]] = {}
+    for project in reachable_projects:
+        project_repo_root = project.effective_repo_root.resolve()
+        if project_repo_root in local_repo_roots:
+            continue
+        gradle_root = project.effective_gradle_root.resolve()
+        grouped_projects.setdefault(gradle_root, []).append(project)
+
+    included_builds: list[LocalIncludedBuild] = []
+    for gradle_root in sorted(grouped_projects.keys()):
+        substitutions: list[LocalIncludedBuildSubstitution] = []
+        seen_coordinates: set[str] = set()
+        for project in sorted(grouped_projects[gradle_root], key=_gradle_project_key):
+            module_coordinate = project.artifact_name.rsplit(":", 1)[0]
+            if module_coordinate in seen_coordinates:
+                continue
+            seen_coordinates.add(module_coordinate)
+            substitutions.append(
+                LocalIncludedBuildSubstitution(
+                    module_coordinate=module_coordinate,
+                    project_path=_included_build_project_path(project),
+                )
+            )
+
+        if not substitutions:
+            continue
+
+        included_builds.append(
+            LocalIncludedBuild(
+                build_path=_relative_project_dir(root_path, gradle_root),
+                substitutions=substitutions,
+            )
+        )
+
+    return included_builds
+
+
+def _write_gradle_local_overlay(
+    ctx: RepoSetupContext,
+    *,
+    root_path: Path,
+    seed_projects: list[GradleProject],
+) -> None:
+    overlay_path = root_path / "settings.local.gradle.kts"
+    included_builds = _local_included_builds(ctx.config, root_path=root_path, seed_projects=seed_projects)
+    if not included_builds:
+        dev.io.delete_if_exists(overlay_path)
+        return
+
+    overlay_text = render_template(
+        ctx.settings_local_template,
+        included_builds=included_builds,
+    )
+    dev.io.write_text_file(overlay_path, setup_kotlin.clean_gradle_build_text(overlay_text))
 
 
 def _write_gradle_root_files(
@@ -389,14 +527,24 @@ def _write_gradle_root_files(
     seed_projects: list[GradleProject],
     write_wrapper: bool,
     write_build: bool = True,
+    include_external_dependencies: bool = False,
+    write_dependency_substitutions: bool = False,
 ) -> None:
     root_path.mkdir(parents=True, exist_ok=True)
-    included_projects = _collect_included_gradle_projects(ctx.config, seed_projects, ctx.mode)
+    included_projects = _collect_included_gradle_projects(
+        ctx.config,
+        seed_projects,
+        include_external_dependencies=include_external_dependencies,
+    )
     plugin_versions = setup_kotlin.settings_plugin_versions(ctx)
     if write_build:
+        dependency_substitutions = (
+            _workspace_dependency_substitutions(ctx.config, included_projects) if write_dependency_substitutions else []
+        )
         build_text = render_template(
             ctx.build_template,
             **plugin_versions,
+            dependency_substitutions=dependency_substitutions,
         )
         dev.io.write_text_file(root_path / "build.gradle.kts", setup_kotlin.clean_gradle_build_text(build_text))
 
@@ -797,6 +945,9 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
         ),
         gradle_gitignore_template=dev.io.read_template(repo_template / "gradle-files" / "gitignore.jinja2"),
         settings_template=dev.io.read_template(repo_template / "gradle-files" / "settings.gradle.kts.jinja2"),
+        settings_local_template=dev.io.read_template(
+            repo_template / "gradle-files" / "settings.local.gradle.kts.jinja2"
+        ),
         subproject_settings_template=dev.io.read_template(
             repo_template / "gradle-files" / "subproject-settings.gradle.kts.jinja2"
         ),
@@ -856,24 +1007,19 @@ def setup(mode: RepoSetupMode, *, interactive: bool = True, project: str | None 
 
     gradle_projects = [project_item for project_item in selected_projects if isinstance(project_item, GradleProject)]
     if gradle_projects:
-        target_project = config.defined_projects.get(project) if project is not None else None
-        if isinstance(target_project, GradleProject) and mode != RepoSetupMode.LOCAL:
-            workspace_seed_projects = [
-                project_item
-                for project_item in gradle_projects
-                if project_item.effective_repo_root == target_project.effective_repo_root
-            ]
-        else:
+        if project is None:
             workspace_seed_projects = gradle_projects
-        workspace_root_name = config.default_maven_project_group or "workspace"
-        _write_gradle_root_files(
-            ctx,
-            root_path=Path("."),
-            root_project_name=workspace_root_name,
-            seed_projects=workspace_seed_projects,
-            write_wrapper=False,
-            write_build=True,
-        )
+            workspace_root_name = config.default_maven_project_group or "workspace"
+            _write_gradle_root_files(
+                ctx,
+                root_path=Path("."),
+                root_project_name=workspace_root_name,
+                seed_projects=workspace_seed_projects,
+                write_wrapper=False,
+                write_build=True,
+                include_external_dependencies=mode == RepoSetupMode.LOCAL,
+                write_dependency_substitutions=mode == RepoSetupMode.LOCAL,
+            )
 
         repo_ids_to_write = {
             project_item.repo_id
@@ -898,26 +1044,53 @@ def setup(mode: RepoSetupMode, *, interactive: bool = True, project: str | None 
                 seed_projects=repo_gradle_projects,
                 write_wrapper=True,
                 write_build=False,
+                include_external_dependencies=False,
+                write_dependency_substitutions=False,
             )
             _write_repo_root_wabbit_legal_documents(ctx, repo_gradle_projects)
 
     for setup_project_item in selected_projects:
-        setup_project(ctx, setup_project_item, interactive=interactive)
+        setup_project(
+            ctx,
+            setup_project_item,
+            interactive=interactive,
+            commit_changes=False,
+            allow_push=False,
+        )
 
     if mode == RepoSetupMode.LOCAL:
+        repo_ids_to_overlay = {
+            project_item.repo_id
+            for project_item in gradle_projects
+            if project_item.repo_id is not None and project_item.effective_gradle_root != Path(".")
+        }
+        for repo_id in sorted(repo_ids_to_overlay):
+            repo_definition = config.defined_repos.get(repo_id)
+            if repo_definition is None:
+                continue
+            repo_gradle_projects = [
+                defined_project
+                for defined_project in config.defined_projects.values()
+                if isinstance(defined_project, GradleProject) and defined_project.repo_id == repo_id
+            ]
+            if not repo_gradle_projects:
+                continue
+            _write_gradle_local_overlay(
+                ctx,
+                root_path=repo_definition.path,
+                seed_projects=repo_gradle_projects,
+            )
+
         standalone_gradle_projects = [
             project_item
             for project_item in selected_projects
             if isinstance(project_item, GradleProject) and project_item.effective_gradle_root == project_item.path
         ]
         for standalone_project in standalone_gradle_projects:
-            _write_gradle_root_files(
+            _write_gradle_local_overlay(
                 ctx,
                 root_path=standalone_project.path,
-                root_project_name=standalone_project.effective_gradle_project_name,
                 seed_projects=[standalone_project],
-                write_wrapper=False,
-                write_build=False,
             )
 
     if project is None:

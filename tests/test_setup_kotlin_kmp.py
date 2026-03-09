@@ -298,10 +298,12 @@ def test_render_dependency_keeps_same_repo_project_dependency_in_prod_mode(tmp_p
         gradle_project_name="jeeves-api",
         github_repo="wabbit-corp/jeeves",
     )
-    ctx.config.defined_projects = {
-        "jeeves/server": owner,
-        "jeeves/api": dependency_project,
-    }
+    ctx.config.defined_projects.update(
+        {
+            "jeeves/server": owner,
+            "jeeves/api": dependency_project,
+        }
+    )
 
     dependency = Dependency(scope=None, target=ProjectDependencyTarget(project="jeeves/api"))
     rendered = _render_dependency_for_mode(ctx, owner, dependency)
@@ -328,10 +330,12 @@ def test_render_dependency_uses_published_artifact_for_cross_repo_dependency_in_
         artifact_id="kotlin-dotenv-parser",
         github_repo="wabbit-corp/kotlin-dotenv-parser",
     )
-    ctx.config.defined_projects = {
-        "jeeves/server": owner,
-        "kotlin-dotenv-parser": dependency_project,
-    }
+    ctx.config.defined_projects.update(
+        {
+            "jeeves/server": owner,
+            "kotlin-dotenv-parser": dependency_project,
+        }
+    )
 
     dependency = Dependency(scope=None, target=ProjectDependencyTarget(project="kotlin-dotenv-parser"))
     rendered = _render_dependency_for_mode(ctx, owner, dependency)
@@ -339,7 +343,7 @@ def test_render_dependency_uses_published_artifact_for_cross_repo_dependency_in_
     assert rendered == 'implementation("one.wabbit:kotlin-dotenv-parser:0.0.1")'
 
 
-def test_render_dependency_keeps_cross_repo_project_dependency_in_local_mode(tmp_path: Path) -> None:
+def test_render_dependency_uses_published_artifact_for_cross_repo_dependency_in_local_mode(tmp_path: Path) -> None:
     ctx = _make_context(tmp_path, jvm_template="", kmp_template="")
     ctx.mode = RepoSetupMode.LOCAL
 
@@ -358,15 +362,36 @@ def test_render_dependency_keeps_cross_repo_project_dependency_in_local_mode(tmp
         artifact_id="kotlin-dotenv-parser",
         github_repo="wabbit-corp/kotlin-dotenv-parser",
     )
-    ctx.config.defined_projects = {
-        "jeeves/server": owner,
-        "kotlin-dotenv-parser": dependency_project,
-    }
+    ctx.config.defined_projects.update(
+        {
+            "jeeves/server": owner,
+            "kotlin-dotenv-parser": dependency_project,
+        }
+    )
 
     dependency = Dependency(scope=None, target=ProjectDependencyTarget(project="kotlin-dotenv-parser"))
     rendered = _render_dependency_for_mode(ctx, owner, dependency)
 
-    assert rendered == 'implementation(project(":kotlin-dotenv-parser")) // 0.0.1'
+    assert rendered == 'implementation("one.wabbit:kotlin-dotenv-parser:0.0.1")'
+
+
+def test_setup_gradle_project_writes_prod_shaped_settings_even_in_local_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "kotlin-demo", platforms=["jvm"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    ctx = _make_context(tmp_path, jvm_template="JVM_TEMPLATE", kmp_template="KMP_TEMPLATE")
+    ctx.subproject_settings_template = jinja2.Template("SETTINGS={{ project_name }}")
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    settings_text = (project.path / "settings.gradle.kts").read_text(encoding="utf-8").strip()
+    assert settings_text == "SETTINGS=kotlin-demo"
+    assert not (project.path / ".is-local-mode").exists()
+    assert not (project.path / ".is-dev-mode").exists()
+    assert not (project.path / ".is-ij-mode").exists()
 
 
 def test_setup_gradle_project_renders_dokka_source_link_for_standalone_jvm_repo(

@@ -147,7 +147,7 @@ def _render_dependency_for_mode(ctx: GradleSetupContext, project: Project, depen
 
         if same_repo and isinstance(subproject, GradleProject):
             return f"{dependency_string} // {project_version}"
-        if has_github_repo and ctx.mode.value != "local":
+        if has_github_repo:
             return artifact_dependency.as_string()
         return f"{dependency_string} // {project_version}"
 
@@ -695,39 +695,20 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
     if nested_gradle_project:
         _cleanup_nested_gradle_project_files(project)
     else:
-        if mode_value == "local":
-            dev.io.delete_if_exists(project.path / "settings.gradle.kts")
-            dev.io.touch(project.path / ".is-local-mode")
-            dev.io.delete_if_exists(project.path / ".is-ij-mode")
-            dev.io.delete_if_exists(project.path / ".is-dev-mode")
-        elif mode_value == "dev":
-            dev.io.write_text_file(
-                project.path / "settings.gradle.kts",
-                clean_gradle_build_text(
-                    render_template(
-                        ctx.settings_template,
-                        root_project_name=project.effective_gradle_project_name,
-                    )
-                ),
-            )
-            dev.io.delete_if_exists(project.path / ".is-local-mode")
-            dev.io.delete_if_exists(project.path / ".is-ij-mode")
-            dev.io.touch(project.path / ".is-dev-mode")
-        else:
-            dev.io.write_text_file(
-                project.path / "settings.gradle.kts",
-                clean_gradle_build_text(
-                    render_template(
-                        ctx.subproject_settings_template,
-                        **settings_plugin_versions(ctx),
-                        project_name=project.effective_gradle_project_name,
-                        features=project.resolved_features,
-                    )
-                ),
-            )
-            dev.io.delete_if_exists(project.path / ".is-local-mode")
-            dev.io.delete_if_exists(project.path / ".is-ij-mode")
-            dev.io.delete_if_exists(project.path / ".is-dev-mode")
+        dev.io.write_text_file(
+            project.path / "settings.gradle.kts",
+            clean_gradle_build_text(
+                render_template(
+                    ctx.subproject_settings_template,
+                    **settings_plugin_versions(ctx),
+                    project_name=project.effective_gradle_project_name,
+                    features=project.resolved_features,
+                )
+            ),
+        )
+        dev.io.delete_if_exists(project.path / ".is-local-mode")
+        dev.io.delete_if_exists(project.path / ".is-ij-mode")
+        dev.io.delete_if_exists(project.path / ".is-dev-mode")
 
         dev.io.write_text_file(
             project.path / ".gitignore",

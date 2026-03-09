@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Make `dev setup` a pure regeneration command by disabling auto-commit and upstream-push behavior in the CLI path, so scoped `setup <name>` and `setup --local <name>` can update tracked files and ignored overlays without dropping into the commit flow.
+- Make generated Gradle repos always track prod-ready dependency state: cross-repo dependencies now stay as published artifact coordinates in tracked `build.gradle.kts`, repo `settings.gradle.kts` files always remain tracked, local mode writes ignored `settings.local.gradle.kts` composite-build overlays instead of toggling tracked files, and workspace-root local builds keep working through generated dependency-substitution rules.
 - Avoid banner churn during setup by comparing rendered RGBA pixels before overwriting `.banner.png`, so equivalent images are left byte-for-byte untouched even when Pillow/zlib would re-encode PNG metadata or IDAT streams differently.
 - Add a config-wide `default-company-email` setting, use it when rendering generated Wabbit legal documents, and fail legal generation if the company contact email is missing instead of hardcoding `wabbit@wabbit.one` in setup code.
 - Fix generated Kotlin Dokka source links by deriving per-project GitHub source roots from each Gradle project's `github_repo` and repo-relative module path, removing the hardcoded `https://example.com/src` placeholder from both JVM and KMP templates.

@@ -110,6 +110,7 @@ def _make_render_context(pyproject_template: str | None = None) -> RepoSetupCont
         cla_explanations=jinja2.Template(""),
         contributor_privacy_policy=jinja2.Template(""),
         settings_template=jinja2.Template(""),
+        settings_local_template=jinja2.Template(""),
         subproject_settings_template=jinja2.Template(""),
         build_template=jinja2.Template(""),
         subproject_build_template=jinja2.Template(""),

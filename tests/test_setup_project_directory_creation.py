@@ -98,6 +98,7 @@ def _make_setup_context(pyproject_template: str, codespell_words: str = "wabbit\
         cla_explanations=jinja2.Template(""),
         contributor_privacy_policy=jinja2.Template(""),
         settings_template=jinja2.Template(""),
+        settings_local_template=jinja2.Template(""),
         subproject_settings_template=jinja2.Template(""),
         build_template=jinja2.Template(""),
         subproject_build_template=jinja2.Template(""),
@@ -465,7 +466,7 @@ def test_targeted_prod_setup_omits_cross_repo_gradle_projects_from_root_settings
     from mu.types import Document
 
     import dev.tasks.setup as setup_module
-    from dev.config import Config, GradleProject, OwnershipType, Version
+    from dev.config import Config, GradleProject, KotlinPluginDefinition, OwnershipType, RepoDefinition, Version
 
     def make_gradle_project(
         path: Path,
@@ -524,14 +525,24 @@ def test_targeted_prod_setup_omits_cross_repo_gradle_projects_from_root_settings
     )
 
     config = Config(raw=Document([]))
-    config.defined_projects = {
-        "jeeves/api": api_project,
-        "kotlin-dotenv-parser": external_project,
-        "jeeves/server": server_project,
-    }
-    config.plugins["kotlin-jvm"] = SimpleNamespace(version="2.2.20")
+    config.defined_projects.update(
+        {
+            "jeeves/api": api_project,
+            "kotlin-dotenv-parser": external_project,
+            "jeeves/server": server_project,
+        }
+    )
+    config.defined_repos["jeeves"] = RepoDefinition(
+        repo_id="jeeves",
+        path=jeeves_root,
+        github_repo="org/jeeves",
+        gradle_root_project_name="jeeves",
+        jvm_policy=None,
+        project_ids=["jeeves/api", "jeeves/server"],
+    )
+    config.plugins["kotlin-jvm"] = KotlinPluginDefinition(name="org.jetbrains.kotlin.jvm", version="2.2.20")
 
-    written_files: dict[str, str] = {}
+    root_write_calls: list[tuple[Path, list[str], bool]] = []
 
     def fake_load_config() -> Config:
         return config
@@ -541,32 +552,26 @@ def test_targeted_prod_setup_omits_cross_repo_gradle_projects_from_root_settings
         return ["jeeves/api", "kotlin-dotenv-parser", "jeeves/server"]
 
     def fake_create_repo_setup_context(_config: Config, mode: object) -> object:
-        return SimpleNamespace(
-            config=config,
-            mode=mode,
-            build_template=jinja2.Template("ROOT_BUILD {{ kotlin_version }}"),
-            settings_template=jinja2.Template(
-                "{% for included_project in included_projects %}"
-                "{{ included_project.gradle_project_name }}={{ included_project.project_dir }}\n"
-                "{% endfor %}"
-            ),
-        )
-
-    def fake_write_text_file(path: Path, content: str) -> None:
-        written_files[path.as_posix()] = content
+        return SimpleNamespace(config=config, mode=mode)
 
     monkeypatch.setattr(setup_module, "load_config", fake_load_config)
     monkeypatch.setattr(setup_module, "toposort_projects", fake_toposort_projects)
     monkeypatch.setattr(setup_module, "create_repo_setup_context", fake_create_repo_setup_context)
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(setup_module.dev.io, "write_text_file", fake_write_text_file)
+    monkeypatch.setattr(
+        setup_module,
+        "_write_gradle_root_files",
+        lambda _ctx, *, root_path, seed_projects, include_external_dependencies, **_kwargs: root_write_calls.append(
+            (root_path, [project.project_id for project in seed_projects], include_external_dependencies)
+        ),
+    )
+    monkeypatch.setattr(setup_module, "_write_repo_root_wabbit_legal_documents", lambda *_args, **_kwargs: None)
 
     setup_module.setup(setup_module.RepoSetupMode.PROD, interactive=False, project="jeeves/server")
 
-    settings_text = written_files["settings.gradle.kts"]
-    assert "jeeves-api=" in settings_text
-    assert "jeeves-server=" in settings_text
-    assert "kotlin-dotenv-parser=" not in settings_text
+    assert root_write_calls == [
+        (jeeves_root, ["jeeves/api", "jeeves/server"], False),
+    ]
 
 
 def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
@@ -578,7 +583,8 @@ def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
     from mu.types import Document
 
     import dev.tasks.setup as setup_module
-    from dev.config import Config, GradleProject, OwnershipType, RepoDefinition, Version
+    import dev.tasks.setup_common as setup_common_module
+    from dev.config import Config, GradleProject, KotlinPluginDefinition, OwnershipType, RepoDefinition, Version
 
     def make_gradle_project(
         path: Path,
@@ -622,18 +628,20 @@ def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
     )
 
     config = Config(raw=Document([]))
-    config.defined_projects = {"jeeves/api": api_project}
-    config.defined_repos = {
-        "jeeves": RepoDefinition(
-            repo_id="jeeves",
-            path=jeeves_root,
-            github_repo="org/jeeves",
-            gradle_root_project_name="one.wabbit",
-            jvm_policy=None,
-            project_ids=["jeeves/api"],
-        )
-    }
-    config.plugins["kotlin-jvm"] = SimpleNamespace(version="2.2.20")
+    config.defined_projects.update({"jeeves/api": api_project})
+    config.defined_repos.update(
+        {
+            "jeeves": RepoDefinition(
+                repo_id="jeeves",
+                path=jeeves_root,
+                github_repo="org/jeeves",
+                gradle_root_project_name="one.wabbit",
+                jvm_policy=None,
+                project_ids=["jeeves/api"],
+            )
+        }
+    )
+    config.plugins["kotlin-jvm"] = KotlinPluginDefinition(name="org.jetbrains.kotlin.jvm", version="2.2.20")
 
     written_paths: list[Path] = []
 
@@ -646,12 +654,352 @@ def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
     )
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        setup_module.setup_common,
-        "write_wabbit_legal_documents",
-        lambda _ctx, project: written_paths.append(project.path),
-    )
+    monkeypatch.setattr(setup_common_module, "write_wabbit_legal_documents", lambda _ctx, project: written_paths.append(project.path))
+    monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
 
     setup_module.setup(setup_module.RepoSetupMode.LOCAL, interactive=False, project="jeeves/api")
 
     assert written_paths == [jeeves_root]
+
+
+def test_setup_does_not_commit_or_push_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    from dev.config import Config, OwnershipType, PythonProject
+
+    project_path = tmp_path / "demo"
+    project = PythonProject(
+        path=project_path,
+        name="demo",
+        version=None,
+        description=None,
+        authors=[],
+        license=None,
+        github_repo=None,
+        requires_python=None,
+        dependencies=[],
+        dev_dependencies=[],
+        scripts=[],
+        application=None,
+        homepage=None,
+        repository=None,
+        keywords=[],
+        classifiers=[],
+        quarantine=False,
+        publish=False,
+        ownership=OwnershipType.WABBIT,
+        resolved_dependencies=[],
+    )
+
+    config = Config(raw=Document([]))
+    config.defined_projects["demo"] = project
+
+    setup_calls: list[tuple[str, bool, bool, bool]] = []
+
+    monkeypatch.setattr(setup_module, "load_config", lambda: config)
+    monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["demo"])
+    monkeypatch.setattr(
+        setup_module,
+        "create_repo_setup_context",
+        lambda _config, mode: SimpleNamespace(config=config, mode=mode),
+    )
+    monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
+
+    def fake_setup_project(
+        _ctx: object,
+        setup_project_item: object,
+        *,
+        interactive: bool,
+        commit_changes: bool,
+        allow_push: bool,
+    ) -> None:
+        assert setup_project_item is project
+        setup_calls.append((project.name, interactive, commit_changes, allow_push))
+
+    monkeypatch.setattr(setup_module, "setup_project", fake_setup_project)
+
+    setup_module.setup(setup_module.RepoSetupMode.PROD, interactive=False, project="demo")
+
+    assert setup_calls == [("demo", False, False, False)]
+
+
+def test_targeted_local_setup_does_not_write_workspace_root_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    from dev.config import Config, GradleProject, KotlinPluginDefinition, OwnershipType, Version
+
+    project = GradleProject(
+        path=tmp_path / "demo",
+        group_name="one.wabbit",
+        name="demo",
+        version=Version.parse("0.0.1"),
+        description=None,
+        authors=[],
+        license="AGPL",
+        quarantine=False,
+        publish=False,
+        github_repo="org/demo",
+        ownership=OwnershipType.WABBIT,
+        raw_dependencies=[],
+        raw_features=[],
+        resolved_dependencies=[],
+        resolved_maven_repositories=[],
+        resolved_features={},
+        platforms=["jvm"],
+        source_set_dependencies={},
+        project_id="demo",
+        repo_id=None,
+        repo_root=tmp_path / "demo",
+        managed_by_setup=True,
+        gradle_root=tmp_path / "demo",
+        module_dir=Path("."),
+        gradle_project_name="demo",
+    )
+
+    config = Config(raw=Document([]))
+    config.defined_projects["demo"] = project
+    config.plugins["kotlin-jvm"] = KotlinPluginDefinition(name="org.jetbrains.kotlin.jvm", version="2.2.20")
+
+    root_writes: list[Path] = []
+
+    monkeypatch.setattr(setup_module, "load_config", lambda: config)
+    monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["demo"])
+    monkeypatch.setattr(
+        setup_module,
+        "create_repo_setup_context",
+        lambda _config, mode: SimpleNamespace(config=config, mode=mode),
+    )
+    monkeypatch.setattr(
+        setup_module,
+        "_write_gradle_root_files",
+        lambda _ctx, *, root_path, **_kwargs: root_writes.append(root_path),
+    )
+    monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+
+    setup_module.setup(setup_module.RepoSetupMode.LOCAL, interactive=False, project="demo")
+
+    assert Path(".") not in root_writes
+
+
+def test_write_gradle_local_overlay_groups_external_builds_and_uses_correct_project_paths(tmp_path: Path) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    from dev.config import Config, Dependency, GradleProject, OwnershipType, ProjectDependencyTarget, Version
+
+    def make_gradle_project(
+        path: Path,
+        *,
+        project_id: str,
+        repo_root_path: Path,
+        gradle_root_path: Path,
+        gradle_project_name: str,
+    ) -> GradleProject:
+        return GradleProject(
+            path=path,
+            group_name="one.wabbit",
+            name=gradle_project_name,
+            version=Version.parse("0.0.1"),
+            description=None,
+            authors=[],
+            license="AGPL",
+            quarantine=False,
+            publish=False,
+            github_repo="org/repo",
+            ownership=OwnershipType.IMPORTED,
+            raw_dependencies=[],
+            raw_features=[],
+            resolved_dependencies=[],
+            resolved_maven_repositories=[],
+            resolved_features={},
+            platforms=["jvm"],
+            source_set_dependencies={},
+            project_id=project_id,
+            repo_id=project_id.split("/", 1)[0] if "/" in project_id else None,
+            repo_root=repo_root_path,
+            gradle_root=gradle_root_path,
+            module_dir=Path(path.name),
+            gradle_project_name=gradle_project_name,
+        )
+
+    repo_root = tmp_path / "jeeves"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    local_project = make_gradle_project(
+        repo_root / "server",
+        project_id="jeeves/server",
+        repo_root_path=repo_root,
+        gradle_root_path=repo_root,
+        gradle_project_name="jeeves-server",
+    )
+
+    standalone_root = tmp_path / "kotlin-dotenv-parser"
+    standalone_project = make_gradle_project(
+        standalone_root,
+        project_id="kotlin-dotenv-parser",
+        repo_root_path=standalone_root,
+        gradle_root_path=standalone_root,
+        gradle_project_name="kotlin-dotenv-parser",
+    )
+
+    shared_root = tmp_path / "shared"
+    shared_api = make_gradle_project(
+        shared_root / "api",
+        project_id="shared/api",
+        repo_root_path=shared_root,
+        gradle_root_path=shared_root,
+        gradle_project_name="shared-api",
+    )
+    shared_cli = make_gradle_project(
+        shared_root / "cli",
+        project_id="shared/cli",
+        repo_root_path=shared_root,
+        gradle_root_path=shared_root,
+        gradle_project_name="shared-cli",
+    )
+
+    local_project.resolved_dependencies = [
+        Dependency(scope=None, target=ProjectDependencyTarget(project="kotlin-dotenv-parser")),
+        Dependency(scope=None, target=ProjectDependencyTarget(project="shared/api")),
+        Dependency(scope=None, target=ProjectDependencyTarget(project="shared/cli")),
+    ]
+
+    config = Config(raw=Document([]))
+    config.defined_projects.update(
+        {
+            "jeeves/server": local_project,
+            "kotlin-dotenv-parser": standalone_project,
+            "shared/api": shared_api,
+            "shared/cli": shared_cli,
+        }
+    )
+
+    ctx = _make_setup_context('[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n')
+    ctx.config = config
+    ctx.settings_local_template = jinja2.Template(
+        "{% for included_build in included_builds %}"
+        "{{ included_build.build_path }}:"
+        "{% for substitution in included_build.substitutions %}"
+        "[{{ substitution.module_coordinate }}=>{{ substitution.project_path }}]"
+        "{% endfor %}\n"
+        "{% endfor %}"
+    )
+
+    setup_module._write_gradle_local_overlay(
+        ctx,
+        root_path=repo_root,
+        seed_projects=[local_project],
+    )
+
+    overlay_text = (repo_root / "settings.local.gradle.kts").read_text(encoding="utf-8")
+    assert "../kotlin-dotenv-parser:[one.wabbit:kotlin-dotenv-parser=>:]" in overlay_text
+    assert "../shared:[one.wabbit:shared-api=>:shared-api][one.wabbit:shared-cli=>:shared-cli]" in overlay_text
+
+
+def test_write_gradle_root_files_writes_workspace_dependency_substitutions_in_local_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    from dev.config import Config, Dependency, GradleProject, OwnershipType, ProjectDependencyTarget, Version
+
+    def make_gradle_project(
+        path: Path,
+        *,
+        project_id: str,
+        repo_root_path: Path,
+        gradle_project_name: str,
+    ) -> GradleProject:
+        return GradleProject(
+            path=path,
+            group_name="one.wabbit",
+            name=gradle_project_name,
+            version=Version.parse("0.0.1"),
+            description=None,
+            authors=[],
+            license="AGPL",
+            quarantine=False,
+            publish=False,
+            github_repo="org/repo",
+            ownership=OwnershipType.IMPORTED,
+            raw_dependencies=[],
+            raw_features=[],
+            resolved_dependencies=[],
+            resolved_maven_repositories=[],
+            resolved_features={},
+            platforms=["jvm"],
+            source_set_dependencies={},
+            project_id=project_id,
+            repo_id=project_id.split("/", 1)[0] if "/" in project_id else None,
+            repo_root=repo_root_path,
+            gradle_root=repo_root_path,
+            module_dir=Path(path.name),
+            gradle_project_name=gradle_project_name,
+        )
+
+    repo_root = tmp_path / "jeeves"
+    local_project = make_gradle_project(
+        repo_root / "server",
+        project_id="jeeves/server",
+        repo_root_path=repo_root,
+        gradle_project_name="jeeves-server",
+    )
+    dependency_root = tmp_path / "kotlin-dotenv-parser"
+    dependency_project = make_gradle_project(
+        dependency_root,
+        project_id="kotlin-dotenv-parser",
+        repo_root_path=dependency_root,
+        gradle_project_name="kotlin-dotenv-parser",
+    )
+    local_project.resolved_dependencies = [
+        Dependency(scope=None, target=ProjectDependencyTarget(project="kotlin-dotenv-parser"))
+    ]
+
+    config = Config(raw=Document([]))
+    config.defined_projects.update(
+        {
+            "jeeves/server": local_project,
+            "kotlin-dotenv-parser": dependency_project,
+        }
+    )
+
+    ctx = _make_setup_context('[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n')
+    ctx.config = config
+    ctx.build_template = jinja2.Template(
+        "{% for substitution in dependency_substitutions %}"
+        "{{ substitution.module_coordinate }}=>{{ substitution.gradle_project_name }}\n"
+        "{% endfor %}"
+    )
+    ctx.settings_template = jinja2.Template(
+        "{% for included_project in included_projects %}"
+        "{{ included_project.gradle_project_name }}={{ included_project.project_dir }}\n"
+        "{% endfor %}"
+    )
+
+    import dev.tasks.setup_kotlin as setup_kotlin_module
+
+    monkeypatch.setattr(setup_kotlin_module, "settings_plugin_versions", lambda _ctx: {})
+
+    workspace_root = tmp_path / "workspace"
+    setup_module._write_gradle_root_files(
+        ctx,
+        root_path=workspace_root,
+        root_project_name="workspace",
+        seed_projects=[local_project],
+        write_wrapper=False,
+        write_build=True,
+        include_external_dependencies=True,
+        write_dependency_substitutions=True,
+    )
+
+    build_text = (workspace_root / "build.gradle.kts").read_text(encoding="utf-8")
+    settings_text = (workspace_root / "settings.gradle.kts").read_text(encoding="utf-8")
+    assert "one.wabbit:kotlin-dotenv-parser=>kotlin-dotenv-parser" in build_text
+    assert "jeeves-server=../jeeves/server" in settings_text
+    assert "kotlin-dotenv-parser=../kotlin-dotenv-parser" in settings_text
