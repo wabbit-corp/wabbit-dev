@@ -570,6 +570,7 @@ def _workflow_context(
     java_version: int,
     needs_android: bool,
     version_print_command: str,
+    snapshot_version_print_command: str,
     release_validation_command: str,
     release_build_command: str,
     release_publish_command: str,
@@ -584,6 +585,7 @@ def _workflow_context(
         "needs_android": needs_android,
         "pages_url": _github_pages_url(github_repo),
         "version_print_command": version_print_command,
+        "snapshot_version_print_command": snapshot_version_print_command,
         "release_validation_command": release_validation_command,
         "release_build_command": release_build_command,
         "release_publish_command": release_publish_command,
@@ -618,6 +620,7 @@ def _gradle_workflow_context_for_projects(
         context_projects.append(docs_project)
 
     version_print_tasks = [_workflow_task_name(project, "printVersion") for project in publish_projects]
+    snapshot_version_print_tasks = [_workflow_task_name(project, "printVersion") for project in snapshot_projects]
     release_validation_tasks = [_workflow_task_name(project, "assertReleaseVersion") for project in publish_projects]
     release_publish_tasks = [
         _workflow_task_name(project, "publishAndReleaseToMavenCentral") for project in publish_projects
@@ -637,6 +640,9 @@ def _gradle_workflow_context_for_projects(
         java_version=java_version,
         needs_android=_projects_need_android_setup(context_projects),
         version_print_command=_workflow_command(version_print_tasks or ["printVersion"]),
+        snapshot_version_print_command=_workflow_command(
+            snapshot_version_print_tasks or version_print_tasks or ["printVersion"]
+        ),
         release_validation_command=_workflow_command(release_validation_tasks or ["assertReleaseVersion"]),
         release_build_command=_workflow_command(["build"]),
         release_publish_command=_workflow_command(["build", *release_publish_tasks]),

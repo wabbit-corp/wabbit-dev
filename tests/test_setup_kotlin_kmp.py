@@ -533,7 +533,9 @@ def test_setup_gradle_project_workflow_context_includes_release_and_docs_command
         "{{ version_print_command }}\n{{ release_validation_command }}\n"
         "{{ release_build_command }}\n{{ release_publish_command }}\n"
     )
-    ctx.gradle_snapshot_publish_workflow_template = jinja2.Template("{{ snapshot_publish_command }}\n")
+    ctx.gradle_snapshot_publish_workflow_template = jinja2.Template(
+        "{{ snapshot_version_print_command }}\n{{ snapshot_publish_command }}\n"
+    )
     ctx.gradle_docs_quality_workflow_template = jinja2.Template("{{ docs_build_command }}\n")
     ctx.gradle_docs_deploy_workflow_template = jinja2.Template("{{ docs_output_dir }}\n")
 
@@ -546,6 +548,7 @@ def test_setup_gradle_project_workflow_context_includes_release_and_docs_command
         "./gradlew --no-daemon build publishAndReleaseToMavenCentral\n"
     )
     assert (project.path / ".github" / "workflows" / "snapshot-publish.yml").read_text(encoding="utf-8") == (
+        "./gradlew --no-daemon printVersion\n"
         "./gradlew --no-daemon build assertSnapshotVersion publishToMavenCentral\n"
     )
     assert (project.path / ".github" / "workflows" / "docs-quality.yml").read_text(encoding="utf-8") == (

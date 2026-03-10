@@ -482,4 +482,5 @@ def test_setup_generates_python_docs_and_quality_defaults(tmp_path: Path, monkey
     assert "actions/configure-pages@v5" in deploy_workflow
     assert "actions/upload-pages-artifact@v3" in deploy_workflow
     assert "actions/deploy-pages@v4" in deploy_workflow
+    assert "peaceiris/actions-gh-pages@v4" not in deploy_workflow
     assert "mkdocs gh-deploy" not in deploy_workflow

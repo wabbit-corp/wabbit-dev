@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Omit `ORG_GRADLE_PROJECT_signingInMemoryKeyId` from generated Maven Central GitHub Actions unless explicitly provided, so snapshot/release workflows do not fail when the optional `MAVEN_GPG_KEY_ID` secret is absent.
+- Make generated Gradle release/snapshot version assertion tasks configuration-cache-safe by capturing the configured version string outside task execution, and skip push-triggered snapshot publish jobs cleanly when a repo is on a release version instead of turning every non-snapshot `master` push red.
+- Document and support the GitHub Pages workflow requirement as a repo-level Pages setting (`Source = GitHub Actions`) while keeping the generated docs deploy workflows on the official `configure-pages`/artifact/deploy flow.
 - Generate Maven Central GitHub Actions for public Gradle repos through the shared Vanniktech publishing path, including tag-only release workflows, branch/manual snapshot workflows, and release-time tag-to-version checks via generated `printVersion` tasks.
 - Generate repo-root Gradle docs/publish workflows for repo-managed modules using explicit nested task selectors and `docsProject`, while conservatively skipping repo-wide Maven Central release workflows when publishable nested modules do not share a single version.
 - Make `dev publish` support repo-managed Gradle Maven Central targets by regenerating repo-root files first and invoking module-scoped Gradle tasks from the repo root instead of rejecting nested modules outright.
