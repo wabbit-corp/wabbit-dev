@@ -109,7 +109,7 @@
 - [x] Start with one small public JVM repo.
 - [x] Commit/push the generator/template changes needed for the rollout.
 - [x] Commit/push the first public JVM repo rollout after scoped regen and local verification.
-- [ ] Then one public KMP repo.
+- [x] Then one public KMP repo.
 - [ ] Then roll out docs workflows broadly.
 - [ ] Only after successful smoke releases, fan out to the rest of the public repos.
 - [ ] Keep commits small and grouped by generator/template/runtime-model changes vs generated repo changes.
@@ -162,7 +162,8 @@
 ## Immediate Next Step
 - [x] Finish repo-managed Maven Central CLI publish support.
 - [x] Roll out the generated GitHub Actions changes to one small public JVM repo (`kotlin-base58`) and push that repo.
-- [ ] Roll out the same generated GitHub Actions changes to one small public KMP repo and push that repo.
+- [x] Roll out the same generated GitHub Actions changes to one small public KMP repo (`kotlin-envformat`) and push that repo.
+- [ ] Start the broader docs/workflow rollout across the remaining public repos.
 
 ## References
 - [ ] Sonatype Central requirements: https://central.sonatype.org/publish/requirements/
