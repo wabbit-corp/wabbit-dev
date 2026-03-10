@@ -1220,6 +1220,22 @@ def _legacy_targets_from_platforms(
     return targets
 
 
+def _android_library_target_from_features(
+    resolved_features: dict[str, Feature],
+) -> GradleTargetSpec | None:
+    android_feature = resolved_features.get("kmp-android-library")
+    if not isinstance(android_feature, KmpAndroidLibrary):
+        return None
+
+    return GradleTargetSpec(
+        kind="android-kmp-library",
+        namespace=android_feature.namespace,
+        compile_sdk=android_feature.compileSdk,
+        min_sdk=android_feature.minSdk,
+        manifest_path=android_feature.manifestPath,
+    )
+
+
 def _is_valid_gradle_source_set_name(source_set_name: str) -> bool:
     return (
         source_set_name in CANONICAL_KMP_SOURCE_SET_REQUIREMENTS
@@ -1656,11 +1672,12 @@ def load_config() -> Config:
         has_kmp_specific_features = any(
             key in project.resolved_features
             for key in (
-                "kmp-android-library",
                 "kmp-compose",
                 "kmp-jvm-runs",
             )
         )
+        if "kmp-android-library" in project.resolved_features and not project.targets:
+            has_kmp_specific_features = True
 
         if not project.is_kmp:
             if has_kmp_specific_features:
@@ -1672,14 +1689,23 @@ def load_config() -> Config:
 
         android_feature = project.resolved_features.get("kmp-android-library")
         has_android_library_target = any(target.kind == "android-kmp-library" for target in project.targets)
-        if has_android_library_target and android_feature is None:
-            raise ValueError(
-                f"{project.name} declares an android-kmp-library target but is missing kmp-android-library feature"
-            )
-        if android_feature is not None and not has_android_library_target:
-            raise ValueError(
-                f"{project.name} enables kmp-android-library but does not declare an android-kmp-library target"
-            )
+        if isinstance(android_feature, KmpAndroidLibrary):
+            if has_android_library_target:
+                android_target = next(target for target in project.targets if target.kind == "android-kmp-library")
+                if (
+                    android_target.namespace != android_feature.namespace
+                    or android_target.compile_sdk != android_feature.compileSdk
+                    or android_target.min_sdk != android_feature.minSdk
+                    or android_target.manifest_path != android_feature.manifestPath
+                ):
+                    raise ValueError(
+                        f"{project.name} defines android-kmp-library target settings that do not match "
+                        "kmp-android-library; keep only the target or make the values identical"
+                    )
+            elif "android" not in project.platforms:
+                raise ValueError(
+                    f"{project.name} enables kmp-android-library but does not declare an android target"
+                )
 
         jvm_runs_feature = project.resolved_features.get("kmp-jvm-runs")
         if jvm_runs_feature is not None and "jvm" not in project.platforms:
@@ -2045,8 +2071,6 @@ def load_config() -> Config:
                     raise ValueError(
                         f"Gradle project {display_name} cannot define both :sourceSets and :sourceSetDependencies"
                     )
-                if command.sourceSets is None and command.sourceSetDependencies is None:
-                    raise ValueError(f"Gradle project {display_name} in KMP mode must define :sourceSets")
 
                 if command.sourceSets is not None:
                     for source_set_name, source_set_command in command.sourceSets.items():
@@ -2074,7 +2098,7 @@ def load_config() -> Config:
                         )
                         source_set_dependencies[source_set_name] = parsed_dependencies
                         resolved_dependencies.extend(parsed_dependencies)
-                else:
+                elif command.sourceSetDependencies is not None:
                     assert command.sourceSetDependencies is not None
                     for source_set_name, source_set_items in command.sourceSetDependencies.items():
                         if source_set_name not in CANONICAL_KMP_SOURCE_SET_REQUIREMENTS:
@@ -2101,6 +2125,12 @@ def load_config() -> Config:
                         )
                         source_set_dependencies[source_set_name] = parsed_dependencies
                         resolved_dependencies.extend(parsed_dependencies)
+
+                if not normalized_targets and build_model == "kmp":
+                    feature_target = _android_library_target_from_features(resolved_features)
+                    if feature_target is not None:
+                        normalized_targets = [GradleTargetSpec(kind="jvm"), feature_target]
+                        platforms = _platforms_from_targets(normalized_targets)
 
                 for source_set_name, source_set in source_sets.items():
                     for parent_source_set in source_set.depends_on:

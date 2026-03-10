@@ -211,10 +211,7 @@ def test_gradle_kmp_platforms_and_source_set_dependencies_are_loaded(tmp_path: P
                 "("
                 'gradle "demo-kmp" '
                 ':version "0.1.0" '
-                ':platforms ["jvm" "android"] '
-                ":features ["
-                '(kmp-android-library :namespace "one.wabbit.demo" :compileSdk 34 :minSdk 26)'
-                "] "
+                ':targets [{"kind": "jvm"} {"kind": "android-kmp-library" "namespace": "one.wabbit.demo" "compileSdk": 34 "minSdk": 26}] '
                 ':sourceSetDependencies {"commonMain": ["kotlin-stdlib"] "androidMain": ["kotlin-stdlib"]})',
                 "",
             ]
@@ -229,6 +226,55 @@ def test_gradle_kmp_platforms_and_source_set_dependencies_are_loaded(tmp_path: P
     assert len(project.source_set_dependencies["androidMain"]) == 1
 
 
+def test_gradle_kmp_allows_default_hierarchy_without_explicit_source_sets(tmp_path: Path) -> None:
+    from dev.config import GradleProject
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'gradle "demo-kmp" '
+                ':version "0.1.0" '
+                ':targets [{"kind": "jvm"} {"kind": "iosArm64"}])',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo-kmp"]
+    assert isinstance(project, GradleProject)
+    assert project.platforms == ["jvm", "iosArm64"]
+    assert project.source_sets == {}
+    assert project.source_set_dependencies == {}
+
+
+def test_gradle_kmp_legacy_android_feature_still_backfills_targets(tmp_path: Path) -> None:
+    from dev.config import GradleProject
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'gradle "demo-kmp" '
+                ':version "0.1.0" '
+                ':platforms ["jvm" "android"] '
+                ":features ["
+                '(kmp-android-library :namespace "one.wabbit.demo" :compileSdk 34 :minSdk 26)'
+                "])",
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo-kmp"]
+    assert isinstance(project, GradleProject)
+    assert [target.kind for target in project.targets] == ["jvm", "android-kmp-library"]
+
+
 def test_gradle_kmp_rejects_legacy_dependencies_key(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="must use :sourceSetDependencies instead of :dependencies"):
         _load_from_temp_root(
@@ -240,10 +286,7 @@ def test_gradle_kmp_rejects_legacy_dependencies_key(tmp_path: Path) -> None:
                     "("
                     'gradle "demo-kmp" '
                     ':version "0.1.0" '
-                    ':platforms ["jvm" "android"] '
-                    ":features ["
-                    '(kmp-android-library :namespace "one.wabbit.demo" :compileSdk 34 :minSdk 26)'
-                    "] "
+                    ':targets [{"kind": "jvm"} {"kind": "android-kmp-library" "namespace": "one.wabbit.demo" "compileSdk": 34 "minSdk": 26}] '
                     ':dependencies ["kotlin-stdlib"])',
                     "",
                 ]
@@ -262,10 +305,7 @@ def test_gradle_kmp_rejects_source_set_key_not_supported_by_platforms(tmp_path: 
                     "("
                     'gradle "demo-kmp" '
                     ':version "0.1.0" '
-                    ':platforms ["jvm" "android"] '
-                    ":features ["
-                    '(kmp-android-library :namespace "one.wabbit.demo" :compileSdk 34 :minSdk 26)'
-                    "] "
+                    ':targets [{"kind": "jvm"} {"kind": "android-kmp-library" "namespace": "one.wabbit.demo" "compileSdk": 34 "minSdk": 26}] '
                     ':sourceSetDependencies {"iosArm64Main": ["kotlin-stdlib"]})',
                     "",
                 ]
@@ -283,10 +323,7 @@ def test_kmp_source_set_validation_allows_jvm_main_to_depend_on_jvm_only_project
                 "("
                 'gradle "app-kmp" '
                 ':version "0.1.0" '
-                ':platforms ["jvm" "android"] '
-                ":features ["
-                '(kmp-android-library :namespace "one.wabbit.app" :compileSdk 34 :minSdk 26)'
-                "] "
+                ':targets [{"kind": "jvm"} {"kind": "android-kmp-library" "namespace": "one.wabbit.app" "compileSdk": 34 "minSdk": 26}] '
                 ':sourceSetDependencies {"jvmMain": [":lib-jvm"]})',
                 "",
             ]
@@ -307,10 +344,7 @@ def test_kmp_source_set_validation_rejects_common_main_to_jvm_only_dependency(tm
                     "("
                     'gradle "app-kmp" '
                     ':version "0.1.0" '
-                    ':platforms ["jvm" "android"] '
-                    ":features ["
-                    '(kmp-android-library :namespace "one.wabbit.app" :compileSdk 34 :minSdk 26)'
-                    "] "
+                    ':targets [{"kind": "jvm"} {"kind": "android-kmp-library" "namespace": "one.wabbit.app" "compileSdk": 34 "minSdk": 26}] '
                     ':sourceSetDependencies {"commonMain": [":lib-jvm"]})',
                     "",
                 ]
@@ -328,10 +362,7 @@ def test_kmp_source_set_validation_rejects_ios_arm64_to_non_ios_project(tmp_path
                     "("
                     'gradle "lib-kmp" '
                     ':version "0.1.0" '
-                    ':platforms ["jvm" "android"] '
-                    ":features ["
-                    '(kmp-android-library :namespace "one.wabbit.lib" :compileSdk 34 :minSdk 26)'
-                    "] "
+                    ':targets [{"kind": "jvm"} {"kind": "android-kmp-library" "namespace": "one.wabbit.lib" "compileSdk": 34 "minSdk": 26}] '
                     ':sourceSetDependencies {"commonMain": ["org.jetbrains.kotlin:kotlin-stdlib:2.2.20"]})',
                     "("
                     'gradle "app-kmp" '

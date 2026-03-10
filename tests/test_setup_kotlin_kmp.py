@@ -12,7 +12,7 @@ from dev.config import (
     Dependency,
     DependencyTarget,
     GradleProject,
-    KmpAndroidLibrary,
+    GradleTargetSpec,
     KmpCompose,
     KmpJvmRunEntry,
     KmpJvmRuns,
@@ -198,7 +198,6 @@ def test_setup_gradle_project_uses_kmp_template_and_renders_source_set_deps_and_
         ],
     }
     project.resolved_features = {
-        "kmp-android-library": KmpAndroidLibrary(namespace="one.wabbit.demo", compileSdk=34, minSdk=26),
         "kmp-jvm-runs": KmpJvmRuns(
             entries=[
                 KmpJvmRunEntry(
@@ -237,7 +236,7 @@ def test_setup_kmp_template_conditionals_include_android_and_compose_only_when_f
 ) -> None:
     _patch_setup_side_effects(monkeypatch)
     kmp_template = (
-        "{% if 'kmp-android-library' in features %}ANDROID{% endif %}"
+        "{% if android_kmp_library_target %}ANDROID{% endif %}"
         "{% if 'kmp-compose' in features %}COMPOSE{% endif %}"
     )
     ctx = _make_context(
@@ -256,9 +255,12 @@ def test_setup_kmp_template_conditionals_include_android_and_compose_only_when_f
     feature_project = _make_project(tmp_path / "kmp-with-feature", platforms=["jvm", "android"])
     feature_project.path.mkdir(parents=True, exist_ok=True)
     feature_project.resolved_features = {
-        "kmp-android-library": KmpAndroidLibrary(namespace="one.wabbit.demo", compileSdk=34, minSdk=26),
         "kmp-compose": KmpCompose(publicResClass=True, resClassPackage="one.wabbit.demo.resources"),
     }
+    feature_project.targets = [
+        GradleTargetSpec(kind="jvm"),
+        GradleTargetSpec(kind="android-kmp-library", namespace="one.wabbit.demo", compile_sdk=34, min_sdk=26),
+    ]
     setup_gradle_project(ctx, feature_project, interactive=False)
     feature_text = (feature_project.path / "build.gradle.kts").read_text(encoding="utf-8")
     assert "ANDROID" in feature_text
