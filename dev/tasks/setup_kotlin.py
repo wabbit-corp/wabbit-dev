@@ -555,8 +555,12 @@ def _workflow_task_name(project: GradleProject, task_name: str) -> str:
     return task_name
 
 
-def _workflow_command(tasks: Sequence[str]) -> str:
-    return shlex.join(["./gradlew", "--no-daemon", *tasks])
+def _workflow_command(tasks: Sequence[str], *, quiet: bool = False) -> str:
+    command = ["./gradlew"]
+    if quiet:
+        command.append("--quiet")
+    command.extend(["--no-daemon", *tasks])
+    return shlex.join(command)
 
 
 def _relative_output_path(root_path: Path, output_path: Path) -> str:
@@ -639,9 +643,9 @@ def _gradle_workflow_context_for_projects(
         github_repo=github_repo,
         java_version=java_version,
         needs_android=_projects_need_android_setup(context_projects),
-        version_print_command=_workflow_command(version_print_tasks or ["printVersion"]),
+        version_print_command=_workflow_command(version_print_tasks or ["printVersion"], quiet=True),
         snapshot_version_print_command=_workflow_command(
-            snapshot_version_print_tasks or version_print_tasks or ["printVersion"]
+            snapshot_version_print_tasks or version_print_tasks or ["printVersion"], quiet=True
         ),
         release_validation_command=_workflow_command(release_validation_tasks or ["assertReleaseVersion"]),
         release_build_command=_workflow_command(["build"]),

@@ -542,13 +542,13 @@ def test_setup_gradle_project_workflow_context_includes_release_and_docs_command
     setup_gradle_project(ctx, project, interactive=False)
 
     assert (project.path / ".github" / "workflows" / "release-publish.yml").read_text(encoding="utf-8") == (
-        "./gradlew --no-daemon printVersion\n"
+        "./gradlew --quiet --no-daemon printVersion\n"
         "./gradlew --no-daemon assertReleaseVersion\n"
         "./gradlew --no-daemon build\n"
         "./gradlew --no-daemon build publishAndReleaseToMavenCentral\n"
     )
     assert (project.path / ".github" / "workflows" / "snapshot-publish.yml").read_text(encoding="utf-8") == (
-        "./gradlew --no-daemon printVersion\n"
+        "./gradlew --quiet --no-daemon printVersion\n"
         "./gradlew --no-daemon build assertSnapshotVersion publishToMavenCentral\n"
     )
     assert (project.path / ".github" / "workflows" / "docs-quality.yml").read_text(encoding="utf-8") == (
@@ -608,7 +608,7 @@ def test_write_gradle_repo_root_workflows_uses_nested_task_selectors_and_repo_re
     )
 
     assert (repo_root / ".github" / "workflows" / "release-publish.yml").read_text(encoding="utf-8") == (
-        "./gradlew --no-daemon :jeeves-api:printVersion :jeeves-client:printVersion\n"
+        "./gradlew --quiet --no-daemon :jeeves-api:printVersion :jeeves-client:printVersion\n"
         "./gradlew --no-daemon :jeeves-api:assertReleaseVersion :jeeves-client:assertReleaseVersion\n"
         "./gradlew --no-daemon build :jeeves-api:publishAndReleaseToMavenCentral"
         " :jeeves-client:publishAndReleaseToMavenCentral\n"
