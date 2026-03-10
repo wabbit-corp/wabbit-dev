@@ -1,10 +1,6 @@
 .DS_Store
 Thumbs.db
 
-/.is-dev-mode
-/.is-local-mode
-/.is-ij-mode
-
 # Python .gitignore
 __pycache__/
 .mypy_cache/
@@ -47,3 +43,7 @@ site/
 /tmp/
 /tmp-*/
 *.bak
+
+/.is-dev-mode
+/.is-local-mode
+/.is-ij-mode
