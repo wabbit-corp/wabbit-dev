@@ -118,6 +118,10 @@ def _make_setup_context(pyproject_template: str, codespell_words: str = "wabbit\
         python_contributing_template=jinja2.Template("# Contributing {{ project_name }}\n"),
         python_docs_quality_workflow_template=jinja2.Template("name: Docs Quality\n"),
         python_docs_deploy_workflow_template=jinja2.Template("name: Docs Deploy\n"),
+        gradle_release_publish_workflow_template=jinja2.Template("name: Release Publish\n"),
+        gradle_snapshot_publish_workflow_template=jinja2.Template("name: Snapshot Publish\n"),
+        gradle_docs_quality_workflow_template=jinja2.Template("name: Gradle Docs Quality\n"),
+        gradle_docs_deploy_workflow_template=jinja2.Template("name: Gradle Docs Deploy\n"),
         python_codespell_ignore_words_template=jinja2.Template(codespell_words),
         python_build_executable_template=jinja2.Template(
             '#!/usr/bin/env python3\nAPP_NAME = "{{ app_name }}"\nENTRYPOINT = "{{ entrypoint_path }}"\n'
@@ -235,6 +239,43 @@ def test_setup_python_project_generates_docs_and_workflows(tmp_path: Path, monke
     assert "build>=1.2.0,<2.0.0" in requirements_dev
     assert "twine>=5.0.0,<6.0.0" in requirements_dev
     assert "pyinstaller>=6.9.0,<7.0.0" not in requirements_dev
+
+
+def test_setup_python_project_keeps_optional_docs_quality_hooks_when_sources_exist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    import dev.tasks.setup as setup_module
+
+    project = _make_python_project(tmp_path / "pkg", github_repo="org/pkg")
+    project.path.mkdir(parents=True, exist_ok=True)
+    (project.path / "README.md").write_text("# pkg\n", encoding="utf-8")
+    (project.path / "scripts").mkdir(parents=True, exist_ok=True)
+    (project.path / "tests").mkdir(parents=True, exist_ok=True)
+    (project.path / "scripts" / "check_changelog_guard.py").write_text("print('ok')\n", encoding="utf-8")
+    (project.path / "scripts" / "generate_api_docs.py").write_text("print('ok')\n", encoding="utf-8")
+    (project.path / "scripts" / "check_docs_links.py").write_text("print('ok')\n", encoding="utf-8")
+    (project.path / "tests" / "test_docs_snippets.py").write_text("def test_docs():\n    pass\n", encoding="utf-8")
+
+    monkeypatch.setattr(setup_module, "_write_wabbit_legal_files", _noop_write_callback)
+    monkeypatch.setattr(setup_module, "_write_banner", _noop_write_callback)
+
+    ctx = _make_setup_context(
+        pyproject_template=(
+            '[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n\n'
+            '[tool.poetry.dependencies]\npython = "{{ python_version }}"\n'
+        ),
+    )
+
+    setup_module.setup_python_project(ctx, project, interactive=False)
+
+    workflow_text = (project.path / ".github" / "workflows" / "docs-quality.yml").read_text(encoding="utf-8")
+    assert "python scripts/check_changelog_guard.py" in workflow_text
+    assert "python scripts/generate_api_docs.py --check" in workflow_text
+    assert "python scripts/check_docs_links.py" in workflow_text
+    assert "python -m pytest -q tests/test_docs_snippets.py" in workflow_text
 
 
 def test_setup_purescript_project_generates_legal_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -385,7 +426,7 @@ def test_setup_python_project_recovers_tracked_gitignore_rules(tmp_path: Path, m
     assert "# python" in gitignore_content
 
 
-def test_setup_python_project_preserves_existing_docs_and_workflows(
+def test_setup_python_project_preserves_existing_docs_and_refreshes_workflows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo_root = Path(__file__).resolve().parents[1]
@@ -423,8 +464,24 @@ def test_setup_python_project_preserves_existing_docs_and_workflows(
 
     setup_module.setup_python_project(ctx, project, interactive=False)
 
+    preserved_paths = {
+        project.path / "pyrightconfig.json",
+        project.path / "mkdocs.yml",
+        project.path / "docs" / "index.md",
+        project.path / "docs" / "installation.md",
+        project.path / "docs" / "development.md",
+        project.path / "CONTRIBUTING.md",
+    }
     for path, content in existing_files.items():
-        assert path.read_text(encoding="utf-8") == content
+        if path in preserved_paths:
+            assert path.read_text(encoding="utf-8") == content
+
+    assert (project.path / ".github" / "workflows" / "docs-quality.yml").read_text(encoding="utf-8") == (
+        "name: Docs Quality\n"
+    )
+    assert (project.path / ".github" / "workflows" / "docs-deploy.yml").read_text(encoding="utf-8") == (
+        "name: Docs Deploy\n"
+    )
 
 
 def test_setup_python_project_merges_codespell_words_without_overwrite(
@@ -455,6 +512,39 @@ def test_setup_python_project_merges_codespell_words_without_overwrite(
 
     content = (project.path / ".codespell-ignore-words.txt").read_text(encoding="utf-8").splitlines()
     assert content == ["langmu", "wabbit", "newword"]
+
+
+def test_setup_python_project_removes_docs_workflows_when_docs_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    import dev.tasks.setup as setup_module
+
+    project = _make_python_project(tmp_path / "pkg", github_repo="org/pkg")
+    project.docs_enabled = False
+    project.docs_system = None
+    project.path.mkdir(parents=True, exist_ok=True)
+    (project.path / "README.md").write_text("# pkg\n", encoding="utf-8")
+    (project.path / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    (project.path / ".github" / "workflows" / "docs-quality.yml").write_text("old\n", encoding="utf-8")
+    (project.path / ".github" / "workflows" / "docs-deploy.yml").write_text("old\n", encoding="utf-8")
+
+    monkeypatch.setattr(setup_module, "_write_wabbit_legal_files", _noop_write_callback)
+    monkeypatch.setattr(setup_module, "_write_banner", _noop_write_callback)
+
+    ctx = _make_setup_context(
+        pyproject_template=(
+            '[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n\n'
+            '[tool.poetry.dependencies]\npython = "{{ python_version }}"\n'
+        )
+    )
+
+    setup_module.setup_python_project(ctx, project, interactive=False)
+
+    assert not (project.path / ".github" / "workflows" / "docs-quality.yml").exists()
+    assert not (project.path / ".github" / "workflows" / "docs-deploy.yml").exists()
 
 
 def test_targeted_prod_setup_omits_cross_repo_gradle_projects_from_root_settings(
@@ -1003,3 +1093,111 @@ def test_write_gradle_root_files_writes_workspace_dependency_substitutions_in_lo
     assert "one.wabbit:kotlin-dotenv-parser=>kotlin-dotenv-parser" in build_text
     assert "jeeves-server=../jeeves/server" in settings_text
     assert "kotlin-dotenv-parser=../kotlin-dotenv-parser" in settings_text
+
+
+def test_setup_wires_repo_root_gradle_workflow_generation_to_repo_docs_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    import dev.tasks.setup_kotlin as setup_kotlin_module
+    from dev.config import Config, GradleProject, OwnershipType, RepoDefinition, Version
+
+    repo_root = tmp_path / "jeeves"
+    api_path = repo_root / "api"
+    api_path.mkdir(parents=True, exist_ok=True)
+
+    api_project = GradleProject(
+        path=api_path,
+        group_name="one.wabbit",
+        name="api",
+        version=Version.parse("0.0.1"),
+        description=None,
+        authors=[],
+        license="AGPL",
+        quarantine=False,
+        publish=True,
+        github_repo="wabbit-corp/jeeves",
+        ownership=OwnershipType.WABBIT,
+        raw_dependencies=[],
+        raw_features=[],
+        resolved_dependencies=[],
+        resolved_maven_repositories=[],
+        resolved_features={},
+        platforms=["jvm"],
+        source_set_dependencies={},
+        project_id="jeeves/api",
+        repo_id="jeeves",
+        repo_root=repo_root,
+        gradle_root=repo_root,
+        gradle_project_name="jeeves-api",
+        publish_target="maven-central",
+        docs_enabled=True,
+        docs_system="dokka",
+    )
+
+    config = Config(raw=Document([]))
+    config.defined_projects["jeeves/api"] = api_project
+    config.defined_repos["jeeves"] = RepoDefinition(
+        repo_id="jeeves",
+        path=repo_root,
+        github_repo="wabbit-corp/jeeves",
+        gradle_root_project_name="one.wabbit",
+        jvm_policy=None,
+        docs_project_id="jeeves/api",
+        project_ids=["jeeves/api"],
+    )
+
+    ctx = _make_setup_context('[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n')
+    ctx.config = config
+
+    monkeypatch.setattr(setup_module, "load_config", lambda: config)
+    monkeypatch.setattr(setup_module, "create_repo_setup_context", lambda _config, _mode: ctx)
+    monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *args, **kwargs: None)
+    monkeypatch.setattr(setup_module, "_write_repo_root_wabbit_legal_documents", lambda *args, **kwargs: None)
+    monkeypatch.setattr(setup_module, "setup_project", lambda *args, **kwargs: None)
+
+    recorded: dict[str, object] = {}
+
+    def fake_write_gradle_repo_root_workflows(
+        _ctx: object,
+        *,
+        root_path: Path,
+        repo_github_repo: str | None,
+        projects: object,
+        docs_project: object,
+        java_version: int,
+    ) -> None:
+        recorded["root_path"] = root_path
+        recorded["repo_github_repo"] = repo_github_repo
+        recorded["projects"] = projects
+        recorded["docs_project"] = docs_project
+        recorded["java_version"] = java_version
+
+    monkeypatch.setattr(setup_kotlin_module, "_write_gradle_repo_root_workflows", fake_write_gradle_repo_root_workflows)
+
+    setup_module.setup(setup_module.RepoSetupMode.PROD, interactive=False, project="jeeves/api")
+
+    assert recorded["root_path"] == repo_root
+    assert recorded["repo_github_repo"] == "wabbit-corp/jeeves"
+    assert recorded["projects"] == [api_project]
+    assert recorded["docs_project"] is api_project
+    assert recorded["java_version"] == config.java_version
+
+
+def test_gradle_release_publish_workflow_template_checks_tag_version_match() -> None:
+    template_path = (
+        Path(__file__).resolve().parents[2]
+        / "data-repo-template"
+        / "gradle-files"
+        / ".github"
+        / "workflows"
+        / "release-publish.yml.jinja2"
+    )
+    template_text = template_path.read_text(encoding="utf-8")
+
+    assert "Match tag to published version" in template_text
+    assert "{{ version_print_command }}" in template_text
+    assert 'EXPECTED_VERSION="${GITHUB_REF_NAME#v}"' in template_text

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import re
+import shlex
 import xml.etree.ElementTree as ET
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
@@ -27,7 +29,8 @@ from dev.config import (
     PurescriptProject,
     PythonProject,
 )
-from dev.messages import error
+from dev.licenses import license_display_name, license_spdx_url
+from dev.messages import error, warning
 from dev.tasks.setup_common import RepoSetupMode, clean_text, render_template, write_banner, write_wabbit_legal_files
 
 ANDROID_GRADLE_PLUGIN_VERSION = "8.13.2"
@@ -37,6 +40,7 @@ KOVER_PLUGIN_VERSION = "0.9.3"
 INTELLIJ_GRADLE_PLUGIN_VERSION = "1.17.2"
 PAPERWEIGHT_USERDEV_PLUGIN_VERSION = "1.7.2"
 BUKKIT_PLUGIN_YML_VERSION = "0.6.0"
+VANNIKTECH_MAVEN_PUBLISH_PLUGIN_VERSION = "0.36.0"
 CONTEXT_PARAMETERS_COMPILER_FLAG = "-Xcontext-parameters"
 GITHUB_SOURCE_ROOT = "https://github.com"
 GITHUB_DEFAULT_BRANCH = "master"
@@ -82,6 +86,18 @@ class GradleSetupContext(Protocol):
 
     @property
     def subproject_build_kmp_template(self) -> jinja2.Template: ...
+
+    @property
+    def gradle_release_publish_workflow_template(self) -> jinja2.Template: ...
+
+    @property
+    def gradle_snapshot_publish_workflow_template(self) -> jinja2.Template: ...
+
+    @property
+    def gradle_docs_quality_workflow_template(self) -> jinja2.Template: ...
+
+    @property
+    def gradle_docs_deploy_workflow_template(self) -> jinja2.Template: ...
 
     @property
     def settings_template(self) -> jinja2.Template: ...
@@ -207,6 +223,7 @@ def settings_plugin_versions(ctx: GradleSetupContext) -> dict[str, str]:
         "shadow_version": plugin_version("shadow", "8.3.0"),
         "dokka_version": DOKKA_PLUGIN_VERSION,
         "kover_version": KOVER_PLUGIN_VERSION,
+        "maven_publish_plugin_version": VANNIKTECH_MAVEN_PUBLISH_PLUGIN_VERSION,
         "intellij_gradle_plugin_version": INTELLIJ_GRADLE_PLUGIN_VERSION,
         "paperweight_userdev_plugin_version": PAPERWEIGHT_USERDEV_PLUGIN_VERSION,
         "bukkit_plugin_yml_version": BUKKIT_PLUGIN_YML_VERSION,
@@ -438,6 +455,315 @@ def _android_kmp_library_target(project: GradleProject) -> GradleTargetSpec | No
     return None
 
 
+def _github_repo_url(repo_full_name: str) -> str:
+    return f"{GITHUB_SOURCE_ROOT}/{repo_full_name}"
+
+
+def _github_clone_url(repo_full_name: str) -> str:
+    return f"scm:git:git://github.com/{repo_full_name}.git"
+
+
+def _github_ssh_connection_url(repo_full_name: str) -> str:
+    return f"scm:git:ssh://git@github.com/{repo_full_name}.git"
+
+
+def _github_pages_url(repo_full_name: str) -> str:
+    owner, _, repo_name = repo_full_name.partition("/")
+    if not owner or not repo_name:
+        raise ValueError(f"Invalid GitHub repository name: {repo_full_name}")
+    return f"https://{owner}.github.io/{repo_name}/"
+
+
+def _supports_gradle_maven_central(project: GradleProject) -> bool:
+    return (
+        _is_maven_central_publishable_project(project)
+        and not _is_nested_gradle_project(project)
+    )
+
+
+def _supports_gradle_dokka_docs(project: GradleProject) -> bool:
+    return (
+        _is_dokka_docs_project(project)
+        and not _is_nested_gradle_project(project)
+    )
+
+
+def _is_maven_central_publishable_project(project: GradleProject) -> bool:
+    return (
+        project.publish
+        and not project.quarantine
+        and project.publish_target == "maven-central"
+        and project.github_repo is not None
+    )
+
+
+def _is_dokka_docs_project(project: GradleProject) -> bool:
+    return (
+        project.docs_enabled
+        and not project.quarantine
+        and project.docs_system == "dokka"
+        and project.github_repo is not None
+    )
+
+
+def _needs_android_setup(project: GradleProject) -> bool:
+    return any(target.kind.startswith("android-") for target in _effective_targets(project))
+
+
+def _pom_project_description(project: GradleProject) -> str:
+    description = project.description
+    if description is None or not description.strip():
+        return project.name
+    return description.strip()
+
+
+def _maven_central_context(ctx: GradleSetupContext, project: GradleProject) -> dict[str, str | bool]:
+    github_repo = project.github_repo
+    if github_repo is None:
+        raise ValueError(f"{project.name} requires github_repo for Maven Central publishing")
+
+    company_name = _company_legal_name(ctx)
+    repo_owner, _, _repo_name = github_repo.partition("/")
+    if not repo_owner:
+        raise ValueError(f"Invalid GitHub repository name for {project.name}: {github_repo}")
+
+    license_name = license_display_name(project.license) or "Open Source"
+    license_url = license_spdx_url(project.license) or _github_repo_url(github_repo)
+    developer_email = ctx.config.default_company_email or ""
+
+    return {
+        "pom_name": project.name,
+        "pom_artifact_id": project.effective_artifact_id,
+        "pom_description": _pom_project_description(project),
+        "pom_url": _github_repo_url(github_repo),
+        "pom_license_name": license_name,
+        "pom_license_url": license_url,
+        "pom_scm_url": _github_repo_url(github_repo),
+        "pom_scm_connection": _github_clone_url(github_repo),
+        "pom_scm_developer_connection": _github_ssh_connection_url(github_repo),
+        "pom_developer_id": repo_owner,
+        "pom_developer_name": company_name,
+        "pom_developer_email": developer_email,
+        "pom_organization_name": company_name,
+        "pom_organization_url": _github_repo_url(github_repo),
+    }
+
+
+def _workflow_task_name(project: GradleProject, task_name: str) -> str:
+    if _is_nested_gradle_project(project):
+        return f":{project.effective_gradle_project_name}:{task_name}"
+    return task_name
+
+
+def _workflow_command(tasks: Sequence[str]) -> str:
+    return shlex.join(["./gradlew", "--no-daemon", *tasks])
+
+
+def _relative_output_path(root_path: Path, output_path: Path) -> str:
+    return Path(os.path.relpath(output_path.resolve(), start=root_path.resolve())).as_posix()
+
+
+def _workflow_context(
+    *,
+    project_name: str,
+    github_repo: str,
+    java_version: int,
+    needs_android: bool,
+    version_print_command: str,
+    release_validation_command: str,
+    release_build_command: str,
+    release_publish_command: str,
+    snapshot_publish_command: str,
+    docs_build_command: str,
+    docs_output_dir: str,
+) -> dict[str, str | bool]:
+    return {
+        "project_name": project_name,
+        "github_repo": github_repo,
+        "java_version": str(java_version),
+        "needs_android": needs_android,
+        "pages_url": _github_pages_url(github_repo),
+        "version_print_command": version_print_command,
+        "release_validation_command": release_validation_command,
+        "release_build_command": release_build_command,
+        "release_publish_command": release_publish_command,
+        "snapshot_publish_command": snapshot_publish_command,
+        "docs_build_command": docs_build_command,
+        "docs_output_dir": docs_output_dir,
+    }
+
+
+def _projects_need_android_setup(projects: Sequence[GradleProject]) -> bool:
+    return any(_needs_android_setup(project) for project in projects)
+
+
+def _gradle_workflow_context_for_projects(
+    *,
+    root_path: Path,
+    projects: Sequence[GradleProject],
+    docs_project: GradleProject | None,
+    java_version: int,
+) -> dict[str, str | bool]:
+    if not projects:
+        raise ValueError("At least one Gradle project is required for workflow generation")
+
+    github_repo = projects[0].github_repo
+    if github_repo is None:
+        raise ValueError(f"{projects[0].name} requires github_repo for workflow generation")
+
+    publish_projects = [project for project in projects if _is_maven_central_publishable_project(project)]
+    snapshot_projects = [project for project in publish_projects if project.publish_snapshots]
+    context_projects = [*publish_projects]
+    if docs_project is not None:
+        context_projects.append(docs_project)
+
+    version_print_tasks = [_workflow_task_name(project, "printVersion") for project in publish_projects]
+    release_validation_tasks = [_workflow_task_name(project, "assertReleaseVersion") for project in publish_projects]
+    release_publish_tasks = [
+        _workflow_task_name(project, "publishAndReleaseToMavenCentral") for project in publish_projects
+    ]
+    snapshot_publish_tasks = [_workflow_task_name(project, "assertSnapshotVersion") for project in snapshot_projects]
+    snapshot_publish_tasks.extend(_workflow_task_name(project, "publishToMavenCentral") for project in snapshot_projects)
+
+    docs_tasks: list[str] = []
+    docs_output_dir = "build/dokka/html"
+    if docs_project is not None:
+        docs_tasks = [_workflow_task_name(docs_project, "dokkaGeneratePublicationHtml")]
+        docs_output_dir = _relative_output_path(root_path, docs_project.path / "build" / "dokka" / "html")
+
+    return _workflow_context(
+        project_name=docs_project.name if docs_project is not None else projects[0].name,
+        github_repo=github_repo,
+        java_version=java_version,
+        needs_android=_projects_need_android_setup(context_projects),
+        version_print_command=_workflow_command(version_print_tasks or ["printVersion"]),
+        release_validation_command=_workflow_command(release_validation_tasks or ["assertReleaseVersion"]),
+        release_build_command=_workflow_command(["build"]),
+        release_publish_command=_workflow_command(["build", *release_publish_tasks]),
+        snapshot_publish_command=_workflow_command(["build", *snapshot_publish_tasks]),
+        docs_build_command=_workflow_command(["build", *docs_tasks]),
+        docs_output_dir=docs_output_dir,
+    )
+
+
+def _write_gradle_workflows(ctx: GradleSetupContext, project: GradleProject, *, java_version: int) -> None:
+    workflows_dir = project.path / ".github" / "workflows"
+    release_publish_path = workflows_dir / "release-publish.yml"
+    snapshot_publish_path = workflows_dir / "snapshot-publish.yml"
+    docs_quality_path = workflows_dir / "docs-quality.yml"
+    docs_deploy_path = workflows_dir / "docs-deploy.yml"
+
+    if _supports_gradle_maven_central(project):
+        workflow_context = _gradle_workflow_context_for_projects(
+            root_path=project.path,
+            projects=[project],
+            docs_project=project if _supports_gradle_dokka_docs(project) else None,
+            java_version=java_version,
+        )
+        dev.io.write_text_file(
+            release_publish_path,
+            clean_text(render_template(ctx.gradle_release_publish_workflow_template, **workflow_context)),
+        )
+        if project.publish_snapshots:
+            dev.io.write_text_file(
+                snapshot_publish_path,
+                clean_text(render_template(ctx.gradle_snapshot_publish_workflow_template, **workflow_context)),
+            )
+        else:
+            dev.io.delete_if_exists(snapshot_publish_path)
+    else:
+        dev.io.delete_if_exists(release_publish_path)
+        dev.io.delete_if_exists(snapshot_publish_path)
+
+    if _supports_gradle_dokka_docs(project):
+        workflow_context = _gradle_workflow_context_for_projects(
+            root_path=project.path,
+            projects=[project],
+            docs_project=project,
+            java_version=java_version,
+        )
+        dev.io.write_text_file(
+            docs_quality_path,
+            clean_text(render_template(ctx.gradle_docs_quality_workflow_template, **workflow_context)),
+        )
+        dev.io.write_text_file(
+            docs_deploy_path,
+            clean_text(render_template(ctx.gradle_docs_deploy_workflow_template, **workflow_context)),
+        )
+    else:
+        dev.io.delete_if_exists(docs_quality_path)
+        dev.io.delete_if_exists(docs_deploy_path)
+
+
+def _write_gradle_repo_root_workflows(
+    ctx: GradleSetupContext,
+    *,
+    root_path: Path,
+    repo_github_repo: str | None,
+    projects: Sequence[GradleProject],
+    docs_project: GradleProject | None,
+    java_version: int,
+) -> None:
+    workflows_dir = root_path / ".github" / "workflows"
+    release_publish_path = workflows_dir / "release-publish.yml"
+    snapshot_publish_path = workflows_dir / "snapshot-publish.yml"
+    docs_quality_path = workflows_dir / "docs-quality.yml"
+    docs_deploy_path = workflows_dir / "docs-deploy.yml"
+
+    publish_projects = [project for project in projects if _is_maven_central_publishable_project(project)]
+    release_workflow_projects: list[GradleProject] = []
+    if publish_projects:
+        publish_versions = {str(project.version) for project in publish_projects if project.version is not None}
+        if len(publish_versions) == 1:
+            release_workflow_projects = publish_projects
+        else:
+            warning(
+                f"Skipping repo-root Maven Central workflows for {root_path}: "
+                f"publishable modules have differing versions {sorted(publish_versions)}"
+            )
+
+    if repo_github_repo is not None and release_workflow_projects:
+        workflow_context = _gradle_workflow_context_for_projects(
+            root_path=root_path,
+            projects=release_workflow_projects,
+            docs_project=docs_project,
+            java_version=java_version,
+        )
+        dev.io.write_text_file(
+            release_publish_path,
+            clean_text(render_template(ctx.gradle_release_publish_workflow_template, **workflow_context)),
+        )
+        if any(project.publish_snapshots for project in release_workflow_projects):
+            dev.io.write_text_file(
+                snapshot_publish_path,
+                clean_text(render_template(ctx.gradle_snapshot_publish_workflow_template, **workflow_context)),
+            )
+        else:
+            dev.io.delete_if_exists(snapshot_publish_path)
+    else:
+        dev.io.delete_if_exists(release_publish_path)
+        dev.io.delete_if_exists(snapshot_publish_path)
+
+    if repo_github_repo is not None and docs_project is not None and _is_dokka_docs_project(docs_project):
+        workflow_context = _gradle_workflow_context_for_projects(
+            root_path=root_path,
+            projects=release_workflow_projects or [docs_project],
+            docs_project=docs_project,
+            java_version=java_version,
+        )
+        dev.io.write_text_file(
+            docs_quality_path,
+            clean_text(render_template(ctx.gradle_docs_quality_workflow_template, **workflow_context)),
+        )
+        dev.io.write_text_file(
+            docs_deploy_path,
+            clean_text(render_template(ctx.gradle_docs_deploy_workflow_template, **workflow_context)),
+        )
+    else:
+        dev.io.delete_if_exists(docs_quality_path)
+        dev.io.delete_if_exists(docs_deploy_path)
+
+
 def _cleanup_nested_gradle_project_files(project: GradleProject) -> None:
     dev.io.delete_if_exists(project.path / "settings.gradle.kts")
     dev.io.delete_if_exists(project.path / "gradlew")
@@ -615,6 +941,8 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
     compose_plugin_version = _compose_plugin_version(ctx)
     nested_gradle_project = _is_nested_gradle_project(project)
     kotlin_free_compiler_args = [CONTEXT_PARAMETERS_COMPILER_FLAG]
+    publish_to_maven_central = _supports_gradle_maven_central(project)
+    maven_central_context = _maven_central_context(ctx, project) if publish_to_maven_central else {}
 
     if project.is_kmp:
         dokka_source_link_remote_url = _dokka_source_link_remote_url(project, "src")
@@ -661,6 +989,8 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             dokka_source_link_remote_url=dokka_source_link_remote_url or "",
             has_dokka_source_link=dokka_source_link_remote_url is not None,
             company_legal_name=company_legal_name,
+            publish_to_maven_central=publish_to_maven_central,
+            **maven_central_context,
         )
     else:
         dokka_source_link_remote_url = _dokka_source_link_remote_url(project, "src/main/kotlin")
@@ -688,6 +1018,8 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             dokka_source_link_remote_url=dokka_source_link_remote_url or "",
             has_dokka_source_link=dokka_source_link_remote_url is not None,
             company_legal_name=company_legal_name,
+            publish_to_maven_central=publish_to_maven_central,
+            **maven_central_context,
         )
     result = clean_gradle_build_text(result)
     dev.io.write_text_file(project.path / "build.gradle.kts", result)
@@ -739,6 +1071,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
         )
 
         write_banner(ctx, project)
+        _write_gradle_workflows(ctx, project, java_version=java_version)
 
 
 __all__ = [

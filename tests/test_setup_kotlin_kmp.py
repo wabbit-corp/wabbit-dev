@@ -24,7 +24,7 @@ from dev.config import (
 )
 from dev.maven import MavenCoordinate
 from dev.tasks.setup_common import RepoSetupMode
-from dev.tasks.setup_kotlin import _render_dependency_for_mode, setup_gradle_project
+from dev.tasks.setup_kotlin import _render_dependency_for_mode, _write_gradle_repo_root_workflows, setup_gradle_project
 
 
 @dataclass
@@ -39,6 +39,10 @@ class _Context:
     contributor_privacy_policy: jinja2.Template
     subproject_build_template: jinja2.Template
     subproject_build_kmp_template: jinja2.Template
+    gradle_release_publish_workflow_template: jinja2.Template
+    gradle_snapshot_publish_workflow_template: jinja2.Template
+    gradle_docs_quality_workflow_template: jinja2.Template
+    gradle_docs_deploy_workflow_template: jinja2.Template
     settings_template: jinja2.Template
     subproject_settings_template: jinja2.Template
     gitignore_template: jinja2.Template
@@ -87,6 +91,12 @@ def _make_context(
         contributor_privacy_policy=jinja2.Template(""),
         subproject_build_template=jinja2.Template(jvm_template),
         subproject_build_kmp_template=jinja2.Template(kmp_template),
+        gradle_release_publish_workflow_template=jinja2.Template("release {{ project_name }} android={{ needs_android }}"),
+        gradle_snapshot_publish_workflow_template=jinja2.Template(
+            "snapshot {{ project_name }} android={{ needs_android }}"
+        ),
+        gradle_docs_quality_workflow_template=jinja2.Template("docs-quality {{ project_name }}"),
+        gradle_docs_deploy_workflow_template=jinja2.Template("docs-deploy {{ docs_output_dir }}"),
         settings_template=jinja2.Template(""),
         subproject_settings_template=jinja2.Template(""),
         gitignore_template=jinja2.Template("# base"),
@@ -459,3 +469,235 @@ def test_setup_gradle_project_omits_dokka_source_link_without_github_repo(
 
     build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8").strip()
     assert build_text == "NO_SOURCE_LINK"
+
+
+def test_setup_gradle_project_generates_maven_central_and_docs_workflows_for_standalone_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "kotlin-demo", platforms=["jvm", "android"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.github_repo = "wabbit-corp/kotlin-demo"
+    project.publish = True
+    project.publish_target = "maven-central"
+    project.publish_snapshots = True
+    project.docs_enabled = True
+    project.docs_system = "dokka"
+    project.description = "Demo library"
+    project.ownership = OwnershipType.WABBIT
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="PUBLISH={{ publish_to_maven_central }} {{ pom_url }}",
+        kmp_template="KMP={{ publish_to_maven_central }} {{ pom_url }}",
+    )
+    ctx.config.default_company_email = "oss@wabbit.one"
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
+    assert "KMP=True https://github.com/wabbit-corp/kotlin-demo" in build_text
+    assert (project.path / ".github" / "workflows" / "release-publish.yml").read_text(encoding="utf-8") == (
+        "release kotlin-demo android=True\n"
+    )
+    assert (project.path / ".github" / "workflows" / "snapshot-publish.yml").read_text(encoding="utf-8") == (
+        "snapshot kotlin-demo android=True\n"
+    )
+    assert (project.path / ".github" / "workflows" / "docs-quality.yml").read_text(encoding="utf-8") == (
+        "docs-quality kotlin-demo\n"
+    )
+    assert (project.path / ".github" / "workflows" / "docs-deploy.yml").read_text(encoding="utf-8") == (
+        "docs-deploy build/dokka/html\n"
+    )
+
+
+def test_setup_gradle_project_workflow_context_includes_release_and_docs_commands(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "kotlin-demo", platforms=["jvm"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.github_repo = "wabbit-corp/kotlin-demo"
+    project.publish = True
+    project.publish_target = "maven-central"
+    project.publish_snapshots = True
+    project.docs_enabled = True
+    project.docs_system = "dokka"
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template="KMP_TEMPLATE",
+    )
+    ctx.gradle_release_publish_workflow_template = jinja2.Template(
+        "{{ version_print_command }}\n{{ release_validation_command }}\n"
+        "{{ release_build_command }}\n{{ release_publish_command }}\n"
+    )
+    ctx.gradle_snapshot_publish_workflow_template = jinja2.Template("{{ snapshot_publish_command }}\n")
+    ctx.gradle_docs_quality_workflow_template = jinja2.Template("{{ docs_build_command }}\n")
+    ctx.gradle_docs_deploy_workflow_template = jinja2.Template("{{ docs_output_dir }}\n")
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    assert (project.path / ".github" / "workflows" / "release-publish.yml").read_text(encoding="utf-8") == (
+        "./gradlew --no-daemon printVersion\n"
+        "./gradlew --no-daemon assertReleaseVersion\n"
+        "./gradlew --no-daemon build\n"
+        "./gradlew --no-daemon build publishAndReleaseToMavenCentral\n"
+    )
+    assert (project.path / ".github" / "workflows" / "snapshot-publish.yml").read_text(encoding="utf-8") == (
+        "./gradlew --no-daemon build assertSnapshotVersion publishToMavenCentral\n"
+    )
+    assert (project.path / ".github" / "workflows" / "docs-quality.yml").read_text(encoding="utf-8") == (
+        "./gradlew --no-daemon build dokkaGeneratePublicationHtml\n"
+    )
+    assert (project.path / ".github" / "workflows" / "docs-deploy.yml").read_text(encoding="utf-8") == (
+        "build/dokka/html\n"
+    )
+
+
+def test_write_gradle_repo_root_workflows_uses_nested_task_selectors_and_repo_relative_docs_output(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "jeeves"
+    api_project = _make_repo_gradle_project(
+        repo_root / "api",
+        project_id="jeeves/api",
+        repo_root=repo_root,
+        gradle_project_name="jeeves-api",
+        github_repo="wabbit-corp/jeeves",
+    )
+    client_project = _make_repo_gradle_project(
+        repo_root / "client",
+        project_id="jeeves/client",
+        repo_root=repo_root,
+        gradle_project_name="jeeves-client",
+        github_repo="wabbit-corp/jeeves",
+    )
+    for project in (api_project, client_project):
+        project.path.mkdir(parents=True, exist_ok=True)
+        project.gradle_root = repo_root
+        project.publish = True
+        project.publish_target = "maven-central"
+        project.publish_snapshots = True
+        project.docs_enabled = True
+        project.docs_system = "dokka"
+
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template="KMP_TEMPLATE",
+    )
+    ctx.gradle_release_publish_workflow_template = jinja2.Template(
+        "{{ version_print_command }}\n{{ release_validation_command }}\n{{ release_publish_command }}\n"
+    )
+    ctx.gradle_snapshot_publish_workflow_template = jinja2.Template("{{ snapshot_publish_command }}\n")
+    ctx.gradle_docs_quality_workflow_template = jinja2.Template("{{ docs_build_command }}\n")
+    ctx.gradle_docs_deploy_workflow_template = jinja2.Template("{{ docs_output_dir }}\n")
+
+    _write_gradle_repo_root_workflows(
+        ctx,
+        root_path=repo_root,
+        repo_github_repo="wabbit-corp/jeeves",
+        projects=[api_project, client_project],
+        docs_project=api_project,
+        java_version=21,
+    )
+
+    assert (repo_root / ".github" / "workflows" / "release-publish.yml").read_text(encoding="utf-8") == (
+        "./gradlew --no-daemon :jeeves-api:printVersion :jeeves-client:printVersion\n"
+        "./gradlew --no-daemon :jeeves-api:assertReleaseVersion :jeeves-client:assertReleaseVersion\n"
+        "./gradlew --no-daemon build :jeeves-api:publishAndReleaseToMavenCentral"
+        " :jeeves-client:publishAndReleaseToMavenCentral\n"
+    )
+    assert (repo_root / ".github" / "workflows" / "snapshot-publish.yml").read_text(encoding="utf-8") == (
+        "./gradlew --no-daemon build :jeeves-api:assertSnapshotVersion :jeeves-client:assertSnapshotVersion"
+        " :jeeves-api:publishToMavenCentral :jeeves-client:publishToMavenCentral\n"
+    )
+    assert (repo_root / ".github" / "workflows" / "docs-quality.yml").read_text(encoding="utf-8") == (
+        "./gradlew --no-daemon build :jeeves-api:dokkaGeneratePublicationHtml\n"
+    )
+    assert (repo_root / ".github" / "workflows" / "docs-deploy.yml").read_text(encoding="utf-8") == (
+        "api/build/dokka/html\n"
+    )
+
+
+def test_write_gradle_repo_root_workflows_skips_release_publish_when_nested_versions_differ(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "jeeves"
+    api_project = _make_repo_gradle_project(
+        repo_root / "api",
+        project_id="jeeves/api",
+        repo_root=repo_root,
+        gradle_project_name="jeeves-api",
+        github_repo="wabbit-corp/jeeves",
+    )
+    client_project = _make_repo_gradle_project(
+        repo_root / "client",
+        project_id="jeeves/client",
+        repo_root=repo_root,
+        gradle_project_name="jeeves-client",
+        github_repo="wabbit-corp/jeeves",
+    )
+    api_project.version = Version.parse("0.0.1")
+    client_project.version = Version.parse("1.0.0")
+    for project in (api_project, client_project):
+        project.path.mkdir(parents=True, exist_ok=True)
+        project.gradle_root = repo_root
+        project.publish = True
+        project.publish_target = "maven-central"
+        project.publish_snapshots = True
+        project.docs_enabled = True
+        project.docs_system = "dokka"
+
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template="KMP_TEMPLATE",
+    )
+
+    _write_gradle_repo_root_workflows(
+        ctx,
+        root_path=repo_root,
+        repo_github_repo="wabbit-corp/jeeves",
+        projects=[api_project, client_project],
+        docs_project=api_project,
+        java_version=21,
+    )
+
+    assert not (repo_root / ".github" / "workflows" / "release-publish.yml").exists()
+    assert not (repo_root / ".github" / "workflows" / "snapshot-publish.yml").exists()
+    assert (repo_root / ".github" / "workflows" / "docs-quality.yml").exists()
+    assert (repo_root / ".github" / "workflows" / "docs-deploy.yml").exists()
+
+
+def test_setup_gradle_project_skips_public_workflows_for_nested_repo_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    repo_root = tmp_path / "jeeves"
+    project = _make_project(repo_root / "api", platforms=["jvm"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.repo_root = repo_root
+    project.gradle_root = repo_root
+    project.gradle_project_name = "jeeves-api"
+    project.github_repo = "wabbit-corp/jeeves"
+    project.publish = True
+    project.publish_target = "maven-central"
+    project.publish_snapshots = True
+    project.docs_enabled = True
+    project.docs_system = "dokka"
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template="KMP_TEMPLATE",
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    assert not (project.path / ".github" / "workflows" / "release-publish.yml").exists()
+    assert not (project.path / ".github" / "workflows" / "snapshot-publish.yml").exists()
+    assert not (project.path / ".github" / "workflows" / "docs-quality.yml").exists()
+    assert not (project.path / ".github" / "workflows" / "docs-deploy.yml").exists()

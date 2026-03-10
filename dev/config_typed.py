@@ -383,6 +383,36 @@ class PypiTokenCommand:
     token: str
 
 
+@tag("maven-username")
+@dataclass(frozen=True)
+class MavenUsernameCommand:
+    username: str
+
+
+@tag("maven-password")
+@dataclass(frozen=True)
+class MavenPasswordCommand:
+    password: str
+
+
+@tag("maven-gpg-private-key")
+@dataclass(frozen=True)
+class MavenGpgPrivateKeyCommand:
+    key: str
+
+
+@tag("maven-gpg-passphrase")
+@dataclass(frozen=True)
+class MavenGpgPassphraseCommand:
+    passphrase: str
+
+
+@tag("maven-gpg-key-id")
+@dataclass(frozen=True)
+class MavenGpgKeyIdCommand:
+    key_id: str
+
+
 @tag("jitpack-cookie")
 @dataclass(frozen=True)
 class JitpackCookieCommand:
@@ -662,6 +692,10 @@ class PythonProjectCommand:
     repository: str | None = None
     keywords: list[str] | None = None
     classifiers: list[str] | None = None
+    publishTarget: str | None = None
+    publishSnapshots: bool | None = None
+    docs: bool | None = None
+    docsSystem: str | None = None
     repo: str | None = None
     ownership: str | None = None
 
@@ -742,6 +776,10 @@ class GradleProjectCommand:
         DecodeWith(_decode_gradle_source_sets),
     ] = None
     features: list[FeatureCommand] | None = None
+    publishTarget: str | None = None
+    publishSnapshots: bool | None = None
+    docs: bool | None = None
+    docsSystem: str | None = None
     jvmPolicy: str | None = None
     jvmTaskPolicies: dict[str, str] | None = None
     repo: str | None = None
@@ -760,6 +798,7 @@ class RepoCommand:
     repo: str | None = None
     gradleRootProjectName: str | None = None
     jvmPolicy: str | None = None
+    docsProject: str | None = None
     projects: list[RepoProjectCommand] | None = None
 
 
@@ -772,6 +811,11 @@ BuiltinTopLevelCommand = (
     | AnthropicKeyCommand
     | JetbrainsMarketplaceTokenCommand
     | PypiTokenCommand
+    | MavenUsernameCommand
+    | MavenPasswordCommand
+    | MavenGpgPrivateKeyCommand
+    | MavenGpgPassphraseCommand
+    | MavenGpgKeyIdCommand
     | JitpackCookieCommand
     | DefaultMavenProjectGroupCommand
     | DefaultCompanyEmailCommand
@@ -804,6 +848,11 @@ BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[object], ...] = (
     AnthropicKeyCommand,
     JetbrainsMarketplaceTokenCommand,
     PypiTokenCommand,
+    MavenUsernameCommand,
+    MavenPasswordCommand,
+    MavenGpgPrivateKeyCommand,
+    MavenGpgPassphraseCommand,
+    MavenGpgKeyIdCommand,
     JitpackCookieCommand,
     DefaultMavenProjectGroupCommand,
     DefaultCompanyEmailCommand,
@@ -880,6 +929,11 @@ __all__ = [
     "KotlinSerializationCommand",
     "LibraryGroupChild",
     "MavenCoordinateExpr",
+    "MavenGpgKeyIdCommand",
+    "MavenGpgPassphraseCommand",
+    "MavenGpgPrivateKeyCommand",
+    "MavenPasswordCommand",
+    "MavenUsernameCommand",
     "OpenaiKeyCommand",
     "PaperPluginCommand",
     "PypiTokenCommand",

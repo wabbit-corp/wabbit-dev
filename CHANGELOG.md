@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Generate Maven Central GitHub Actions for public Gradle repos through the shared Vanniktech publishing path, including tag-only release workflows, branch/manual snapshot workflows, and release-time tag-to-version checks via generated `printVersion` tasks.
+- Generate repo-root Gradle docs/publish workflows for repo-managed modules using explicit nested task selectors and `docsProject`, while conservatively skipping repo-wide Maven Central release workflows when publishable nested modules do not share a single version.
+- Make `dev publish` support repo-managed Gradle Maven Central targets by regenerating repo-root files first and invoking module-scoped Gradle tasks from the repo root instead of rejecting nested modules outright.
+- Align generated snapshot publish assertions with the config/runtime version format by treating `+dev-SNAPSHOT` as the canonical snapshot suffix in generated Gradle tasks and CLI Maven Central publish dispatch.
+- Strengthen setup/docs workflow regression coverage by testing optional Python docs hooks, repo-root Gradle workflow wiring, nested Gradle task selector generation, and the generated release workflow’s tag/version check template.
 - Make `dev setup` a pure regeneration command by disabling auto-commit and upstream-push behavior in the CLI path, so scoped `setup <name>` and `setup --local <name>` can update tracked files and ignored overlays without dropping into the commit flow.
 - Make generated Gradle repos always track prod-ready dependency state: cross-repo dependencies now stay as published artifact coordinates in tracked `build.gradle.kts`, repo `settings.gradle.kts` files always remain tracked, local mode writes ignored `settings.local.gradle.kts` composite-build overlays instead of toggling tracked files, and workspace-root local builds keep working through generated dependency-substitution rules.
 - Avoid banner churn during setup by comparing rendered RGBA pixels before overwriting `.banner.png`, so equivalent images are left byte-for-byte untouched even when Pillow/zlib would re-encode PNG metadata or IDAT streams differently.

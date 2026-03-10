@@ -406,6 +406,15 @@ def _default_repo_urls(project: PythonProject) -> tuple[str | None, str | None, 
     return homepage, repository, issue_tracker
 
 
+def _default_site_url(project: PythonProject) -> str | None:
+    if project.github_repo is None:
+        return None
+    owner, _, repo_name = project.github_repo.partition("/")
+    if not owner or not repo_name:
+        return None
+    return f"https://{owner}.github.io/{repo_name}/"
+
+
 def _default_deptry_map(project_path: Path, dependencies: list[str]) -> dict[str, str]:
     common_map = {
         "pygithub": "github",
@@ -749,6 +758,13 @@ def _write_python_docs_files(ctx: PythonSetupContext, project: PythonProject) ->
     repository_name = _python_repository_name(project)
     site_name = project.name
     site_description = project.description or f"Documentation for {project.name}."
+    site_url = _default_site_url(project) or ""
+    docs_workflow_context = {
+        "has_changelog_guard_script": (project.path / "scripts" / "check_changelog_guard.py").is_file(),
+        "has_generate_api_docs_script": (project.path / "scripts" / "generate_api_docs.py").is_file(),
+        "has_docs_links_script": (project.path / "scripts" / "check_docs_links.py").is_file(),
+        "has_docs_snippets_test": (project.path / "tests" / "test_docs_snippets.py").is_file(),
+    }
 
     dev.io.write_text_file_if_missing(
         project.path / "mkdocs.yml",
@@ -757,6 +773,7 @@ def _write_python_docs_files(ctx: PythonSetupContext, project: PythonProject) ->
                 ctx.python_mkdocs_template,
                 site_name=site_name,
                 site_description=site_description,
+                site_url=site_url,
                 repo_url=repository_url,
                 repo_name=repository_name,
             )
@@ -805,11 +822,11 @@ def _write_python_docs_files(ctx: PythonSetupContext, project: PythonProject) ->
         codespell_words,
     )
 
-    dev.io.write_text_file_if_missing(
+    dev.io.write_text_file(
         project.path / ".github" / "workflows" / "docs-quality.yml",
-        clean_text(render_template(ctx.python_docs_quality_workflow_template)),
+        clean_text(render_template(ctx.python_docs_quality_workflow_template, **docs_workflow_context)),
     )
-    dev.io.write_text_file_if_missing(
+    dev.io.write_text_file(
         project.path / ".github" / "workflows" / "docs-deploy.yml",
         clean_text(render_template(ctx.python_docs_deploy_workflow_template)),
     )
@@ -872,7 +889,11 @@ def setup_python_project(ctx: PythonSetupContext, project: PythonProject, intera
         clean_text(render_python_pyrightconfig(ctx, project)),
     )
 
-    _write_python_docs_files(ctx, project)
+    if project.docs_enabled and project.docs_system == "mkdocs":
+        _write_python_docs_files(ctx, project)
+    else:
+        dev.io.delete_if_exists(project.path / ".github" / "workflows" / "docs-quality.yml")
+        dev.io.delete_if_exists(project.path / ".github" / "workflows" / "docs-deploy.yml")
     _write_python_application_files(ctx, project)
 
 

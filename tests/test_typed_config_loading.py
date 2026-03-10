@@ -680,6 +680,7 @@ def test_publish_target_routing(tmp_path: Path) -> None:
             [
                 '(default-maven-project-group "one.wabbit")',
                 '(gradle "kotlin-base58" :version "1.0.0" :features [(jvm-kotlin-library)])',
+                '(gradle "kotlin-legacy" :version "1.0.0" :publishTarget "jitpack" :features [(jvm-kotlin-library)])',
                 '(gradle "ij-diff-paste" :version "0.0.1" :features [(intellij-plugin "DiffPaste")])',
                 '(python "python-lang-mu" :version "0.4.0")',
                 "",
@@ -687,6 +688,40 @@ def test_publish_target_routing(tmp_path: Path) -> None:
         ),
     )
 
-    assert determine_publish_target(config.defined_projects["kotlin-base58"]) == "jetpack"
+    assert determine_publish_target(config.defined_projects["kotlin-base58"]) == "maven-central"
+    assert determine_publish_target(config.defined_projects["kotlin-legacy"]) == "jitpack"
     assert determine_publish_target(config.defined_projects["ij-diff-paste"]) == "intellij-marketplace"
     assert determine_publish_target(config.defined_projects["python-lang-mu"]) == "pypi"
+
+
+def test_loads_maven_central_secret_config_and_repo_docs_project(tmp_path: Path) -> None:
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(repo "jeeves" :repo "wabbit-corp/jeeves" :docsProject "api" :projects [',
+                '  (gradle "api" :version "0.0.1" :features [(jvm-kotlin-library)])',
+                '  (python "audio-backend" :version "0.0.1")',
+                '])',
+                "",
+            ]
+        ),
+        root_private_clj="\n".join(
+            [
+                '(maven-username "portal-user")',
+                '(maven-password "portal-password")',
+                '(maven-gpg-private-key "armored-key")',
+                '(maven-gpg-passphrase "secret-passphrase")',
+                '(maven-gpg-key-id "ABC123")',
+                "",
+            ]
+        ),
+    )
+
+    assert config.maven_username == "portal-user"
+    assert config.maven_password == "portal-password"
+    assert config.maven_gpg_private_key == "armored-key"
+    assert config.maven_gpg_passphrase == "secret-passphrase"
+    assert config.maven_gpg_key_id == "ABC123"
+    assert config.defined_repos["jeeves"].docs_project_id == "jeeves/api"

@@ -128,6 +128,10 @@ def _make_render_context(pyproject_template: str | None = None) -> RepoSetupCont
         python_contributing_template=jinja2.Template(""),
         python_docs_quality_workflow_template=jinja2.Template(""),
         python_docs_deploy_workflow_template=jinja2.Template(""),
+        gradle_release_publish_workflow_template=jinja2.Template(""),
+        gradle_snapshot_publish_workflow_template=jinja2.Template(""),
+        gradle_docs_quality_workflow_template=jinja2.Template(""),
+        gradle_docs_deploy_workflow_template=jinja2.Template(""),
         python_codespell_ignore_words_template=jinja2.Template(""),
         python_build_executable_template=jinja2.Template(""),
         mode=setup_module.RepoSetupMode.LOCAL,
@@ -471,3 +475,11 @@ def test_setup_generates_python_docs_and_quality_defaults(tmp_path: Path, monkey
     assert (generated_project / ".codespell-ignore-words.txt").is_file()
     assert (generated_project / ".github" / "workflows" / "docs-quality.yml").is_file()
     assert (generated_project / ".github" / "workflows" / "docs-deploy.yml").is_file()
+    assert "site_url: https://wabbit-corp.github.io/wabbit-dev/" in (generated_project / "mkdocs.yml").read_text(
+        encoding="utf-8"
+    )
+    deploy_workflow = (generated_project / ".github" / "workflows" / "docs-deploy.yml").read_text(encoding="utf-8")
+    assert "actions/configure-pages@v5" in deploy_workflow
+    assert "actions/upload-pages-artifact@v3" in deploy_workflow
+    assert "actions/deploy-pages@v4" in deploy_workflow
+    assert "mkdocs gh-deploy" not in deploy_workflow

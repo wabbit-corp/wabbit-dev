@@ -1,0 +1,196 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import jinja2
+import pytest
+from mu.types import Document
+
+from dev.config import Config, GradleProject, OwnershipType, Version
+from dev.tasks.setup import RepoSetupContext, RepoSetupMode
+
+
+def _make_repo_setup_context() -> RepoSetupContext:
+    config = Config(raw=Document([]))
+    return RepoSetupContext(
+        config=config,
+        known_repo_names=[],
+        known_github_repos={},
+        is_github_api_available=False,
+        repo_template=Path("."),
+        licenses={},
+        coc=jinja2.Template(""),
+        gitignore_template=jinja2.Template(""),
+        cla=jinja2.Template(""),
+        cla_explanations=jinja2.Template(""),
+        contributor_privacy_policy=jinja2.Template(""),
+        settings_template=jinja2.Template(""),
+        settings_local_template=jinja2.Template(""),
+        subproject_settings_template=jinja2.Template(""),
+        build_template=jinja2.Template(""),
+        subproject_build_template=jinja2.Template(""),
+        subproject_build_kmp_template=jinja2.Template(""),
+        gradle_gitignore_template=jinja2.Template(""),
+        gradle_properties_template=jinja2.Template(""),
+        python_gitignore_template=jinja2.Template(""),
+        purescript_gitignore_template=jinja2.Template(""),
+        python_pyproject_template=jinja2.Template(""),
+        python_pyrightconfig_template=jinja2.Template(""),
+        python_mkdocs_template=jinja2.Template(""),
+        python_docs_index_template=jinja2.Template(""),
+        python_docs_installation_template=jinja2.Template(""),
+        python_docs_development_template=jinja2.Template(""),
+        python_contributing_template=jinja2.Template(""),
+        python_docs_quality_workflow_template=jinja2.Template(""),
+        python_docs_deploy_workflow_template=jinja2.Template(""),
+        gradle_release_publish_workflow_template=jinja2.Template(""),
+        gradle_snapshot_publish_workflow_template=jinja2.Template(""),
+        gradle_docs_quality_workflow_template=jinja2.Template(""),
+        gradle_docs_deploy_workflow_template=jinja2.Template(""),
+        python_codespell_ignore_words_template=jinja2.Template(""),
+        python_build_executable_template=jinja2.Template(""),
+        mode=RepoSetupMode.PROD,
+    )
+
+
+def _make_gradle_project(path: Path) -> GradleProject:
+    return GradleProject(
+        path=path,
+        group_name="one.wabbit",
+        name=path.name,
+        version=Version.parse("0.0.1"),
+        description="Demo",
+        authors=[],
+        license="MIT",
+        quarantine=False,
+        publish=True,
+        github_repo="wabbit-corp/demo",
+        ownership=OwnershipType.WABBIT,
+        raw_dependencies=[],
+        raw_features=[],
+        resolved_dependencies=[],
+        resolved_maven_repositories=[],
+        resolved_features={},
+        platforms=["jvm"],
+        source_set_dependencies={},
+        publish_target="maven-central",
+    )
+
+
+@pytest.mark.asyncio
+async def test_publish_maven_central_runs_standalone_gradle_tasks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import dev.tasks.publish_maven_central as publish_module
+
+    project = _make_gradle_project(tmp_path / "kotlin-demo")
+    project.path.mkdir(parents=True, exist_ok=True)
+    (project.path / "gradlew").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    setup_calls: list[tuple[RepoSetupContext, GradleProject, bool]] = []
+    commands: list[tuple[list[str], Path, dict[str, str]]] = []
+
+    def fake_setup_project(ctx: RepoSetupContext, gradle_project: GradleProject, interactive: bool = True) -> None:
+        setup_calls.append((ctx, gradle_project, interactive))
+
+    def fake_run(command: list[str], *, cwd: Path, env: dict[str, str], check: bool) -> None:
+        assert check is True
+        commands.append((command, cwd, env))
+
+    monkeypatch.setattr(publish_module, "setup_project", fake_setup_project)
+    monkeypatch.setattr("dev.tasks.publish_maven_central.subprocess.run", fake_run)
+
+    ctx = _make_repo_setup_context()
+    ok = await publish_module.publish_gradle_project_to_maven_central(
+        project,
+        ctx,
+        maven_username="user",
+        maven_password="pass",
+        gpg_private_key="key",
+        gpg_passphrase="secret",
+        gpg_key_id="ABC123",
+    )
+
+    assert ok is True
+    assert setup_calls == [(ctx, project, False)]
+    assert len(commands) == 1
+    command, cwd, env = commands[0]
+    assert command == [
+        str(project.path / "gradlew"),
+        "--no-daemon",
+        "build",
+        "assertReleaseVersion",
+        "publishAndReleaseToMavenCentral",
+    ]
+    assert cwd == project.path
+    assert env["ORG_GRADLE_PROJECT_mavenCentralUsername"] == "user"
+    assert env["ORG_GRADLE_PROJECT_mavenCentralPassword"] == "pass"
+    assert env["ORG_GRADLE_PROJECT_signingInMemoryKey"] == "key"
+    assert env["ORG_GRADLE_PROJECT_signingInMemoryKeyPassword"] == "secret"
+    assert env["ORG_GRADLE_PROJECT_signingInMemoryKeyId"] == "ABC123"
+
+
+@pytest.mark.asyncio
+async def test_publish_maven_central_runs_repo_managed_scoped_tasks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import dev.tasks.publish_maven_central as publish_module
+
+    repo_root = tmp_path / "jeeves"
+    module_path = repo_root / "api"
+    module_path.mkdir(parents=True, exist_ok=True)
+    (repo_root / "gradlew").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    project = _make_gradle_project(module_path)
+    project.version = Version(None, 0, 0, 1, True)
+    project.name = "api"
+    project.repo_id = "jeeves"
+    project.repo_root = repo_root
+    project.gradle_root = repo_root
+    project.gradle_project_name = "jeeves-api"
+    project.github_repo = "wabbit-corp/jeeves"
+
+    call_order: list[str] = []
+    commands: list[tuple[list[str], Path, dict[str, str]]] = []
+
+    def fake_setup_gradle_repo_root(ctx: RepoSetupContext, gradle_project: GradleProject) -> None:
+        assert gradle_project is project
+        call_order.append("repo-root")
+
+    def fake_setup_project(ctx: RepoSetupContext, gradle_project: GradleProject, interactive: bool = True) -> None:
+        assert gradle_project is project
+        assert interactive is False
+        call_order.append("project")
+
+    def fake_run(command: list[str], *, cwd: Path, env: dict[str, str], check: bool) -> None:
+        assert check is True
+        commands.append((command, cwd, env))
+
+    monkeypatch.setattr(publish_module, "setup_gradle_repo_root", fake_setup_gradle_repo_root)
+    monkeypatch.setattr(publish_module, "setup_project", fake_setup_project)
+    monkeypatch.setattr("dev.tasks.publish_maven_central.subprocess.run", fake_run)
+
+    ctx = _make_repo_setup_context()
+    ok = await publish_module.publish_gradle_project_to_maven_central(
+        project,
+        ctx,
+        maven_username="user",
+        maven_password="pass",
+        gpg_private_key="key",
+        gpg_passphrase="secret",
+        gpg_key_id=None,
+    )
+
+    assert ok is True
+    assert call_order == ["repo-root", "project"]
+    assert len(commands) == 1
+    command, cwd, env = commands[0]
+    assert command == [
+        str(repo_root / "gradlew"),
+        "--no-daemon",
+        ":jeeves-api:build",
+        ":jeeves-api:assertSnapshotVersion",
+        ":jeeves-api:publishToMavenCentral",
+    ]
+    assert cwd == repo_root
+    assert env["ORG_GRADLE_PROJECT_mavenCentralUsername"] == "user"
+    assert env["ORG_GRADLE_PROJECT_mavenCentralPassword"] == "pass"
+    assert env["ORG_GRADLE_PROJECT_signingInMemoryKey"] == "key"
+    assert env["ORG_GRADLE_PROJECT_signingInMemoryKeyPassword"] == "secret"
+    assert "ORG_GRADLE_PROJECT_signingInMemoryKeyId" not in env

@@ -439,6 +439,7 @@ class RepoDefinition:
     github_repo: str | None
     gradle_root_project_name: str | None
     jvm_policy: str | None
+    docs_project_id: str | None = None
     project_ids: list[str] = dataclasses.field(default_factory=list)
 
 
@@ -589,6 +590,10 @@ class Project(ABC):
     ownership: OwnershipType
     managed_by_setup: bool
     resolved_dependencies: list[Dependency]
+    publish_target: str | None
+    publish_snapshots: bool
+    docs_enabled: bool
+    docs_system: str | None
 
     @property
     def effective_repo_root(self) -> Path:
@@ -669,6 +674,10 @@ class PythonProject(Project):
     managed_by_setup: bool = True
     copyright_holder: str | None = None
     copyright_year_start: int | None = None
+    publish_target: str | None = None
+    publish_snapshots: bool = False
+    docs_enabled: bool = True
+    docs_system: str | None = "mkdocs"
     # (We keep a list of `Dependency` too if you want to unify anything across projects,
     #  but typically a pure Python project won't rely on Gradle dependencies.)
 
@@ -702,6 +711,10 @@ class PurescriptProject(Project):
     managed_by_setup: bool = True
     copyright_holder: str | None = None
     copyright_year_start: int | None = None
+    publish_target: str | None = None
+    publish_snapshots: bool = False
+    docs_enabled: bool = False
+    docs_system: str | None = None
 
     def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
@@ -733,6 +746,10 @@ class PremakeProject(Project):
     managed_by_setup: bool = True
     copyright_holder: str | None = None
     copyright_year_start: int | None = None
+    publish_target: str | None = None
+    publish_snapshots: bool = False
+    docs_enabled: bool = False
+    docs_system: str | None = None
 
     def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
@@ -764,6 +781,10 @@ class DataProject(Project):
     managed_by_setup: bool = True
     copyright_holder: str | None = None
     copyright_year_start: int | None = None
+    publish_target: str | None = None
+    publish_snapshots: bool = False
+    docs_enabled: bool = False
+    docs_system: str | None = None
 
     def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
@@ -813,6 +834,10 @@ class GradleProject(Project):
     source_sets: dict[str, "GradleSourceSet"] = dataclasses.field(default_factory=dict)
     jvm_policy: str | None = None
     jvm_task_policies: dict[str, str] = dataclasses.field(default_factory=dict)
+    publish_target: str | None = None
+    publish_snapshots: bool = False
+    docs_enabled: bool = False
+    docs_system: str | None = None
 
     @property
     def artifact_name(self) -> str:
@@ -958,6 +983,18 @@ SUPPORTED_GRADLE_BUILD_MODELS: tuple[str, ...] = (
     "kmp",
 )
 
+SUPPORTED_PUBLISH_TARGETS: tuple[str, ...] = (
+    "maven-central",
+    "jetbrains-marketplace",
+    "pypi",
+    "jitpack",
+)
+
+SUPPORTED_DOC_SYSTEMS: tuple[str, ...] = (
+    "dokka",
+    "mkdocs",
+)
+
 SUPPORTED_KMP_PLATFORMS: tuple[str, ...] = (
     "jvm",
     "android",
@@ -1035,6 +1072,34 @@ def _normalize_gradle_build_model(
         return "kmp"
 
     return "jvm"
+
+
+def _normalize_publish_target(
+    project_name: str,
+    publish_target: str | None,
+    *,
+    default_target: str | None,
+) -> str | None:
+    if publish_target is None:
+        return default_target
+    if publish_target not in SUPPORTED_PUBLISH_TARGETS:
+        supported = ", ".join(SUPPORTED_PUBLISH_TARGETS)
+        raise ValueError(f"{project_name}.publishTarget must be one of: {supported}")
+    return publish_target
+
+
+def _normalize_docs_system(
+    project_name: str,
+    docs_system: str | None,
+    *,
+    default_docs_system: str | None,
+) -> str | None:
+    if docs_system is None:
+        return default_docs_system
+    if docs_system not in SUPPORTED_DOC_SYSTEMS:
+        supported = ", ".join(SUPPORTED_DOC_SYSTEMS)
+        raise ValueError(f"{project_name}.docsSystem must be one of: {supported}")
+    return docs_system
 
 
 def _normalize_gradle_targets(
@@ -1205,6 +1270,11 @@ class Config:
     anthropic_key: str | None = None
     jetbrains_marketplace_token: str | None = None
     pypi_token: str | None = None
+    maven_username: str | None = None
+    maven_password: str | None = None
+    maven_gpg_private_key: str | None = None
+    maven_gpg_passphrase: str | None = None
+    maven_gpg_key_id: str | None = None
     jitpack_cookie: str | None = None
 
     default_maven_project_group: str | None = None
@@ -1645,6 +1715,13 @@ def load_config() -> Config:
             if isinstance(intellij_feature, IntellijPlugin):
                 _validate_intellij_feature(intellij_feature, project_name=project.name)
             _validate_kmp_project_dependencies(project)
+            if project.docs_enabled and project.docs_system not in (None, "dokka"):
+                raise ValueError(f"{project.name} is a Gradle project and must use docsSystem 'dokka'")
+        elif isinstance(project, PythonProject):
+            if project.docs_enabled and project.docs_system not in (None, "mkdocs"):
+                raise ValueError(f"{project.name} is a Python project and must use docsSystem 'mkdocs'")
+        elif project.docs_enabled:
+            raise ValueError(f"{project.name} enables docs, but {type(project).__name__} does not support docs generation")
 
         def is_publishable(input_project: Project) -> bool:
             return input_project.publish and input_project.github_repo is not None and (not input_project.quarantine)
@@ -1789,6 +1866,21 @@ def load_config() -> Config:
                     aliases=aliases,
                 )
 
+            publish_target = _normalize_publish_target(
+                name,
+                command.publishTarget,
+                default_target="pypi" if command.publish else None,
+            )
+            publish_snapshots = command.publishSnapshots if command.publishSnapshots is not None else False
+            if publish_snapshots and publish_target != "maven-central":
+                raise ValueError(f"Python project {name} cannot enable publishSnapshots for target {publish_target!r}")
+            docs_enabled = command.docs if command.docs is not None else True
+            docs_system = _normalize_docs_system(
+                name,
+                command.docsSystem,
+                default_docs_system="mkdocs" if docs_enabled else None,
+            )
+
             python_project = PythonProject(
                 path=path,
                 name=name,
@@ -1816,6 +1908,10 @@ def load_config() -> Config:
                 managed_by_setup=managed_by_setup,
                 copyright_holder=command.copyright_holder,
                 copyright_year_start=command.copyright_year_start,
+                publish_target=publish_target,
+                publish_snapshots=publish_snapshots,
+                docs_enabled=docs_enabled,
+                docs_system=docs_system,
             )
             verify_project(python_project)
             register_project(project_id, python_project)
@@ -2051,6 +2147,33 @@ def load_config() -> Config:
                 repo_id=repo_id,
             )
 
+            default_publish_target: str | None
+            if not command.publish:
+                default_publish_target = None
+            elif "intellij-plugin" in resolved_features:
+                default_publish_target = "jetbrains-marketplace"
+            else:
+                default_publish_target = "maven-central"
+            publish_target = _normalize_publish_target(
+                display_name,
+                command.publishTarget,
+                default_target=default_publish_target,
+            )
+            publish_snapshots = command.publishSnapshots if command.publishSnapshots is not None else (
+                publish_target == "maven-central"
+            )
+            if publish_snapshots and publish_target != "maven-central":
+                raise ValueError(
+                    f"Gradle project {display_name} cannot enable publishSnapshots for target {publish_target!r}"
+                )
+            docs_enabled_default = publish_target == "maven-central"
+            docs_enabled = command.docs if command.docs is not None else docs_enabled_default
+            docs_system = _normalize_docs_system(
+                display_name,
+                command.docsSystem,
+                default_docs_system="dokka" if docs_enabled else None,
+            )
+
             gradle_project = GradleProject(
                 path=path,
                 group_name=default_group_name,
@@ -2085,6 +2208,10 @@ def load_config() -> Config:
                 source_sets=source_sets,
                 jvm_policy=command.jvmPolicy or repo_jvm_policy,
                 jvm_task_policies=dict(command.jvmTaskPolicies or {}),
+                publish_target=publish_target,
+                publish_snapshots=publish_snapshots,
+                docs_enabled=docs_enabled,
+                docs_system=docs_system,
             )
             verify_project(gradle_project)
             register_project(project_id, gradle_project)
@@ -2127,6 +2254,26 @@ def load_config() -> Config:
 
         if isinstance(command, config_typed.PypiTokenCommand):
             config.pypi_token = command.token
+            return
+
+        if isinstance(command, config_typed.MavenUsernameCommand):
+            config.maven_username = command.username
+            return
+
+        if isinstance(command, config_typed.MavenPasswordCommand):
+            config.maven_password = command.password
+            return
+
+        if isinstance(command, config_typed.MavenGpgPrivateKeyCommand):
+            config.maven_gpg_private_key = command.key
+            return
+
+        if isinstance(command, config_typed.MavenGpgPassphraseCommand):
+            config.maven_gpg_passphrase = command.passphrase
+            return
+
+        if isinstance(command, config_typed.MavenGpgKeyIdCommand):
+            config.maven_gpg_key_id = command.key_id
             return
 
         if isinstance(command, config_typed.DefaultMavenProjectGroupCommand):
@@ -2255,12 +2402,19 @@ def load_config() -> Config:
                     raise ValueError(f"Unsupported nested project type in repo {repo_id}: {type(nested_project)}")
                 nested_project_ids.append(nested_project_id)
 
+            docs_project_id: str | None = None
+            if command.docsProject is not None:
+                docs_project_id = _project_id_for(command.docsProject, repo_id)
+                if docs_project_id not in nested_project_ids:
+                    raise ValueError(f"Repo {repo_id}.docsProject refers to unknown nested project {command.docsProject}")
+
             config.defined_repos[repo_id] = RepoDefinition(
                 repo_id=repo_id,
                 path=repo_root_path,
                 github_repo=command.repo,
                 gradle_root_project_name=command.gradleRootProjectName,
                 jvm_policy=command.jvmPolicy,
+                docs_project_id=docs_project_id,
                 project_ids=nested_project_ids,
             )
             return

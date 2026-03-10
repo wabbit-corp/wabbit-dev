@@ -12,19 +12,26 @@ from dev.messages import error, success, warning
 from dev.tasks.publish_common import PublishError
 from dev.tasks.publish_intellij import publish_gradle_project_to_intellij_marketplace
 from dev.tasks.publish_jetpack import publish_gradle_project_to_jetpack
+from dev.tasks.publish_maven_central import publish_gradle_project_to_maven_central
 from dev.tasks.publish_pypi import publish_python_project_to_pypi
 from dev.tasks.setup import RepoSetupMode, create_repo_setup_context
 
-PublishTarget = Literal["jetpack", "intellij-marketplace", "pypi", "skip"]
+PublishTarget = Literal["maven-central", "jitpack", "intellij-marketplace", "pypi", "skip"]
 
 
 def determine_publish_target(project: Project) -> PublishTarget:
     if isinstance(project, GradleProject):
-        if "intellij-plugin" in project.resolved_features:
+        if project.publish_target == "jetbrains-marketplace" or "intellij-plugin" in project.resolved_features:
             return "intellij-marketplace"
-        return "jetpack"
+        if project.publish_target == "jitpack":
+            return "jitpack"
+        if project.publish_target == "maven-central":
+            return "maven-central"
+        return "skip"
     if isinstance(project, PythonProject):
-        return "pypi"
+        if project.publish_target == "pypi":
+            return "pypi"
+        return "skip"
     return "skip"
 
 
@@ -43,11 +50,11 @@ async def publish_main(project_name: str | None = None) -> None:
         return
 
     success("Topological order of projects to publish:\n  " + ", ".join(order))
-    has_jetpack_target = any(determine_publish_target(all_projects[name]) == "jetpack" for name in order)
+    has_jitpack_target = any(determine_publish_target(all_projects[name]) == "jitpack" for name in order)
 
     async with AsyncExitStack() as stack:
         jitpack_api: JitPackAPI | None = None
-        if has_jetpack_target:
+        if has_jitpack_target:
             jitpack_api = await stack.enter_async_context(JitPackAPI(session_cookie=config.jitpack_cookie))
 
         for name in order:
@@ -59,7 +66,19 @@ async def publish_main(project_name: str | None = None) -> None:
                 continue
 
             try:
-                if target == "jetpack":
+                if target == "maven-central":
+                    if not isinstance(project, GradleProject):
+                        raise PublishError(f"Expected GradleProject for {project.name}, got {type(project).__name__}.")
+                    ok = await publish_gradle_project_to_maven_central(
+                        project,
+                        repo_setup_context,
+                        maven_username=config.maven_username,
+                        maven_password=config.maven_password,
+                        gpg_private_key=config.maven_gpg_private_key,
+                        gpg_passphrase=config.maven_gpg_passphrase,
+                        gpg_key_id=config.maven_gpg_key_id,
+                    )
+                elif target == "jitpack":
                     if not isinstance(project, GradleProject):
                         raise PublishError(f"Expected GradleProject for {project.name}, got {type(project).__name__}.")
                     if jitpack_api is None:

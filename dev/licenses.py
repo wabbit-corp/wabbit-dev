@@ -16,14 +16,45 @@ class LicenseDefinition:
     template_file: str
     python_spdx: str
     display_name: str
+    spdx_url: str
 
 
 SUPPORTED_LICENSES: tuple[LicenseDefinition, ...] = (
-    LicenseDefinition("AGPL", "AGPL.md", "AGPL-3.0-or-later", "GNU Affero General Public License v3.0 or later"),
-    LicenseDefinition("CC0", "CC0.md", "CC0-1.0", "Creative Commons Zero v1.0 Universal"),
-    LicenseDefinition("MIT", "MIT.md", "MIT", "MIT License"),
-    LicenseDefinition("BSD", "BSD.md", "BSD-3-Clause", "BSD 3-Clause License"),
-    LicenseDefinition("GPLv3", "GPLv3.md", "GPL-3.0-only", "GNU General Public License v3.0 only"),
+    LicenseDefinition(
+        "AGPL",
+        "AGPL.md",
+        "AGPL-3.0-or-later",
+        "GNU Affero General Public License v3.0 or later",
+        "https://spdx.org/licenses/AGPL-3.0-or-later.html",
+    ),
+    LicenseDefinition(
+        "CC0",
+        "CC0.md",
+        "CC0-1.0",
+        "Creative Commons Zero v1.0 Universal",
+        "https://spdx.org/licenses/CC0-1.0.html",
+    ),
+    LicenseDefinition(
+        "MIT",
+        "MIT.md",
+        "MIT",
+        "MIT License",
+        "https://spdx.org/licenses/MIT.html",
+    ),
+    LicenseDefinition(
+        "BSD",
+        "BSD.md",
+        "BSD-3-Clause",
+        "BSD 3-Clause License",
+        "https://spdx.org/licenses/BSD-3-Clause.html",
+    ),
+    LicenseDefinition(
+        "GPLv3",
+        "GPLv3.md",
+        "GPL-3.0-only",
+        "GNU General Public License v3.0 only",
+        "https://spdx.org/licenses/GPL-3.0-only.html",
+    ),
 )
 
 _LICENSES_BY_KEY: dict[str, LicenseDefinition] = {item.key: item for item in SUPPORTED_LICENSES}
@@ -77,6 +108,17 @@ def license_display_name(license_key: str | None) -> str | None:
     if definition is None:
         return normalized
     return definition.display_name
+
+
+def license_spdx_url(license_key: str | None) -> str | None:
+    normalized = canonicalize_license_key(license_key)
+    if normalized is None:
+        return None
+
+    definition = _LICENSES_BY_KEY.get(normalized)
+    if definition is None:
+        return None
+    return definition.spdx_url
 
 
 def cla_primary_license_reference(license_key: str | None) -> str:

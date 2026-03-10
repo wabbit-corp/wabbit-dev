@@ -82,6 +82,10 @@ class RepoSetupContext:
     python_contributing_template: jinja2.Template
     python_docs_quality_workflow_template: jinja2.Template
     python_docs_deploy_workflow_template: jinja2.Template
+    gradle_release_publish_workflow_template: jinja2.Template
+    gradle_snapshot_publish_workflow_template: jinja2.Template
+    gradle_docs_quality_workflow_template: jinja2.Template
+    gradle_docs_deploy_workflow_template: jinja2.Template
     python_codespell_ignore_words_template: jinja2.Template
     python_build_executable_template: jinja2.Template
 
@@ -581,6 +585,57 @@ def _write_gradle_root_files(
         )
 
 
+def _repo_gradle_workflow_java_version(ctx: RepoSetupContext, projects: list[GradleProject]) -> int:
+    if not projects:
+        return ctx.config.java_version
+    return max(
+        setup_kotlin.java_version_for_features(ctx.config.java_version, project.resolved_features) for project in projects
+    )
+
+
+def setup_gradle_repo_root(ctx: RepoSetupContext, project: GradleProject) -> None:
+    repo_id = project.repo_id
+    if repo_id is None or project.effective_gradle_root == Path("."):
+        return
+
+    repo_definition = ctx.config.defined_repos.get(repo_id)
+    if repo_definition is None:
+        raise ValueError(f"Missing repo definition for {repo_id}")
+
+    repo_gradle_projects = [
+        defined_project
+        for defined_project in ctx.config.defined_projects.values()
+        if isinstance(defined_project, GradleProject) and defined_project.repo_id == repo_id
+    ]
+    if not repo_gradle_projects:
+        return
+
+    _write_gradle_root_files(
+        ctx,
+        root_path=repo_definition.path,
+        root_project_name=repo_definition.gradle_root_project_name or repo_id,
+        seed_projects=repo_gradle_projects,
+        write_wrapper=True,
+        write_build=False,
+        include_external_dependencies=False,
+        write_dependency_substitutions=False,
+    )
+    _write_repo_root_wabbit_legal_documents(ctx, repo_gradle_projects)
+    docs_project: GradleProject | None = None
+    if repo_definition.docs_project_id is not None:
+        defined_docs_project = ctx.config.defined_projects.get(repo_definition.docs_project_id)
+        if isinstance(defined_docs_project, GradleProject):
+            docs_project = defined_docs_project
+    setup_kotlin._write_gradle_repo_root_workflows(
+        ctx,
+        root_path=repo_definition.path,
+        repo_github_repo=repo_definition.github_repo,
+        projects=repo_gradle_projects,
+        docs_project=docs_project,
+        java_version=_repo_gradle_workflow_java_version(ctx, repo_gradle_projects),
+    )
+
+
 USED_COMMIT_MESSAGES: dict[str, str] = {}
 
 
@@ -980,6 +1035,18 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
         python_docs_deploy_workflow_template=dev.io.read_template(
             repo_template / "python-files" / ".github" / "workflows" / "docs-deploy.yml.jinja2"
         ),
+        gradle_release_publish_workflow_template=dev.io.read_template(
+            repo_template / "gradle-files" / ".github" / "workflows" / "release-publish.yml.jinja2"
+        ),
+        gradle_snapshot_publish_workflow_template=dev.io.read_template(
+            repo_template / "gradle-files" / ".github" / "workflows" / "snapshot-publish.yml.jinja2"
+        ),
+        gradle_docs_quality_workflow_template=dev.io.read_template(
+            repo_template / "gradle-files" / ".github" / "workflows" / "docs-quality.yml.jinja2"
+        ),
+        gradle_docs_deploy_workflow_template=dev.io.read_template(
+            repo_template / "gradle-files" / ".github" / "workflows" / "docs-deploy.yml.jinja2"
+        ),
         python_codespell_ignore_words_template=dev.io.read_template(
             repo_template / "python-files" / ".codespell-ignore-words.txt.jinja2"
         ),
@@ -1027,27 +1094,17 @@ def setup(mode: RepoSetupMode, *, interactive: bool = True, project: str | None 
             if project_item.repo_id is not None and project_item.effective_gradle_root != Path(".")
         }
         for repo_id in sorted(repo_ids_to_write):
-            repo_definition = config.defined_repos.get(repo_id)
-            if repo_definition is None:
-                continue
-            repo_gradle_projects = [
-                defined_project
-                for defined_project in config.defined_projects.values()
-                if isinstance(defined_project, GradleProject) and defined_project.repo_id == repo_id
-            ]
-            if not repo_gradle_projects:
-                continue
-            _write_gradle_root_files(
-                ctx,
-                root_path=repo_definition.path,
-                root_project_name=repo_definition.gradle_root_project_name or repo_id,
-                seed_projects=repo_gradle_projects,
-                write_wrapper=True,
-                write_build=False,
-                include_external_dependencies=False,
-                write_dependency_substitutions=False,
+            representative_project = next(
+                (
+                    defined_project
+                    for defined_project in config.defined_projects.values()
+                    if isinstance(defined_project, GradleProject) and defined_project.repo_id == repo_id
+                ),
+                None,
             )
-            _write_repo_root_wabbit_legal_documents(ctx, repo_gradle_projects)
+            if representative_project is None:
+                continue
+            setup_gradle_repo_root(ctx, representative_project)
 
     for setup_project_item in selected_projects:
         setup_project(
@@ -1129,5 +1186,6 @@ __all__ = [
     "RepoSetupMode",
     "RepoSetupContext",
     "create_repo_setup_context",
+    "setup_gradle_repo_root",
     "setup",
 ]
