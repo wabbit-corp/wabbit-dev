@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Auto-wire generated Gradle Dokka configs to include `docs/dokka-module.md` when present, so repos can improve published docs without hand-editing generated `build.gradle.kts` or forcing GitHub-facing `README.md` files into Dokka's module-doc format.
 - Omit `ORG_GRADLE_PROJECT_signingInMemoryKeyId` from generated Maven Central GitHub Actions unless explicitly provided, so snapshot/release workflows do not fail when the optional `MAVEN_GPG_KEY_ID` secret is absent.
 - Make generated Gradle release/snapshot version assertion tasks configuration-cache-safe by capturing the configured version string outside task execution, and skip push-triggered snapshot publish jobs cleanly when a repo is on a release version instead of turning every non-snapshot `master` push red.
 - Fix the generated annotated-tag release guard to fetch and inspect `refs/tags/$GITHUB_REF_NAME` explicitly, avoiding false failures under `actions/checkout` on real tag-triggered release runs.
