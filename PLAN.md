@@ -106,9 +106,9 @@
 - [ ] Validate that generated workflows do not reference missing secrets/steps for private repos.
 
 ### 7. Rollout Sequence
-- [ ] Start with one small public JVM repo.
-- [ ] Commit/push the generator/template changes needed for the rollout.
-- [ ] Commit/push the first public JVM repo rollout after scoped regen and local verification.
+- [x] Start with one small public JVM repo.
+- [x] Commit/push the generator/template changes needed for the rollout.
+- [x] Commit/push the first public JVM repo rollout after scoped regen and local verification.
 - [ ] Then one public KMP repo.
 - [ ] Then roll out docs workflows broadly.
 - [ ] Only after successful smoke releases, fan out to the rest of the public repos.
@@ -161,7 +161,8 @@
 
 ## Immediate Next Step
 - [x] Finish repo-managed Maven Central CLI publish support.
-- [ ] Roll out the generated GitHub Actions changes to one small public JVM repo (`kotlin-base58`) and push that repo.
+- [x] Roll out the generated GitHub Actions changes to one small public JVM repo (`kotlin-base58`) and push that repo.
+- [ ] Roll out the same generated GitHub Actions changes to one small public KMP repo and push that repo.
 
 ## References
 - [ ] Sonatype Central requirements: https://central.sonatype.org/publish/requirements/
