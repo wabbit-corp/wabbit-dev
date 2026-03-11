@@ -134,6 +134,9 @@ async def async_main() -> int:
     with commands("push") as cmd:
         cmd.add_argument("project", type=str, nargs="?", default=".")
 
+    with commands("project/list") as cmd:
+        pass
+
     with commands("check") as cmd:
         cmd.add_argument("project_or_dir_or_file", type=str, nargs="?", default=".")
         cmd.add_argument(
@@ -246,6 +249,15 @@ async def async_main() -> int:
             project_name = args.project
             push(project_name)
             project_name = args.project[0]
+
+        case "project":
+            match args.subcommand:
+                case "list":
+                    from dev.tasks.project_list import list_projects
+
+                    list_projects()
+                case _:
+                    raise ValueError(f"Unknown subcommand: {args.subcommand}")
 
         case "check":
             from dev.tasks.check import check_main
