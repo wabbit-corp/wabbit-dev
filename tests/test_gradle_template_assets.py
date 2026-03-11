@@ -35,3 +35,20 @@ def test_gradle_templates_auto_include_dokka_docs_assets(template_name: str) -> 
     assert 'file("docs/dokka-module.md")' in content
     assert "dokkaModuleFile.exists()" in content
     assert "includes.from(dokkaModuleFile)" in content
+
+
+@pytest.mark.parametrize(
+    "template_name",
+    [
+        "subproject-build.gradle.kts.jinja2",
+        "subproject-build-kmp.gradle.kts.jinja2",
+    ],
+)
+def test_gradle_templates_skip_signing_for_maven_local_publish(template_name: str) -> None:
+    template_path = Path(__file__).resolve().parents[2] / "data-repo-template" / "gradle-files" / template_name
+    content = template_path.read_text(encoding="utf-8")
+
+    assert "localPublishRequested" in content
+    assert '"MavenLocal" in taskName' in content
+    assert "tasks.withType<org.gradle.plugins.signing.Sign>().configureEach" in content
+    assert "enabled = false" in content

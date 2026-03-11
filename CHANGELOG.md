@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Skip generated Gradle signing tasks when publishing to `MavenLocal`, so local verification of generated Maven publications no longer requires configured in-memory GPG secrets.
 - Simplify KMP config modeling by allowing target-driven default hierarchies with no explicit `:sourceSets`, treating `android-kmp-library` target metadata as authoritative instead of requiring a duplicate `kmp-android-library` feature, and slimming representative `root.clj` entries down to dependency-only source-set maps where custom hierarchy is not needed.
 - Auto-wire generated Gradle Dokka configs to include `docs/dokka-module.md` when present, so repos can improve published docs without hand-editing generated `build.gradle.kts` or forcing GitHub-facing `README.md` files into Dokka's module-doc format.
 - Omit `ORG_GRADLE_PROJECT_signingInMemoryKeyId` from generated Maven Central GitHub Actions unless explicitly provided, so snapshot/release workflows do not fail when the optional `MAVEN_GPG_KEY_ID` secret is absent.
