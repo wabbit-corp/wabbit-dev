@@ -2,6 +2,7 @@
 
 ## Unreleased (2026-02-17)
 - Add `dev project list`, a concise colorized tree view of configured projects in config order that distinguishes Python, JVM Kotlin, and KMP Kotlin projects while preserving nested repo structure.
+- Fix generated KMP source-set rendering so default parents such as `commonMain` or `commonTest` are emitted automatically when custom source sets depend on them, avoiding broken `dependsOn(commonMain)` builds for target-shared layouts like `jvmAndAndroidMain`.
 - Skip generated Gradle signing tasks when publishing to `MavenLocal`, so local verification of generated Maven publications no longer requires configured in-memory GPG secrets.
 - Simplify KMP config modeling by allowing target-driven default hierarchies with no explicit `:sourceSets`, treating `android-kmp-library` target metadata as authoritative instead of requiring a duplicate `kmp-android-library` feature, and slimming representative `root.clj` entries down to dependency-only source-set maps where custom hierarchy is not needed.
 - Auto-wire generated Gradle Dokka configs to include `docs/dokka-module.md` when present, so repos can improve published docs without hand-editing generated `build.gradle.kts` or forcing GitHub-facing `README.md` files into Dokka's module-doc format.

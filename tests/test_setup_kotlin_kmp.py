@@ -12,6 +12,7 @@ from dev.config import (
     Dependency,
     DependencyTarget,
     GradleProject,
+    GradleSourceSet,
     GradleTargetSpec,
     KmpCompose,
     KmpJvmRunEntry,
@@ -228,6 +229,57 @@ def test_setup_gradle_project_uses_kmp_template_and_renders_source_set_deps_and_
     assert 'commonMain=implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")' in build_text
     assert 'jvmMain=implementation("io.ktor:ktor-client-core:3.3.0")' in build_text
     assert "RUN=runServerJvm" in build_text
+
+
+def test_setup_kmp_includes_implicit_default_parent_source_sets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "kmp-proj", platforms=["jvm", "android"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.source_sets = {
+        "commonTest": GradleSourceSet(
+            name="commonTest",
+            dependencies=[
+                Dependency(
+                    scope=None,
+                    target=DependencyTarget.Maven(artifact="org.jetbrains.kotlin:kotlin-test:2.2.20"),
+                )
+            ],
+        ),
+        "jvmAndAndroidMain": GradleSourceSet(name="jvmAndAndroidMain", depends_on=["commonMain"]),
+        "jvmMain": GradleSourceSet(name="jvmMain", depends_on=["jvmAndAndroidMain"]),
+        "androidMain": GradleSourceSet(name="androidMain", depends_on=["jvmAndAndroidMain"]),
+    }
+    project.source_set_dependencies = {
+        "commonTest": [
+            Dependency(
+                scope=None,
+                target=DependencyTarget.Maven(artifact="org.jetbrains.kotlin:kotlin-test:2.2.20"),
+            )
+        ]
+    }
+
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template=(
+            "{% for source_set in source_set_entries %}"
+            "[{{ source_set.name }}|{{ source_set.accessor }}|{{ source_set.depends_on|join(',') }}"
+            "|{{ source_set.dependencies|join(',') }}]"
+            "{% endfor %}"
+        ),
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
+    assert "[commonMain|getting||]" in build_text
+    assert "[commonTest|getting||implementation(\"org.jetbrains.kotlin:kotlin-test:2.2.20\")]" in build_text
+    assert "[jvmAndAndroidMain|creating|commonMain|]" in build_text
+    assert "[jvmMain|getting|jvmAndAndroidMain|]" in build_text
+    assert "[androidMain|getting|jvmAndAndroidMain|]" in build_text
 
 
 def test_setup_kmp_template_conditionals_include_android_and_compose_only_when_features_exist(

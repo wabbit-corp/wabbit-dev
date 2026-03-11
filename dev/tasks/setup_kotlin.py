@@ -421,6 +421,36 @@ def _source_set_entries(
             return "commonTest"
         return None
 
+    implicit_default_source_sets: list[str] = []
+    seen_implicit_defaults: set[str] = set()
+
+    def add_implicit_default_source_set(source_set_name: str) -> None:
+        if source_set_name not in default_source_sets:
+            return
+        if source_set_name in project.source_sets:
+            return
+        if source_set_name in seen_implicit_defaults:
+            return
+        seen_implicit_defaults.add(source_set_name)
+        implicit_default_source_sets.append(source_set_name)
+
+    for source_set_name in source_set_dependencies:
+        add_implicit_default_source_set(source_set_name)
+
+    for source_set in project.source_sets.values():
+        for parent in source_set.depends_on:
+            add_implicit_default_source_set(parent)
+
+    for source_set_name in implicit_default_source_sets:
+        entries.append(
+            {
+                "name": source_set_name,
+                "accessor": "getting",
+                "depends_on": [],
+                "dependencies": list(source_set_dependencies.get(source_set_name, [])),
+            }
+        )
+
     for source_set_name, source_set in project.source_sets.items():
         depends_on = [parent for parent in source_set.depends_on if parent != implicit_parent(source_set_name)]
         entries.append(
