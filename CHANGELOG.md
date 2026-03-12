@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Fix KMP dependency validation so `commonMain` only requires common compatibility instead of inheriting descendant target requirements, allowing shared JVM+Android KMP libraries with real `commonMain` APIs to be consumed from other projects' `commonMain`.
 - Add `dev project list`, a concise colorized tree view of configured projects in config order that distinguishes Python, JVM Kotlin, and KMP Kotlin projects while preserving nested repo structure.
 - Fix generated KMP source-set rendering so default parents such as `commonMain` or `commonTest` are emitted automatically when custom source sets depend on them, avoiding broken `dependsOn(commonMain)` builds for target-shared layouts like `jvmAndAndroidMain`.
 - Skip generated Gradle signing tasks when publishing to `MavenLocal`, so local verification of generated Maven publications no longer requires configured in-memory GPG secrets.
@@ -31,7 +32,7 @@
 - Add explicit project copyright metadata in config (`:copyright-holder`, `:copyright-year-start`) and use it when rendering generated license notices, including year ranges such as `2019-2026`.
 - Make CLA generation license-aware by rendering the configured project license into both the full CLA and the simplified CLA explanations, instead of hardcoding AGPL wording for every managed repo.
 - Fix Purescript setup so configured Wabbit-owned Purescript repos get the standard generated legal/banner files, and register `purescript-stablename` plus `purescript-datareify` in `root.clj` with `MIT` licenses so scoped `setup <name>` produces `LICENSE.md`.
-- Align generated Android/KMP builds to Gradle `8.13` and AGP `8.13.2`, update generated wrapper/`gradle.properties` versions accordingly, and keep repo-local wrappers in sync with the managed toolchain version.
+- Align generated Android/KMP builds to Gradle `8.13` and AGP `8.12.0`, update generated wrapper/`gradle.properties` versions accordingly, and keep repo-local wrappers in sync with the managed toolchain version.
 - Fix generated KMP coverage config by upgrading Kover to `0.9.3`, which restores `:jeeves-api:koverGenerateArtifactJvm` on Android-backed KMP modules.
 - Stop generating deprecated `-Xcontext-receivers`, standardize generated Kotlin compiler flags on `-Xcontext-parameters`, and clean up default KMP source-set rendering to avoid hierarchy-template warnings.
 - Add temporary generated Android-app task guards for known toolchain incompatibilities: skip `check*AarMetadata` in local builds, gate iOS simulator tests behind `jeeves.enableIosSimulatorTests`, and disable Android lint tasks by default until lint can read Kotlin `2.3.x` metadata (`-Pwabbit.enableAndroidLint=true` re-enables them).

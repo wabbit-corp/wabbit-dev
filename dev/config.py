@@ -1651,6 +1651,10 @@ def load_config() -> Config:
 
             visiting.add(current_source_set_name)
             requirements = _source_set_base_required_platforms(project, current_source_set_name)
+            if requirements == {"common"}:
+                visiting.remove(current_source_set_name)
+                cache[current_source_set_name] = requirements
+                return requirements
             for child_source_set_name in reverse_graph.get(current_source_set_name, []):
                 requirements.update(visit(child_source_set_name, visiting))
             if current_source_set_name not in CANONICAL_KMP_SOURCE_SET_REQUIREMENTS and requirements:

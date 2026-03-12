@@ -33,7 +33,7 @@ from dev.licenses import license_display_name, license_spdx_url
 from dev.messages import error, warning
 from dev.tasks.setup_common import RepoSetupMode, clean_text, render_template, write_banner, write_wabbit_legal_files
 
-ANDROID_GRADLE_PLUGIN_VERSION = "8.13.2"
+ANDROID_GRADLE_PLUGIN_VERSION = "8.12.0"
 DEFAULT_COMPOSE_PLUGIN_VERSION = "1.9.1"
 DOKKA_PLUGIN_VERSION = "2.0.0"
 KOVER_PLUGIN_VERSION = "0.9.3"

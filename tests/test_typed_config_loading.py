@@ -352,6 +352,32 @@ def test_kmp_source_set_validation_rejects_common_main_to_jvm_only_dependency(tm
         )
 
 
+def test_kmp_source_set_validation_allows_common_main_to_depend_on_common_kmp_project(
+    tmp_path: Path,
+) -> None:
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'gradle "lib-kmp" '
+                ':version "0.1.0" '
+                ':targets [{"kind": "jvm"} {"kind": "android-kmp-library" "namespace": "one.wabbit.lib" "compileSdk": 34 "minSdk": 26}] '
+                ':sourceSetDependencies {"commonMain": ["org.jetbrains.kotlin:kotlin-stdlib:2.2.20"]})',
+                "("
+                'gradle "app-kmp" '
+                ':version "0.1.0" '
+                ':targets [{"kind": "jvm"} {"kind": "android-kmp-library" "namespace": "one.wabbit.app" "compileSdk": 34 "minSdk": 26} {"kind": "iosArm64"}] '
+                ':sourceSetDependencies {"commonMain": [":lib-kmp"]})',
+                "",
+            ]
+        ),
+    )
+
+    assert "app-kmp" in config.defined_projects
+
+
 def test_kmp_source_set_validation_rejects_ios_arm64_to_non_ios_project(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="iosArm64 compatibility"):
         _load_from_temp_root(
