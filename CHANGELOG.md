@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Add desktop native KMP target support (`linuxX64`, `mingwX64`, `macosX64`) to the Gradle generator and switch `kotlin-throwable-policy` to a shared `nativeMain` fallback for non-JVM throwable hooks.
+- Add generic extra Gradle-plugin application support for generated JVM and KMP Kotlin projects via a new `(gradle-plugin "...")` feature backed by existing top-level plugin definitions, including generated `settings.gradle.kts` plugin-management entries and custom plugin repositories for non-portal plugins.
 - Fix KMP dependency validation so `commonMain` only requires common compatibility instead of inheriting descendant target requirements, allowing shared JVM+Android KMP libraries with real `commonMain` APIs to be consumed from other projects' `commonMain`.
 - Add `dev project list`, a concise colorized tree view of configured projects in config order that distinguishes Python, JVM Kotlin, and KMP Kotlin projects while preserving nested repo structure.
 - Fix generated KMP source-set rendering so default parents such as `commonMain` or `commonTest` are emitted automatically when custom source sets depend on them, avoiding broken `dependsOn(commonMain)` builds for target-shared layouts like `jvmAndAndroidMain`.

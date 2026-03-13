@@ -293,6 +293,30 @@ class KotlinSerialization(Feature):
         return [Kotlin()]
 
 
+@dataclass(frozen=True)
+class GradlePluginApplication:
+    name: str
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("gradle-plugin.name must not be empty")
+
+
+@dataclass
+class GradlePlugins(Feature):
+    __feature_name__ = "gradle-plugin"
+    entries: list[GradlePluginApplication]
+
+    def __post_init__(self) -> None:
+        if not self.entries:
+            raise ValueError("gradle-plugin.entries must not be empty")
+        seen: set[str] = set()
+        for entry in self.entries:
+            if entry.name in seen:
+                raise ValueError(f"Duplicate gradle-plugin entry: {entry.name}")
+            seen.add(entry.name)
+
+
 @dataclass
 class KmpAndroidLibrary(Feature):
     __feature_name__ = "kmp-android-library"
@@ -350,6 +374,17 @@ class PythonImportLinter(Feature):
 def _merge_feature(existing: Feature, incoming: Feature) -> Feature:
     if type(existing) is not type(incoming):
         raise TypeError(f"Cannot merge features with different types: {type(existing)} vs {type(incoming)}")
+
+    if isinstance(existing, GradlePlugins):
+        assert isinstance(incoming, GradlePlugins)
+        merged_entries = list(existing.entries)
+        seen = {entry.name for entry in existing.entries}
+        for entry in incoming.entries:
+            if entry.name in seen:
+                continue
+            seen.add(entry.name)
+            merged_entries.append(entry)
+        return GradlePlugins(entries=merged_entries)
 
     dataclass_field_names = _dataclass_field_names(existing)
     if dataclass_field_names is None:
@@ -1000,7 +1035,10 @@ SUPPORTED_KMP_PLATFORMS: tuple[str, ...] = (
     "android",
     "iosArm64",
     "iosSimulatorArm64",
+    "macosX64",
     "macosArm64",
+    "linuxX64",
+    "mingwX64",
 )
 
 SUPPORTED_GRADLE_TARGET_KINDS: tuple[str, ...] = (
@@ -1009,7 +1047,10 @@ SUPPORTED_GRADLE_TARGET_KINDS: tuple[str, ...] = (
     "android-kmp-library",
     "iosArm64",
     "iosSimulatorArm64",
+    "macosX64",
     "macosArm64",
+    "linuxX64",
+    "mingwX64",
 )
 
 GRADLE_TARGET_KIND_TO_PLATFORM: dict[str, str] = {
@@ -1018,10 +1059,13 @@ GRADLE_TARGET_KIND_TO_PLATFORM: dict[str, str] = {
     "android-kmp-library": "android",
     "iosArm64": "iosArm64",
     "iosSimulatorArm64": "iosSimulatorArm64",
+    "macosX64": "macosX64",
     "macosArm64": "macosArm64",
+    "linuxX64": "linuxX64",
+    "mingwX64": "mingwX64",
 }
 
-APPLE_KMP_PLATFORMS: frozenset[str] = frozenset({"iosArm64", "iosSimulatorArm64", "macosArm64"})
+APPLE_KMP_PLATFORMS: frozenset[str] = frozenset({"iosArm64", "iosSimulatorArm64", "macosX64", "macosArm64"})
 
 CANONICAL_KMP_SOURCE_SET_REQUIREMENTS: dict[str, str] = {
     "commonMain": "common",
@@ -1036,8 +1080,14 @@ CANONICAL_KMP_SOURCE_SET_REQUIREMENTS: dict[str, str] = {
     "iosArm64Test": "iosArm64",
     "iosSimulatorArm64Main": "iosSimulatorArm64",
     "iosSimulatorArm64Test": "iosSimulatorArm64",
+    "macosX64Main": "macosX64",
+    "macosX64Test": "macosX64",
     "clientNativeMain": "macosArm64",
     "clientNativeTest": "macosArm64",
+    "linuxX64Main": "linuxX64",
+    "linuxX64Test": "linuxX64",
+    "mingwX64Main": "mingwX64",
+    "mingwX64Test": "mingwX64",
 }
 
 GRADLE_SOURCE_SET_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:Main|Test|UnitTest)$")
@@ -1216,6 +1266,9 @@ def _legacy_targets_from_platforms(
         if platform == "macosArm64":
             targets.append(GradleTargetSpec(kind="macosArm64", name="clientNative"))
             continue
+        if platform == "macosX64":
+            targets.append(GradleTargetSpec(kind="macosX64"))
+            continue
         targets.append(GradleTargetSpec(kind=platform))
     return targets
 
@@ -1325,6 +1378,13 @@ class Config:
         if self.jvm_version == 8:
             return "JVM_1_8"
         return f"JVM_{self.jvm_version}"
+
+
+def get_gradle_plugin_applications(project: GradleProject) -> list[GradlePluginApplication]:
+    feature = project.resolved_features.get("gradle-plugin")
+    if not isinstance(feature, GradlePlugins):
+        return []
+    return list(feature.entries)
 
 
 def project_repo_root(project: Project | object) -> Path:
@@ -1442,6 +1502,8 @@ def load_config() -> Config:
             )
         if isinstance(command, config_typed.KotlinSerializationCommand):
             return KotlinSerialization()
+        if isinstance(command, config_typed.GradlePluginCommand):
+            return GradlePlugins(entries=[GradlePluginApplication(name=command.name)])
         if isinstance(command, config_typed.KmpAndroidLibraryCommand):
             return KmpAndroidLibrary(
                 namespace=command.namespace,
@@ -2489,5 +2551,23 @@ def load_config() -> Config:
 
     _decode_and_apply(root, "root")
     _decode_and_apply(root_private, "root.private")
+
+    for project in config.defined_projects.values():
+        if not isinstance(project, GradleProject):
+            continue
+        for application in get_gradle_plugin_applications(project):
+            definition = config.plugins.get(application.name)
+            if definition is None:
+                raise ValueError(f"Gradle project {project.name} references unknown gradle-plugin {application.name}")
+            if ":" in definition.name:
+                raise ValueError(
+                    f"Gradle project {project.name} uses gradle-plugin {application.name}, "
+                    f"but its definition must use plugin-id:version syntax"
+                )
+            if definition.repo is not None and definition.repo not in config.repositories:
+                raise ValueError(
+                    f"Gradle project {project.name} uses gradle-plugin {application.name}, "
+                    f"but repo {definition.repo} is not defined"
+                )
 
     return config

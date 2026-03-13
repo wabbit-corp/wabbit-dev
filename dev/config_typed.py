@@ -536,6 +536,12 @@ class KotlinSerializationCommand:
     pass
 
 
+@tag("gradle-plugin")
+@dataclass(frozen=True)
+class GradlePluginCommand:
+    name: str
+
+
 @tag("kmp-android-library")
 @dataclass(frozen=True)
 class KmpAndroidLibraryCommand:
@@ -619,6 +625,7 @@ FeatureCommand = (
     | JvmKotlinAgentCommand
     | IntellijPluginCommand
     | KotlinSerializationCommand
+    | GradlePluginCommand
     | KmpAndroidLibraryCommand
     | KmpComposeCommand
     | KmpJvmRunsCommand
@@ -911,6 +918,7 @@ __all__ = [
     "GithubTokenCommand",
     "GitUserCommand",
     "GradleProjectCommand",
+    "GradlePluginCommand",
     "GradleSourceSetCommand",
     "GradleTargetCommand",
     "IntellijPluginCommand",

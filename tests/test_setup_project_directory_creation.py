@@ -1095,6 +1095,94 @@ def test_write_gradle_root_files_writes_workspace_dependency_substitutions_in_lo
     assert "kotlin-dotenv-parser=../kotlin-dotenv-parser" in settings_text
 
 
+def test_write_gradle_root_files_renders_extra_gradle_plugins_in_settings(tmp_path: Path) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    from dev.config import (
+        Config,
+        GradlePluginApplication,
+        GradlePlugins,
+        GradleProject,
+        KotlinPluginDefinition,
+        MavenRepositoryDefinition,
+        OwnershipType,
+        Version,
+    )
+
+    project = GradleProject(
+        path=tmp_path / "workspace" / "demo",
+        group_name="one.wabbit",
+        name="demo",
+        version=Version.parse("0.0.1"),
+        description=None,
+        authors=[],
+        license="AGPL",
+        quarantine=False,
+        publish=False,
+        github_repo="org/repo",
+        ownership=OwnershipType.IMPORTED,
+        raw_dependencies=[],
+        raw_features=[],
+        resolved_dependencies=[],
+        resolved_maven_repositories=[],
+        resolved_features={
+            "gradle-plugin": GradlePlugins(entries=[GradlePluginApplication(name="acyclic-gradle")]),
+        },
+        platforms=["jvm"],
+        source_set_dependencies={},
+        project_id="demo",
+        repo_root=tmp_path / "workspace",
+        gradle_root=tmp_path / "workspace",
+        gradle_project_name="demo",
+    )
+
+    config = Config(raw=Document([]))
+    config.defined_projects["demo"] = project
+    config.plugins["acyclic-gradle"] = KotlinPluginDefinition(name="one.wabbit.acyclic", version="0.0.1")
+    config.repositories["repo:company"] = MavenRepositoryDefinition(
+        name="repo:company",
+        url="https://repo.example.com/releases",
+    )
+    config.plugins["company-plugin"] = KotlinPluginDefinition(
+        name="com.example.company",
+        version="1.2.3",
+        repo="repo:company",
+    )
+    project.resolved_features["gradle-plugin"] = GradlePlugins(
+        entries=[
+            GradlePluginApplication(name="acyclic-gradle"),
+            GradlePluginApplication(name="company-plugin"),
+        ]
+    )
+
+    ctx = _make_setup_context("")
+    ctx.config = config
+    ctx.build_template = jinja2.Template("")
+    ctx.settings_template = jinja2.Template(
+        "{% for plugin in extra_gradle_plugins %}[{{ plugin.plugin_id }}={{ plugin.version }}]{% endfor %}"
+        "{% for repo in extra_gradle_plugin_repositories %}[repo={{ repo.url }}]{% endfor %}"
+    )
+    ctx.repo_template = tmp_path
+    ctx.gradle_properties_template = jinja2.Template("")
+
+    workspace_root = tmp_path / "workspace"
+    setup_module._write_gradle_root_files(
+        ctx,
+        root_path=workspace_root,
+        root_project_name="workspace",
+        seed_projects=[project],
+        write_wrapper=False,
+        write_build=True,
+        include_external_dependencies=False,
+        write_dependency_substitutions=False,
+    )
+
+    settings_text = (workspace_root / "settings.gradle.kts").read_text(encoding="utf-8")
+    assert "[one.wabbit.acyclic=0.0.1][com.example.company=1.2.3]" in settings_text
+    assert "[repo=https://repo.example.com/releases]" in settings_text
+
+
 def test_setup_wires_repo_root_gradle_workflow_generation_to_repo_docs_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

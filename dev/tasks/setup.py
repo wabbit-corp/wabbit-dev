@@ -540,21 +540,21 @@ def _write_gradle_root_files(
         seed_projects,
         include_external_dependencies=include_external_dependencies,
     )
-    plugin_versions = setup_kotlin.settings_plugin_versions(ctx)
+    plugin_context = setup_kotlin.settings_plugin_context(ctx, included_projects)
     if write_build:
         dependency_substitutions = (
             _workspace_dependency_substitutions(ctx.config, included_projects) if write_dependency_substitutions else []
         )
         build_text = render_template(
             ctx.build_template,
-            **plugin_versions,
+            **plugin_context,
             dependency_substitutions=dependency_substitutions,
         )
         dev.io.write_text_file(root_path / "build.gradle.kts", setup_kotlin.clean_gradle_build_text(build_text))
 
     settings_text = render_template(
         ctx.settings_template,
-        **plugin_versions,
+        **plugin_context,
         root_project_name=root_project_name,
         included_projects=[
             {

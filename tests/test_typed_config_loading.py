@@ -250,6 +250,29 @@ def test_gradle_kmp_allows_default_hierarchy_without_explicit_source_sets(tmp_pa
     assert project.source_set_dependencies == {}
 
 
+def test_gradle_kmp_supports_desktop_native_targets(tmp_path: Path) -> None:
+    from dev.config import GradleProject
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'gradle "demo-kmp" '
+                ':version "0.1.0" '
+                ':targets [{"kind": "jvm"} {"kind": "linuxX64"} {"kind": "mingwX64"} {"kind": "macosX64"}])',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo-kmp"]
+    assert isinstance(project, GradleProject)
+    assert project.platforms == ["jvm", "linuxX64", "mingwX64", "macosX64"]
+    assert [target.kind for target in project.targets] == ["jvm", "linuxX64", "mingwX64", "macosX64"]
+
+
 def test_gradle_kmp_legacy_android_feature_still_backfills_targets(tmp_path: Path) -> None:
     from dev.config import GradleProject
 
@@ -273,6 +296,47 @@ def test_gradle_kmp_legacy_android_feature_still_backfills_targets(tmp_path: Pat
     project = config.defined_projects["demo-kmp"]
     assert isinstance(project, GradleProject)
     assert [target.kind for target in project.targets] == ["jvm", "android-kmp-library"]
+
+
+def test_gradle_project_loads_extra_gradle_plugin_feature(tmp_path: Path) -> None:
+    from dev.config import GradleProject, get_gradle_plugin_applications
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(define-kotlin-plugin "acyclic-gradle" "one.wabbit.acyclic:0.0.1")',
+                "("
+                'gradle "demo" '
+                ':version "0.1.0" '
+                ':features [(jvm-kotlin-library) (gradle-plugin "acyclic-gradle")])',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo"]
+    assert isinstance(project, GradleProject)
+    assert [entry.name for entry in get_gradle_plugin_applications(project)] == ["acyclic-gradle"]
+
+
+def test_gradle_plugin_feature_rejects_non_plugin_id_definition(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="plugin-id:version syntax"):
+        _load_from_temp_root(
+            tmp_path,
+            "\n".join(
+                [
+                    '(default-maven-project-group "one.wabbit")',
+                    '(define-kotlin-plugin "legacy-style" "org.example:plugin-artifact:1.2.3")',
+                    "("
+                    'gradle "demo" '
+                    ':version "0.1.0" '
+                    ':features [(jvm-kotlin-library) (gradle-plugin "legacy-style")])',
+                    "",
+                ]
+            ),
+        )
 
 
 def test_gradle_kmp_rejects_legacy_dependencies_key(tmp_path: Path) -> None:

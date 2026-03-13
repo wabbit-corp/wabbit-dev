@@ -28,6 +28,7 @@ from dev.config import (
     ProjectDependencyTarget,
     PurescriptProject,
     PythonProject,
+    get_gradle_plugin_applications,
 )
 from dev.licenses import license_display_name, license_spdx_url
 from dev.messages import error, warning
@@ -54,6 +55,15 @@ COMPOSE_ACCESSOR_PREFIXES: tuple[tuple[str, str], ...] = (
     ("org.jetbrains.compose.components:components-ui-tooling-preview:", "compose.components.uiToolingPreview"),
     ("org.jetbrains.compose.desktop:desktop-jvm:", "compose.desktop.currentOs"),
 )
+
+BUILTIN_GRADLE_PLUGIN_IDS_BY_FEATURE: dict[str, tuple[str, ...]] = {
+    "kotlin": ("org.jetbrains.kotlin.jvm",),
+    "kotlin-serialization": ("org.jetbrains.kotlin.plugin.serialization",),
+    "kmp-compose": ("org.jetbrains.compose", "org.jetbrains.kotlin.plugin.compose"),
+    "shadow-jar": ("com.gradleup.shadow",),
+    "intellij-plugin": ("org.jetbrains.intellij",),
+    "paper-plugin": ("io.papermc.paperweight.userdev", "net.minecrell.plugin-yml.bukkit"),
+}
 
 
 class GradleSetupContext(Protocol):
@@ -205,6 +215,49 @@ def _compose_plugin_version(ctx: GradleSetupContext) -> str:
     return DEFAULT_COMPOSE_PLUGIN_VERSION
 
 
+def _builtin_gradle_plugin_ids(project: GradleProject) -> set[str]:
+    builtins: set[str] = {"org.jetbrains.kotlin.multiplatform" if project.is_kmp else "org.jetbrains.kotlin.jvm"}
+    for feature_name, plugin_ids in BUILTIN_GRADLE_PLUGIN_IDS_BY_FEATURE.items():
+        if feature_name in project.resolved_features:
+            builtins.update(plugin_ids)
+    return builtins
+
+
+def _extra_gradle_plugins_for_projects(
+    ctx: GradleSetupContext,
+    projects: Sequence[GradleProject],
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    plugin_specs: list[dict[str, str]] = []
+    repositories: list[dict[str, str]] = []
+    seen_plugin_ids: set[str] = set()
+    seen_repositories: set[str] = set()
+
+    for project in projects:
+        builtin_plugin_ids = _builtin_gradle_plugin_ids(project)
+        for application in get_gradle_plugin_applications(project):
+            definition = ctx.config.plugins[application.name]
+            plugin_id = definition.name
+            if plugin_id in builtin_plugin_ids or plugin_id in seen_plugin_ids:
+                continue
+            seen_plugin_ids.add(plugin_id)
+            plugin_specs.append(
+                {
+                    "alias": application.name,
+                    "plugin_id": plugin_id,
+                    "version": definition.version,
+                }
+            )
+            if definition.repo is None:
+                continue
+            repository = ctx.config.repositories[definition.repo]
+            if repository.url in seen_repositories:
+                continue
+            seen_repositories.add(repository.url)
+            repositories.append({"name": repository.name, "url": repository.url})
+
+    return plugin_specs, repositories
+
+
 def settings_plugin_versions(ctx: GradleSetupContext) -> dict[str, str]:
     def plugin_version(name: str, fallback: str) -> str:
         plugin = ctx.config.plugins.get(name)
@@ -230,6 +283,17 @@ def settings_plugin_versions(ctx: GradleSetupContext) -> dict[str, str]:
     }
 
 
+def settings_plugin_context(
+    ctx: GradleSetupContext,
+    projects: Sequence[GradleProject],
+) -> dict[str, object]:
+    extra_gradle_plugins, extra_gradle_plugin_repositories = _extra_gradle_plugins_for_projects(ctx, projects)
+    context: dict[str, object] = dict(settings_plugin_versions(ctx))
+    context["extra_gradle_plugins"] = extra_gradle_plugins
+    context["extra_gradle_plugin_repositories"] = extra_gradle_plugin_repositories
+    return context
+
+
 def _effective_targets(project: GradleProject) -> list[GradleTargetSpec]:
     if project.targets:
         return project.targets
@@ -252,6 +316,8 @@ def _effective_targets(project: GradleProject) -> list[GradleTargetSpec]:
                 targets.append(GradleTargetSpec(kind="android-application"))
         elif platform == "macosArm64":
             targets.append(GradleTargetSpec(kind="macosArm64", name="clientNative"))
+        elif platform == "macosX64":
+            targets.append(GradleTargetSpec(kind="macosX64"))
         else:
             targets.append(GradleTargetSpec(kind=platform))
     return targets
@@ -266,7 +332,24 @@ def _needs_google_repository(project: GradleProject) -> bool:
 
 
 def _has_apple_targets(project: GradleProject) -> bool:
-    return any(target.kind in ("iosArm64", "iosSimulatorArm64", "macosArm64") for target in _effective_targets(project))
+    return any(
+        target.kind in ("iosArm64", "iosSimulatorArm64", "macosX64", "macosArm64")
+        for target in _effective_targets(project)
+    )
+
+
+def _apple_framework_target_names(project: GradleProject) -> list[str]:
+    names: list[str] = []
+    for target in _effective_targets(project):
+        if target.kind == "iosArm64":
+            names.append("iosArm64")
+        elif target.kind == "iosSimulatorArm64":
+            names.append("iosSimulatorArm64")
+        elif target.kind == "macosArm64":
+            names.append(target.name or "macosArm64")
+        elif target.kind == "macosX64":
+            names.append(target.name or "macosX64")
+    return names
 
 
 def _dokka_source_link_remote_url(project: GradleProject, source_root: str) -> str | None:
@@ -331,6 +414,15 @@ def _default_source_set_names(project: GradleProject) -> set[str]:
             has_apple_targets = True
             target_name = target.name or "macosArm64"
             result.update({f"{target_name}Main", f"{target_name}Test"})
+        elif target.kind == "macosX64":
+            has_native_targets = True
+            has_apple_targets = True
+            target_name = target.name or "macosX64"
+            result.update({f"{target_name}Main", f"{target_name}Test"})
+        elif target.kind in ("linuxX64", "mingwX64"):
+            has_native_targets = True
+            target_name = target.name or target.kind
+            result.update({f"{target_name}Main", f"{target_name}Test"})
     if has_native_targets:
         result.update({"nativeMain", "nativeTest"})
     if has_apple_targets:
@@ -359,10 +451,18 @@ def _source_set_entries(
         return entries
 
     declared_source_sets = set(project.source_sets)
-    macos_source_set_names = {
-        f"{(target.name or 'macosArm64')}{suffix}"
+    native_source_set_parents = {
+        f"{(target.name or ('macosArm64' if target.kind == 'macosArm64' else 'macosX64' if target.kind == 'macosX64' else target.kind))}{suffix}": (
+            "appleMain"
+            if suffix == "Main" and target.kind in ("macosArm64", "macosX64")
+            else "appleTest"
+            if suffix == "Test" and target.kind in ("macosArm64", "macosX64")
+            else "nativeMain"
+            if suffix == "Main"
+            else "nativeTest"
+        )
         for target in _effective_targets(project)
-        if target.kind == "macosArm64"
+        if target.kind in ("macosArm64", "macosX64", "linuxX64", "mingwX64")
         for suffix in ("Main", "Test")
     }
 
@@ -407,15 +507,24 @@ def _source_set_entries(
             if "nativeTest" in declared_source_sets:
                 return "nativeTest"
             return "commonTest"
-        if source_set_name in macos_source_set_names:
-            if source_set_name.endswith("Main"):
+        if source_set_name in native_source_set_parents:
+            parent_name = native_source_set_parents[source_set_name]
+            if parent_name == "appleMain":
                 if "appleMain" in declared_source_sets:
                     return "appleMain"
                 if "nativeMain" in declared_source_sets:
                     return "nativeMain"
                 return "commonMain"
-            if "appleTest" in declared_source_sets:
-                return "appleTest"
+            if parent_name == "appleTest":
+                if "appleTest" in declared_source_sets:
+                    return "appleTest"
+                if "nativeTest" in declared_source_sets:
+                    return "nativeTest"
+                return "commonTest"
+            if parent_name == "nativeMain":
+                if "nativeMain" in declared_source_sets:
+                    return "nativeMain"
+                return "commonMain"
             if "nativeTest" in declared_source_sets:
                 return "nativeTest"
             return "commonTest"
@@ -981,6 +1090,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
     compose_plugin_version = _compose_plugin_version(ctx)
     nested_gradle_project = _is_nested_gradle_project(project)
     kotlin_free_compiler_args = [CONTEXT_PARAMETERS_COMPILER_FLAG]
+    extra_gradle_plugins, _extra_gradle_plugin_repositories = _extra_gradle_plugins_for_projects(ctx, [project])
     publish_to_maven_central = _supports_gradle_maven_central(project)
     maven_central_context = _maven_central_context(ctx, project) if publish_to_maven_central else {}
 
@@ -1017,6 +1127,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             platforms=project.platforms,
             targets=targets,
             has_apple_targets=_has_apple_targets(project),
+            apple_framework_target_names=_apple_framework_target_names(project),
             needs_google_repository=_needs_google_repository(project),
             android_application_target=android_application_target,
             android_kmp_library_target=android_kmp_library_target,
@@ -1026,6 +1137,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             kmp_jvm_runs=kmp_jvm_runs,
             native_framework_base_name=_native_framework_base_name(project),
             kotlin_free_compiler_args=kotlin_free_compiler_args,
+            extra_gradle_plugins=extra_gradle_plugins,
             dokka_source_link_remote_url=dokka_source_link_remote_url or "",
             has_dokka_source_link=dokka_source_link_remote_url is not None,
             company_legal_name=company_legal_name,
@@ -1055,6 +1167,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             mode=mode_value,
             serialization_library=ctx.config.libraries["kotlinx-serialization-core"].maven_urn.__str__(),
             kotlin_free_compiler_args=kotlin_free_compiler_args,
+            extra_gradle_plugins=extra_gradle_plugins,
             dokka_source_link_remote_url=dokka_source_link_remote_url or "",
             has_dokka_source_link=dokka_source_link_remote_url is not None,
             company_legal_name=company_legal_name,
@@ -1072,7 +1185,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             clean_gradle_build_text(
                 render_template(
                     ctx.subproject_settings_template,
-                    **settings_plugin_versions(ctx),
+                    **settings_plugin_context(ctx, [project]),
                     project_name=project.effective_gradle_project_name,
                     features=project.resolved_features,
                 )

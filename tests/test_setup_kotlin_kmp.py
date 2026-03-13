@@ -11,14 +11,19 @@ from dev.config import (
     Config,
     Dependency,
     DependencyTarget,
+    GradlePluginApplication,
+    GradlePlugins,
     GradleProject,
     GradleSourceSet,
     GradleTargetSpec,
+    JvmKotlinLibrary,
     KmpCompose,
     KmpJvmRunEntry,
     KmpJvmRuns,
+    Kotlin,
     KotlinPluginDefinition,
     MavenLibraryDefinition,
+    MavenRepositoryDefinition,
     OwnershipType,
     ProjectDependencyTarget,
     Version,
@@ -341,6 +346,105 @@ def test_setup_gradle_project_always_renders_context_parameters_flag(
     setup_gradle_project(ctx, kmp_project, interactive=False)
     kmp_text = (kmp_project.path / "build.gradle.kts").read_text(encoding="utf-8").strip()
     assert kmp_text == "KMP=-Xcontext-parameters"
+
+
+def test_setup_gradle_project_renders_extra_gradle_plugin_in_jvm_build_and_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "jvm-proj", platforms=["jvm"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.resolved_features = {
+        "kotlin": Kotlin(),
+        "jvm-kotlin-library": JvmKotlinLibrary(),
+        "gradle-plugin": GradlePlugins(entries=[GradlePluginApplication(name="acyclic-gradle")]),
+    }
+    ctx = _make_context(
+        tmp_path,
+        jvm_template='{% for plugin in extra_gradle_plugins %}[{{ plugin.plugin_id }}]{% endfor %}',
+        kmp_template="KMP_TEMPLATE",
+    )
+    ctx.config.plugins["acyclic-gradle"] = KotlinPluginDefinition(name="one.wabbit.acyclic", version="0.0.1")
+    ctx.config.repositories["repo:company"] = MavenRepositoryDefinition(
+        name="repo:company",
+        url="https://repo.example.com/releases",
+    )
+    ctx.config.plugins["company-plugin"] = KotlinPluginDefinition(
+        name="com.example.company",
+        version="1.2.3",
+        repo="repo:company",
+    )
+    project.resolved_features["gradle-plugin"] = GradlePlugins(
+        entries=[
+            GradlePluginApplication(name="acyclic-gradle"),
+            GradlePluginApplication(name="company-plugin"),
+        ]
+    )
+    ctx.subproject_settings_template = jinja2.Template(
+        "{% for plugin in extra_gradle_plugins %}[{{ plugin.plugin_id }}={{ plugin.version }}]{% endfor %}"
+        "{% for repo in extra_gradle_plugin_repositories %}[repo={{ repo.url }}]{% endfor %}"
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
+    settings_text = (project.path / "settings.gradle.kts").read_text(encoding="utf-8")
+    assert "[one.wabbit.acyclic][com.example.company]" in build_text
+    assert "[one.wabbit.acyclic=0.0.1][com.example.company=1.2.3]" in settings_text
+    assert "[repo=https://repo.example.com/releases]" in settings_text
+
+
+def test_setup_gradle_project_renders_extra_gradle_plugin_in_kmp_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "kmp-proj", platforms=["jvm", "iosArm64"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.resolved_features = {
+        "gradle-plugin": GradlePlugins(entries=[GradlePluginApplication(name="acyclic-gradle")]),
+    }
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template='{% for plugin in extra_gradle_plugins %}[{{ plugin.plugin_id }}]{% endfor %}',
+    )
+    ctx.config.plugins["acyclic-gradle"] = KotlinPluginDefinition(name="one.wabbit.acyclic", version="0.0.1")
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
+    assert "[one.wabbit.acyclic]" in build_text
+
+
+def test_setup_gradle_project_renders_desktop_native_targets_and_apple_framework_names(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(
+        tmp_path / "kmp-native-proj",
+        platforms=["jvm", "iosArm64", "linuxX64", "mingwX64", "macosX64", "macosArm64"],
+    )
+    project.path.mkdir(parents=True, exist_ok=True)
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template=(
+            "{% for target in targets %}[{{ target.kind }}:{{ target.name or '' }}]{% endfor %}"
+            "|frameworks={% for target_name in apple_framework_target_names %}[{{ target_name }}]{% endfor %}"
+        ),
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
+    assert "[linuxX64:]" in build_text
+    assert "[mingwX64:]" in build_text
+    assert "[macosX64:]" in build_text
+    assert "[macosArm64:clientNative]" in build_text
+    assert "frameworks=[iosArm64][macosX64][clientNative]" in build_text
 
 
 def test_render_dependency_keeps_same_repo_project_dependency_in_prod_mode(tmp_path: Path) -> None:
