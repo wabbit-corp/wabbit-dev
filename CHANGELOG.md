@@ -147,6 +147,7 @@
 - Add typed loader regression tests for Maven var resolution, forward/undefined reference failures, strict kebab-case enforcement, module command application, and nested `dep` handling.
 - Simplify `PythonProject` internals by removing redundant `python_` field prefixes.
 - Preserve scoped `(dep ... "api")` entries inside Gradle KMP `:sourceSetDependencies` by decoding them explicitly instead of flattening them to unscoped dependencies during setup generation.
+- Include Gradle project dependencies declared only inside KMP `:sourceSetDependencies` when generating local `settings.local.gradle.kts` overlays, so `setup --local` keeps cross-repo KMP builds wired correctly.
 
 - Ensure project directories are created/validated before per-project setup writes files.
 - Fix Python target-version derivation to use the minimum supported version from `requires-python` specifiers.

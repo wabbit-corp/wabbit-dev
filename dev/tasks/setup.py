@@ -14,6 +14,7 @@ from dev.build_order import toposort_projects
 from dev.config import (
     Config,
     DataProject,
+    Dependency,
     GradleProject,
     OwnershipType,
     PremakeProject,
@@ -376,13 +377,26 @@ def _gradle_project_key(project: GradleProject) -> str:
 
 def _gradle_project_dependencies(config: Config, project: GradleProject) -> list[GradleProject]:
     result: list[GradleProject] = []
-    for dependency in project.resolved_dependencies:
+    seen: set[str] = set()
+
+    def add_dependency_project(dependency: Dependency) -> None:
         target = dependency.target
         if not isinstance(target, ProjectDependencyTarget):
-            continue
+            return
         dependency_project = config.defined_projects[target.project]
-        if isinstance(dependency_project, GradleProject):
-            result.append(dependency_project)
+        if not isinstance(dependency_project, GradleProject):
+            return
+        dependency_key = _gradle_project_key(dependency_project)
+        if dependency_key in seen:
+            return
+        seen.add(dependency_key)
+        result.append(dependency_project)
+
+    for dependency in project.resolved_dependencies:
+        add_dependency_project(dependency)
+    for source_set_dependencies in project.source_set_dependencies.values():
+        for dependency in source_set_dependencies:
+            add_dependency_project(dependency)
     return result
 
 

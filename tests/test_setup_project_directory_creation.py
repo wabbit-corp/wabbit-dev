@@ -994,6 +994,116 @@ def test_write_gradle_local_overlay_groups_external_builds_and_uses_correct_proj
     assert "../shared:[one.wabbit:shared-api=>:shared-api][one.wabbit:shared-cli=>:shared-cli]" in overlay_text
 
 
+def test_write_gradle_local_overlay_includes_kmp_source_set_project_dependencies(tmp_path: Path) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    from dev.config import Config, Dependency, GradleProject, OwnershipType, ProjectDependencyTarget, Version
+
+    def make_gradle_project(
+        path: Path,
+        *,
+        project_id: str,
+        repo_root_path: Path,
+        gradle_root_path: Path,
+        gradle_project_name: str,
+        platforms: list[str] | None = None,
+    ) -> GradleProject:
+        return GradleProject(
+            path=path,
+            group_name="one.wabbit",
+            name=gradle_project_name,
+            version=Version.parse("0.0.1"),
+            description=None,
+            authors=[],
+            license="AGPL",
+            quarantine=False,
+            publish=False,
+            github_repo="org/repo",
+            ownership=OwnershipType.IMPORTED,
+            raw_dependencies=[],
+            raw_features=[],
+            resolved_dependencies=[],
+            resolved_maven_repositories=[],
+            resolved_features={},
+            platforms=platforms or ["jvm"],
+            source_set_dependencies={},
+            project_id=project_id,
+            repo_id=project_id.split("/", 1)[0] if "/" in project_id else None,
+            repo_root=repo_root_path,
+            gradle_root=gradle_root_path,
+            module_dir=Path(path.name),
+            gradle_project_name=gradle_project_name,
+        )
+
+    consumer_root = tmp_path / "kotlin-web-crossref"
+    consumer_root.mkdir(parents=True, exist_ok=True)
+    consumer_project = make_gradle_project(
+        consumer_root,
+        project_id="kotlin-web-crossref",
+        repo_root_path=consumer_root,
+        gradle_root_path=consumer_root,
+        gradle_project_name="kotlin-web-crossref",
+        platforms=["jvm", "iosArm64"],
+    )
+    data_root = tmp_path / "kotlin-data"
+    data_project = make_gradle_project(
+        data_root,
+        project_id="kotlin-data",
+        repo_root_path=data_root,
+        gradle_root_path=data_root,
+        gradle_project_name="kotlin-data",
+    )
+    common_root = tmp_path / "kotlin-web-common"
+    common_project = make_gradle_project(
+        common_root,
+        project_id="kotlin-web-common",
+        repo_root_path=common_root,
+        gradle_root_path=common_root,
+        gradle_project_name="kotlin-web-common",
+        platforms=["jvm", "iosArm64"],
+    )
+    consumer_project.source_set_dependencies = {
+        "commonMain": [
+            Dependency(scope=None, target=ProjectDependencyTarget(project="kotlin-data")),
+            Dependency(scope=None, target=ProjectDependencyTarget(project="kotlin-web-common")),
+        ]
+    }
+
+    config = Config(raw=Document([]))
+    config.defined_projects.update(
+        {
+            "kotlin-web-crossref": consumer_project,
+            "kotlin-data": data_project,
+            "kotlin-web-common": common_project,
+        }
+    )
+
+    ctx = _make_setup_context('[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n')
+    ctx.config = config
+    ctx.settings_local_template = jinja2.Template(
+        "{% for plugin_build_path in plugin_included_builds %}"
+        "{{ plugin_build_path }}:[plugin]\n"
+        "{% endfor %}"
+        "{% for included_build in included_builds %}"
+        "{{ included_build.build_path }}:"
+        "{% for substitution in included_build.substitutions %}"
+        "[{{ substitution.module_coordinate }}=>{{ substitution.project_path }}]"
+        "{% endfor %}\n"
+        "{% endfor %}"
+    )
+
+    setup_module._write_gradle_local_overlay(
+        ctx,
+        root_path=consumer_root,
+        seed_projects=[consumer_project],
+    )
+
+    overlay_text = (consumer_root / "settings.local.gradle.kts").read_text(encoding="utf-8")
+    assert "../kotlin-data:[one.wabbit:kotlin-data=>:]" in overlay_text
+    assert "../kotlin-web-common:[one.wabbit:kotlin-web-common=>:]" in overlay_text
+
+
 def test_write_gradle_local_overlay_includes_local_plugin_projects_for_reachable_projects(tmp_path: Path) -> None:
     from mu.types import Document
 
@@ -1001,6 +1111,7 @@ def test_write_gradle_local_overlay_includes_local_plugin_projects_for_reachable
     from dev.config import (
         Config,
         Dependency,
+        Feature,
         GradlePluginApplication,
         GradlePlugins,
         GradleProject,
@@ -1017,7 +1128,7 @@ def test_write_gradle_local_overlay_includes_local_plugin_projects_for_reachable
         repo_root_path: Path,
         gradle_root_path: Path,
         gradle_project_name: str,
-        resolved_features: dict[str, object] | None = None,
+        resolved_features: dict[str, Feature] | None = None,
     ) -> GradleProject:
         return GradleProject(
             path=path,
@@ -1100,22 +1211,20 @@ def test_write_gradle_local_overlay_includes_local_plugin_projects_for_reachable
         compiler_plugin="kotlin-acyclic-plugin",
     )
 
-    ctx = SimpleNamespace(
-        config=config,
-        settings_local_template=jinja2.Template(
-            "{% for plugin_build_path in plugin_included_builds %}"
-            "{{ plugin_build_path }}:[plugin]\n"
-            "{% endfor %}"
-            "{% for included_build in included_builds %}"
-            "{{ included_build.build_path }}:"
-            "{% for substitution in included_build.substitutions %}"
-            "[{{ substitution.module_coordinate }}=>{{ substitution.project_path }}]"
-            "{% endfor %}"
-            "\n"
-            "{% endfor %}"
-        ),
+    ctx = _make_setup_context('[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n')
+    ctx.config = config
+    ctx.settings_local_template = jinja2.Template(
+        "{% for plugin_build_path in plugin_included_builds %}"
+        "{{ plugin_build_path }}:[plugin]\n"
+        "{% endfor %}"
+        "{% for included_build in included_builds %}"
+        "{{ included_build.build_path }}:"
+        "{% for substitution in included_build.substitutions %}"
+        "[{{ substitution.module_coordinate }}=>{{ substitution.project_path }}]"
+        "{% endfor %}"
+        "\n"
+        "{% endfor %}"
     )
-
     setup_module._write_gradle_local_overlay(
         ctx,
         root_path=consumer_root,
@@ -1303,15 +1412,14 @@ def test_write_gradle_root_files_resolves_local_gradle_plugin_projects_in_settin
     config.defined_projects["kotlin-acyclic-gradle-plugin"] = plugin_project
     config.plugins["acyclic-gradle"] = KotlinPluginDefinition(project="kotlin-acyclic-gradle-plugin")
 
-    ctx = SimpleNamespace(
-        config=config,
-        build_template=jinja2.Template(""),
-        settings_template=jinja2.Template(
-            "{% for plugin in extra_gradle_plugins %}[{{ plugin.plugin_id }}={{ plugin.version }}]{% endfor %}"
-        ),
-        repo_template=tmp_path,
-        gradle_properties_template=jinja2.Template(""),
+    ctx = _make_setup_context('[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n')
+    ctx.config = config
+    ctx.build_template = jinja2.Template("")
+    ctx.settings_template = jinja2.Template(
+        "{% for plugin in extra_gradle_plugins %}[{{ plugin.plugin_id }}={{ plugin.version }}]{% endfor %}"
     )
+    ctx.repo_template = tmp_path
+    ctx.gradle_properties_template = jinja2.Template("")
 
     workspace_root = tmp_path / "workspace"
     setup_module._write_gradle_root_files(
