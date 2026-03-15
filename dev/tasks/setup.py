@@ -21,8 +21,11 @@ from dev.config import (
     ProjectDependencyTarget,
     PurescriptProject,
     PythonProject,
+    get_gradle_plugin_applications,
     load_config,
     project_repo_root,
+    resolve_kotlin_plugin_compiler_plugin_project,
+    resolve_kotlin_plugin_project,
 )
 from dev.git_changes import ChangeType, FileDiff, FileType, compute_repo_diffs
 from dev.licenses import load_license_texts
@@ -426,6 +429,67 @@ def _collect_reachable_gradle_projects(config: Config, seed_projects: list[Gradl
     return reachable
 
 
+def _local_plugin_projects(config: Config, project: GradleProject) -> list[GradleProject]:
+    plugin_projects: list[GradleProject] = []
+    seen: set[str] = set()
+    for application in get_gradle_plugin_applications(project):
+        definition = config.plugins[application.name]
+        candidate = resolve_kotlin_plugin_project(config, definition)
+        if candidate is None:
+            continue
+        candidate_key = _gradle_project_key(candidate)
+        if candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        plugin_projects.append(candidate)
+    return plugin_projects
+
+
+def _local_compiler_plugin_projects(config: Config, project: GradleProject) -> list[GradleProject]:
+    compiler_projects: list[GradleProject] = []
+    seen: set[str] = set()
+    for application in get_gradle_plugin_applications(project):
+        definition = config.plugins[application.name]
+        candidate = resolve_kotlin_plugin_compiler_plugin_project(config, definition)
+        if candidate is None:
+            continue
+        candidate_key = _gradle_project_key(candidate)
+        if candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        compiler_projects.append(candidate)
+    return compiler_projects
+
+
+def _collect_reachable_gradle_projects_for_local_mode(
+    config: Config,
+    seed_projects: list[GradleProject],
+) -> tuple[list[GradleProject], list[GradleProject]]:
+    reachable: list[GradleProject] = []
+    plugin_builds: list[GradleProject] = []
+    seen: set[str] = set()
+    plugin_seen: set[str] = set()
+    queue = list(seed_projects)
+
+    while queue:
+        project = queue.pop(0)
+        project_key = _gradle_project_key(project)
+        if project_key in seen:
+            continue
+        seen.add(project_key)
+        reachable.append(project)
+        queue.extend(_gradle_project_dependencies(config, project))
+        for plugin_project in _local_plugin_projects(config, project):
+            plugin_key = _gradle_project_key(plugin_project)
+            if plugin_key not in plugin_seen:
+                plugin_seen.add(plugin_key)
+                plugin_builds.append(plugin_project)
+            queue.append(plugin_project)
+        queue.extend(_local_compiler_plugin_projects(config, project))
+
+    return reachable, plugin_builds
+
+
 def _workspace_dependency_substitutions(
     config: Config,
     included_projects: list[GradleProject],
@@ -463,12 +527,15 @@ def _local_included_builds(
     *,
     root_path: Path,
     seed_projects: list[GradleProject],
-) -> list[LocalIncludedBuild]:
-    reachable_projects = _collect_reachable_gradle_projects(config, seed_projects)
+) -> tuple[list[str], list[LocalIncludedBuild]]:
+    reachable_projects, plugin_build_projects = _collect_reachable_gradle_projects_for_local_mode(config, seed_projects)
     local_repo_roots = {project.effective_repo_root.resolve() for project in seed_projects}
+    plugin_build_keys = {_gradle_project_key(project) for project in plugin_build_projects}
 
     grouped_projects: dict[Path, list[GradleProject]] = {}
     for project in reachable_projects:
+        if _gradle_project_key(project) in plugin_build_keys:
+            continue
         project_repo_root = project.effective_repo_root.resolve()
         if project_repo_root in local_repo_roots:
             continue
@@ -501,7 +568,13 @@ def _local_included_builds(
             )
         )
 
-    return included_builds
+    plugin_included_builds = [
+        _relative_project_dir(root_path, project.effective_gradle_root)
+        for project in plugin_build_projects
+        if project.effective_repo_root.resolve() not in local_repo_roots
+    ]
+
+    return plugin_included_builds, included_builds
 
 
 def _write_gradle_local_overlay(
@@ -511,13 +584,18 @@ def _write_gradle_local_overlay(
     seed_projects: list[GradleProject],
 ) -> None:
     overlay_path = root_path / "settings.local.gradle.kts"
-    included_builds = _local_included_builds(ctx.config, root_path=root_path, seed_projects=seed_projects)
-    if not included_builds:
+    plugin_included_builds, included_builds = _local_included_builds(
+        ctx.config,
+        root_path=root_path,
+        seed_projects=seed_projects,
+    )
+    if not plugin_included_builds and not included_builds:
         dev.io.delete_if_exists(overlay_path)
         return
 
     overlay_text = render_template(
         ctx.settings_local_template,
+        plugin_included_builds=plugin_included_builds,
         included_builds=included_builds,
     )
     dev.io.write_text_file(overlay_path, setup_kotlin.clean_gradle_build_text(overlay_text))

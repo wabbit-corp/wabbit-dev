@@ -29,6 +29,8 @@ from dev.config import (
     PurescriptProject,
     PythonProject,
     get_gradle_plugin_applications,
+    resolve_kotlin_plugin_id,
+    resolve_kotlin_plugin_version,
 )
 from dev.licenses import license_display_name, license_spdx_url
 from dev.messages import error, warning
@@ -236,7 +238,7 @@ def _extra_gradle_plugins_for_projects(
         builtin_plugin_ids = _builtin_gradle_plugin_ids(project)
         for application in get_gradle_plugin_applications(project):
             definition = ctx.config.plugins[application.name]
-            plugin_id = definition.name
+            plugin_id = resolve_kotlin_plugin_id(ctx.config, definition)
             if plugin_id in builtin_plugin_ids or plugin_id in seen_plugin_ids:
                 continue
             seen_plugin_ids.add(plugin_id)
@@ -244,7 +246,7 @@ def _extra_gradle_plugins_for_projects(
                 {
                     "alias": application.name,
                     "plugin_id": plugin_id,
-                    "version": definition.version,
+                    "version": resolve_kotlin_plugin_version(ctx.config, definition),
                 }
             )
             if definition.repo is None:
@@ -263,7 +265,7 @@ def settings_plugin_versions(ctx: GradleSetupContext) -> dict[str, str]:
         plugin = ctx.config.plugins.get(name)
         if plugin is None:
             return fallback
-        return plugin.version
+        return resolve_kotlin_plugin_version(ctx.config, plugin)
 
     kotlin_jvm_version = plugin_version("kotlin-jvm", "2.3.10")
     return {

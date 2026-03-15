@@ -331,6 +331,23 @@ def _decode_gradle_source_sets(expr: Expr, ctx: DecodeContext) -> dict[str, Grad
     return result
 
 
+def _decode_gradle_source_set_dependencies(expr: Expr, ctx: DecodeContext) -> dict[str, list[DependencyInput]]:
+    if not isinstance(expr, MappingExpr):
+        raise DecodeError(
+            path=ctx.path,
+            expected="map {} of Gradle source-set dependency lists",
+            got=type(expr).__name__,
+            span=getattr(expr, "span", None),
+        )
+
+    result: dict[str, list[DependencyInput]] = {}
+    for index, field in enumerate(expr.values):
+        source_set_name = ctx.decode(field.key, str, path=f"{ctx.path}.keys[{index}]")
+        dependencies = ctx.decode(field.value, list[DependencyInput], path=f"{ctx.path}.values[{index}]")
+        result[source_set_name] = dependencies
+    return result
+
+
 @tag("checks/disable")
 @dataclass(frozen=True)
 class ChecksDisableCommand:
@@ -657,6 +674,13 @@ class DefineKotlinPluginCommand:
     name: str
     value: str
     repo: str | None = None
+    compilerPlugin: str | None = None
+
+
+@tag("add-default-gradle-plugin")
+@dataclass(frozen=True)
+class AddDefaultGradlePluginCommand:
+    name: str
 
 
 @tag("define-maven-library")
@@ -774,10 +798,14 @@ class GradleProjectCommand:
     buildModel: str | None = None
     gradleProjectName: str | None = None
     artifactId: str | None = None
+    gradlePluginId: str | None = None
     platforms: list[str] | None = None
     targets: typing.Annotated[list[GradleTargetCommand] | None, DecodeWith(_decode_gradle_target_commands)] = None
     dependencies: list[DependencyInput] | None = None
-    sourceSetDependencies: dict[str, list[DependencyInput]] | None = None
+    sourceSetDependencies: typing.Annotated[
+        dict[str, list[DependencyInput]] | None,
+        DecodeWith(_decode_gradle_source_set_dependencies),
+    ] = None
     sourceSets: typing.Annotated[
         dict[str, GradleSourceSetCommand] | None,
         DecodeWith(_decode_gradle_source_sets),
@@ -835,6 +863,7 @@ BuiltinTopLevelCommand = (
     | PythonDefaultsCommand
     | DefineMavenRepoCommand
     | DefineKotlinPluginCommand
+    | AddDefaultGradlePluginCommand
     | DefineMavenLibraryCommand
     | DefineMavenLibraryGroupCommand
     | PythonProjectCommand
@@ -872,6 +901,7 @@ BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[object], ...] = (
     PythonDefaultsCommand,
     DefineMavenRepoCommand,
     DefineKotlinPluginCommand,
+    AddDefaultGradlePluginCommand,
     DefineMavenLibraryCommand,
     DefineMavenLibraryGroupCommand,
     PythonProjectCommand,
@@ -907,6 +937,7 @@ __all__ = [
     "DataProjectCommand",
     "DefaultMavenProjectGroupCommand",
     "DefineCommand",
+    "AddDefaultGradlePluginCommand",
     "DefineKotlinPluginCommand",
     "DefineMavenLibraryCommand",
     "DefineMavenLibraryGroupCommand",

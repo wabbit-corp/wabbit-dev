@@ -3,7 +3,7 @@ import os
 import re
 from abc import ABC, abstractmethod
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from inspect import signature
@@ -449,9 +449,70 @@ def resolve_features(features: list[Feature]) -> dict[str, Feature]:
 
 @dataclass
 class KotlinPluginDefinition:
-    name: str
-    version: str
+    plugin_id: str | None = None
+    version: str | None = None
     repo: str | None = None
+    project: str | None = None
+    compiler_plugin: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.plugin_id is None) == (self.project is None):
+            raise ValueError("KotlinPluginDefinition must define exactly one of plugin_id or project")
+
+
+def _normalize_project_reference(reference: str, *, field_name: str) -> str:
+    if not reference.startswith(":"):
+        raise ValueError(f"{field_name} must use :project-name syntax")
+    project_name = reference[1:].strip()
+    if not project_name:
+        raise ValueError(f"{field_name} must not be empty")
+    return project_name
+
+
+def resolve_kotlin_plugin_project(config: "Config", definition: KotlinPluginDefinition) -> "GradleProject | None":
+    if definition.project is None:
+        return None
+    project = config.defined_projects.get(definition.project)
+    if project is None:
+        raise ValueError(f"Kotlin plugin references unknown local project {definition.project}")
+    if not isinstance(project, GradleProject):
+        raise ValueError(f"Kotlin plugin local project {definition.project} is not a Gradle project")
+    return project
+
+
+def resolve_kotlin_plugin_id(config: "Config", definition: KotlinPluginDefinition) -> str:
+    if definition.plugin_id is not None:
+        return definition.plugin_id
+    project = resolve_kotlin_plugin_project(config, definition)
+    assert project is not None
+    if project.gradle_plugin_id is None:
+        raise ValueError(f"Gradle project {project.name} is used as a local plugin but has no gradlePluginId")
+    return project.gradle_plugin_id
+
+
+def resolve_kotlin_plugin_version(config: "Config", definition: KotlinPluginDefinition) -> str:
+    if definition.version is not None:
+        return definition.version
+    project = resolve_kotlin_plugin_project(config, definition)
+    assert project is not None
+    if project.version is None:
+        raise ValueError(f"Gradle project {project.name} is used as a local plugin but has no version")
+    return str(project.version)
+
+
+def resolve_kotlin_plugin_compiler_plugin_project(
+    config: "Config",
+    definition: KotlinPluginDefinition,
+) -> "GradleProject | None":
+    if definition.compiler_plugin is None:
+        return None
+    project_name = definition.compiler_plugin[1:] if definition.compiler_plugin.startswith(":") else definition.compiler_plugin
+    project = config.defined_projects.get(project_name)
+    if project is None:
+        return None
+    if not isinstance(project, GradleProject):
+        raise ValueError(f"Kotlin compiler plugin reference {definition.compiler_plugin} is not a Gradle project")
+    return project
 
 
 @dataclass
@@ -864,6 +925,7 @@ class GradleProject(Project):
     module_dir: Path | None = None
     gradle_project_name: str | None = None
     artifact_id: str | None = None
+    gradle_plugin_id: str | None = None
     build_model: str | None = None
     targets: list["GradleTargetSpec"] = dataclasses.field(default_factory=list)
     source_sets: dict[str, "GradleSourceSet"] = dataclasses.field(default_factory=dict)
@@ -1355,6 +1417,7 @@ class Config:
 
     repositories: OrderedDict[str, MavenRepositoryDefinition] = dataclasses.field(default_factory=OrderedDict)
     plugins: OrderedDict[str, KotlinPluginDefinition] = dataclasses.field(default_factory=OrderedDict)
+    default_gradle_plugin_applications: list[GradlePluginApplication] = dataclasses.field(default_factory=list)
     libraries: OrderedDict[str, MavenLibraryDefinition] = dataclasses.field(default_factory=OrderedDict)
     library_groups: OrderedDict[str, list[str | Dependency | list[Dependency]]] = dataclasses.field(
         default_factory=OrderedDict
@@ -1385,6 +1448,15 @@ def get_gradle_plugin_applications(project: GradleProject) -> list[GradlePluginA
     if not isinstance(feature, GradlePlugins):
         return []
     return list(feature.entries)
+
+
+def _with_default_gradle_plugins(
+    features: list[Feature],
+    default_applications: Sequence[GradlePluginApplication],
+) -> list[Feature]:
+    if not default_applications:
+        return features
+    return [GradlePlugins(entries=list(default_applications)), *features]
 
 
 def project_repo_root(project: Project | object) -> Path:
@@ -2096,7 +2168,9 @@ def load_config() -> Config:
             path = _project_path_for(command.dir_name, repo_root_path)
             display_name = _project_name_for(command.dir_name, command.name, repo_id)
             raw_features = [_feature_from_command(item) for item in (command.features or [])]
-            resolved_features = resolve_features(raw_features)
+            resolved_features = resolve_features(
+                _with_default_gradle_plugins(raw_features, config.default_gradle_plugin_applications)
+            )
 
             build_model = _normalize_gradle_build_model(
                 display_name,
@@ -2299,6 +2373,7 @@ def load_config() -> Config:
                 module_dir=Path(command.dir_name),
                 gradle_project_name=gradle_project_name,
                 artifact_id=artifact_id,
+                gradle_plugin_id=command.gradlePluginId,
                 build_model=build_model,
                 targets=normalized_targets,
                 source_sets=source_sets,
@@ -2422,10 +2497,28 @@ def load_config() -> Config:
         if isinstance(command, config_typed.DefineKotlinPluginCommand):
             if command.name in config.plugins:
                 raise ValueError(f"Plugin {command.name} already exists")
+            if command.value.startswith(":"):
+                config.plugins[command.name] = KotlinPluginDefinition(
+                    project=_normalize_project_reference(command.value, field_name=f"plugin {command.name}"),
+                    repo=command.repo,
+                    compiler_plugin=command.compilerPlugin,
+                )
+                return
             if ":" not in command.value:
                 raise ValueError(f"Invalid plugin definition: {command.value}")
-            artifact_name, version = command.value.rsplit(":", 1)
-            config.plugins[command.name] = KotlinPluginDefinition(artifact_name, version, command.repo)
+            plugin_id, version = command.value.rsplit(":", 1)
+            config.plugins[command.name] = KotlinPluginDefinition(
+                plugin_id=plugin_id,
+                version=version,
+                repo=command.repo,
+                compiler_plugin=command.compilerPlugin,
+            )
+            return
+
+        if isinstance(command, config_typed.AddDefaultGradlePluginCommand):
+            application = GradlePluginApplication(name=command.name)
+            if application not in config.default_gradle_plugin_applications:
+                config.default_gradle_plugin_applications.append(application)
             return
 
         if isinstance(command, config_typed.DefineMavenLibraryCommand):
@@ -2559,7 +2652,8 @@ def load_config() -> Config:
             definition = config.plugins.get(application.name)
             if definition is None:
                 raise ValueError(f"Gradle project {project.name} references unknown gradle-plugin {application.name}")
-            if ":" in definition.name:
+            plugin_id = resolve_kotlin_plugin_id(config, definition)
+            if ":" in plugin_id:
                 raise ValueError(
                     f"Gradle project {project.name} uses gradle-plugin {application.name}, "
                     f"but its definition must use plugin-id:version syntax"

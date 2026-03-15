@@ -68,13 +68,13 @@ def _make_context(
     config.default_company_short_name = "Example Co"
     config.plugins.update(
         {
-            "kotlin-jvm": KotlinPluginDefinition(name="org.jetbrains.kotlin.jvm", version="2.2.20"),
-            "kotlin-mp": KotlinPluginDefinition(name="org.jetbrains.kotlin.multiplatform", version="2.2.20"),
+            "kotlin-jvm": KotlinPluginDefinition(plugin_id="org.jetbrains.kotlin.jvm", version="2.2.20"),
+            "kotlin-mp": KotlinPluginDefinition(plugin_id="org.jetbrains.kotlin.multiplatform", version="2.2.20"),
             "kotlin-serialization": KotlinPluginDefinition(
-                name="org.jetbrains.kotlin.plugin.serialization",
+                plugin_id="org.jetbrains.kotlin.plugin.serialization",
                 version="2.2.20",
             ),
-            "shadow": KotlinPluginDefinition(name="com.gradleup.shadow", version="8.3.0"),
+            "shadow": KotlinPluginDefinition(plugin_id="com.gradleup.shadow", version="8.3.0"),
         }
     )
     config.libraries.update(
@@ -365,13 +365,13 @@ def test_setup_gradle_project_renders_extra_gradle_plugin_in_jvm_build_and_setti
         jvm_template='{% for plugin in extra_gradle_plugins %}[{{ plugin.plugin_id }}]{% endfor %}',
         kmp_template="KMP_TEMPLATE",
     )
-    ctx.config.plugins["acyclic-gradle"] = KotlinPluginDefinition(name="one.wabbit.acyclic", version="0.0.1")
+    ctx.config.plugins["acyclic-gradle"] = KotlinPluginDefinition(plugin_id="one.wabbit.acyclic", version="0.0.1")
     ctx.config.repositories["repo:company"] = MavenRepositoryDefinition(
         name="repo:company",
         url="https://repo.example.com/releases",
     )
     ctx.config.plugins["company-plugin"] = KotlinPluginDefinition(
-        name="com.example.company",
+        plugin_id="com.example.company",
         version="1.2.3",
         repo="repo:company",
     )
@@ -410,7 +410,7 @@ def test_setup_gradle_project_renders_extra_gradle_plugin_in_kmp_build(
         jvm_template="JVM_TEMPLATE",
         kmp_template='{% for plugin in extra_gradle_plugins %}[{{ plugin.plugin_id }}]{% endfor %}',
     )
-    ctx.config.plugins["acyclic-gradle"] = KotlinPluginDefinition(name="one.wabbit.acyclic", version="0.0.1")
+    ctx.config.plugins["acyclic-gradle"] = KotlinPluginDefinition(plugin_id="one.wabbit.acyclic", version="0.0.1")
 
     setup_gradle_project(ctx, project, interactive=False)
 

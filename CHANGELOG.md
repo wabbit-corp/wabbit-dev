@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased (2026-02-17)
+- Hardcode `-Xcontext-parameters` into the shared JVM/KMP Gradle templates so generated Kotlin builds keep the default flag even when no extra compiler args are configured.
+- Document the setup/versioning rule in `AGENTS.md`: project versions should only be incremented when preparing a real publish/release, not during in-progress migration work.
+- Let `define-kotlin-plugin` point at a local Gradle plugin project plus an optional `compilerPlugin` name, so `--local` overlays can include companion plugin builds without hand-authored composite-build wiring.
+- Add top-level `(add-default-gradle-plugin "...")` config support so later `root.clj` Gradle projects inherit shared companion plugin application automatically without repeating `(gradle-plugin "...")` on every project.
 - Add desktop native KMP target support (`linuxX64`, `mingwX64`, `macosX64`) to the Gradle generator and switch `kotlin-throwable-policy` to a shared `nativeMain` fallback for non-JVM throwable hooks.
 - Add generic extra Gradle-plugin application support for generated JVM and KMP Kotlin projects via a new `(gradle-plugin "...")` feature backed by existing top-level plugin definitions, including generated `settings.gradle.kts` plugin-management entries and custom plugin repositories for non-portal plugins.
 - Fix KMP dependency validation so `commonMain` only requires common compatibility instead of inheriting descendant target requirements, allowing shared JVM+Android KMP libraries with real `commonMain` APIs to be consumed from other projects' `commonMain`.
@@ -142,6 +146,8 @@
 - Support Maven version references via `${var}` in `define-maven-library` using declaration-ordered `define` resolution, with fail-fast decode/validation errors and spans.
 - Add typed loader regression tests for Maven var resolution, forward/undefined reference failures, strict kebab-case enforcement, module command application, and nested `dep` handling.
 - Simplify `PythonProject` internals by removing redundant `python_` field prefixes.
+- Preserve scoped `(dep ... "api")` entries inside Gradle KMP `:sourceSetDependencies` by decoding them explicitly instead of flattening them to unscoped dependencies during setup generation.
+
 - Ensure project directories are created/validated before per-project setup writes files.
 - Fix Python target-version derivation to use the minimum supported version from `requires-python` specifiers.
 - Stop deriving import-linter root packages from layer definitions; fall back to source sets/packages only.

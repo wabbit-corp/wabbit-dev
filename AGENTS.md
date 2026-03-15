@@ -3,6 +3,7 @@
 General Guidelines:
 1. Never hardcode secrets, API keys, paths, or environment-specific values in the codebase.
 2. Follow the DRY (Don't Repeat Yourself) principle. Refactor common code into reusable functions, data types, and modules.
+3. Only increment project versions when preparing an actual publish/release. Do not bump versions for in-progress migrations, exploratory refactors, or local verification passes.
 
 ## Python Coding Guidelines
 

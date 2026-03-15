@@ -630,7 +630,7 @@ def test_targeted_prod_setup_omits_cross_repo_gradle_projects_from_root_settings
         jvm_policy=None,
         project_ids=["jeeves/api", "jeeves/server"],
     )
-    config.plugins["kotlin-jvm"] = KotlinPluginDefinition(name="org.jetbrains.kotlin.jvm", version="2.2.20")
+    config.plugins["kotlin-jvm"] = KotlinPluginDefinition(plugin_id="org.jetbrains.kotlin.jvm", version="2.2.20")
 
     root_write_calls: list[tuple[Path, list[str], bool]] = []
 
@@ -731,7 +731,7 @@ def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
             )
         }
     )
-    config.plugins["kotlin-jvm"] = KotlinPluginDefinition(name="org.jetbrains.kotlin.jvm", version="2.2.20")
+    config.plugins["kotlin-jvm"] = KotlinPluginDefinition(plugin_id="org.jetbrains.kotlin.jvm", version="2.2.20")
 
     written_paths: list[Path] = []
 
@@ -853,7 +853,7 @@ def test_targeted_local_setup_does_not_write_workspace_root_files(
 
     config = Config(raw=Document([]))
     config.defined_projects["demo"] = project
-    config.plugins["kotlin-jvm"] = KotlinPluginDefinition(name="org.jetbrains.kotlin.jvm", version="2.2.20")
+    config.plugins["kotlin-jvm"] = KotlinPluginDefinition(plugin_id="org.jetbrains.kotlin.jvm", version="2.2.20")
 
     root_writes: list[Path] = []
 
@@ -972,6 +972,9 @@ def test_write_gradle_local_overlay_groups_external_builds_and_uses_correct_proj
     ctx = _make_setup_context('[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n')
     ctx.config = config
     ctx.settings_local_template = jinja2.Template(
+        "{% for plugin_build_path in plugin_included_builds %}"
+        "{{ plugin_build_path }}:[plugin]\n"
+        "{% endfor %}"
         "{% for included_build in included_builds %}"
         "{{ included_build.build_path }}:"
         "{% for substitution in included_build.substitutions %}"
@@ -989,6 +992,140 @@ def test_write_gradle_local_overlay_groups_external_builds_and_uses_correct_proj
     overlay_text = (repo_root / "settings.local.gradle.kts").read_text(encoding="utf-8")
     assert "../kotlin-dotenv-parser:[one.wabbit:kotlin-dotenv-parser=>:]" in overlay_text
     assert "../shared:[one.wabbit:shared-api=>:shared-api][one.wabbit:shared-cli=>:shared-cli]" in overlay_text
+
+
+def test_write_gradle_local_overlay_includes_local_plugin_projects_for_reachable_projects(tmp_path: Path) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    from dev.config import (
+        Config,
+        Dependency,
+        GradlePluginApplication,
+        GradlePlugins,
+        GradleProject,
+        KotlinPluginDefinition,
+        OwnershipType,
+        ProjectDependencyTarget,
+        Version,
+    )
+
+    def make_gradle_project(
+        path: Path,
+        *,
+        project_id: str,
+        repo_root_path: Path,
+        gradle_root_path: Path,
+        gradle_project_name: str,
+        resolved_features: dict[str, object] | None = None,
+    ) -> GradleProject:
+        return GradleProject(
+            path=path,
+            group_name="one.wabbit",
+            name=gradle_project_name,
+            version=Version.parse("0.0.1"),
+            description=None,
+            authors=[],
+            license="AGPL",
+            quarantine=False,
+            publish=False,
+            github_repo="org/repo",
+            ownership=OwnershipType.IMPORTED,
+            raw_dependencies=[],
+            raw_features=[],
+            resolved_dependencies=[],
+            resolved_maven_repositories=[],
+            resolved_features=resolved_features or {},
+            platforms=["jvm"],
+            source_set_dependencies={},
+            project_id=project_id,
+            repo_id=project_id.split("/", 1)[0] if "/" in project_id else None,
+            repo_root=repo_root_path,
+            gradle_root=gradle_root_path,
+            module_dir=Path(path.name),
+            gradle_project_name=gradle_project_name,
+        )
+
+    consumer_root = tmp_path / "consumer"
+    consumer_project = make_gradle_project(
+        consumer_root,
+        project_id="consumer",
+        repo_root_path=consumer_root,
+        gradle_root_path=consumer_root,
+        gradle_project_name="consumer",
+    )
+    dependency_root = tmp_path / "kotlin-hashing-simple"
+    dependency_project = make_gradle_project(
+        dependency_root,
+        project_id="kotlin-hashing-simple",
+        repo_root_path=dependency_root,
+        gradle_root_path=dependency_root,
+        gradle_project_name="kotlin-hashing-simple",
+        resolved_features={
+            "gradle-plugin": GradlePlugins(entries=[GradlePluginApplication(name="acyclic-gradle")]),
+        },
+    )
+    consumer_project.resolved_dependencies = [
+        Dependency(scope=None, target=ProjectDependencyTarget(project="kotlin-hashing-simple"))
+    ]
+    gradle_plugin_root = tmp_path / "kotlin-acyclic-gradle-plugin"
+    gradle_plugin_project = make_gradle_project(
+        gradle_plugin_root,
+        project_id="kotlin-acyclic-gradle-plugin",
+        repo_root_path=gradle_plugin_root,
+        gradle_root_path=gradle_plugin_root,
+        gradle_project_name="kotlin-acyclic-gradle-plugin",
+    )
+    gradle_plugin_project.gradle_plugin_id = "one.wabbit.acyclic"
+    compiler_plugin_root = tmp_path / "kotlin-acyclic-plugin"
+    compiler_plugin_project = make_gradle_project(
+        compiler_plugin_root,
+        project_id="kotlin-acyclic-plugin",
+        repo_root_path=compiler_plugin_root,
+        gradle_root_path=compiler_plugin_root,
+        gradle_project_name="kotlin-acyclic-plugin",
+    )
+
+    config = Config(raw=Document([]))
+    config.defined_projects.update(
+        {
+            "consumer": consumer_project,
+            "kotlin-hashing-simple": dependency_project,
+            "kotlin-acyclic-gradle-plugin": gradle_plugin_project,
+            "kotlin-acyclic-plugin": compiler_plugin_project,
+        }
+    )
+    config.plugins["acyclic-gradle"] = KotlinPluginDefinition(
+        project="kotlin-acyclic-gradle-plugin",
+        compiler_plugin="kotlin-acyclic-plugin",
+    )
+
+    ctx = SimpleNamespace(
+        config=config,
+        settings_local_template=jinja2.Template(
+            "{% for plugin_build_path in plugin_included_builds %}"
+            "{{ plugin_build_path }}:[plugin]\n"
+            "{% endfor %}"
+            "{% for included_build in included_builds %}"
+            "{{ included_build.build_path }}:"
+            "{% for substitution in included_build.substitutions %}"
+            "[{{ substitution.module_coordinate }}=>{{ substitution.project_path }}]"
+            "{% endfor %}"
+            "\n"
+            "{% endfor %}"
+        ),
+    )
+
+    setup_module._write_gradle_local_overlay(
+        ctx,
+        root_path=consumer_root,
+        seed_projects=[consumer_project],
+    )
+
+    overlay_text = (consumer_root / "settings.local.gradle.kts").read_text(encoding="utf-8")
+    assert "../kotlin-hashing-simple:[one.wabbit:kotlin-hashing-simple=>:]" in overlay_text
+    assert "../kotlin-acyclic-gradle-plugin:[plugin]" in overlay_text
+    assert "../kotlin-acyclic-plugin:[one.wabbit:kotlin-acyclic-plugin=>:]" in overlay_text
 
 
 def test_write_gradle_root_files_writes_workspace_dependency_substitutions_in_local_mode(
@@ -1095,6 +1232,103 @@ def test_write_gradle_root_files_writes_workspace_dependency_substitutions_in_lo
     assert "kotlin-dotenv-parser=../kotlin-dotenv-parser" in settings_text
 
 
+def test_write_gradle_root_files_resolves_local_gradle_plugin_projects_in_settings(tmp_path: Path) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    from dev.config import (
+        Config,
+        GradlePluginApplication,
+        GradlePlugins,
+        GradleProject,
+        KotlinPluginDefinition,
+        OwnershipType,
+        Version,
+    )
+
+    project = GradleProject(
+        path=tmp_path / "workspace" / "demo",
+        group_name="one.wabbit",
+        name="demo",
+        version=Version.parse("0.0.1"),
+        description=None,
+        authors=[],
+        license="AGPL",
+        quarantine=False,
+        publish=False,
+        github_repo="org/repo",
+        ownership=OwnershipType.IMPORTED,
+        raw_dependencies=[],
+        raw_features=[],
+        resolved_dependencies=[],
+        resolved_maven_repositories=[],
+        resolved_features={
+            "gradle-plugin": GradlePlugins(entries=[GradlePluginApplication(name="acyclic-gradle")]),
+        },
+        platforms=["jvm"],
+        source_set_dependencies={},
+        project_id="demo",
+        repo_root=tmp_path / "workspace",
+        gradle_root=tmp_path / "workspace",
+        gradle_project_name="demo",
+    )
+    plugin_project = GradleProject(
+        path=tmp_path / "kotlin-acyclic-gradle-plugin",
+        group_name="one.wabbit",
+        name="kotlin-acyclic-gradle-plugin",
+        version=Version.parse("0.0.1"),
+        description=None,
+        authors=[],
+        license="AGPL",
+        quarantine=False,
+        publish=False,
+        github_repo="org/repo",
+        ownership=OwnershipType.IMPORTED,
+        raw_dependencies=[],
+        raw_features=[],
+        resolved_dependencies=[],
+        resolved_maven_repositories=[],
+        resolved_features={},
+        platforms=["jvm"],
+        source_set_dependencies={},
+        project_id="kotlin-acyclic-gradle-plugin",
+        repo_root=tmp_path / "kotlin-acyclic-gradle-plugin",
+        gradle_root=tmp_path / "kotlin-acyclic-gradle-plugin",
+        gradle_project_name="kotlin-acyclic-gradle-plugin",
+        gradle_plugin_id="one.wabbit.acyclic",
+    )
+
+    config = Config(raw=Document([]))
+    config.defined_projects["demo"] = project
+    config.defined_projects["kotlin-acyclic-gradle-plugin"] = plugin_project
+    config.plugins["acyclic-gradle"] = KotlinPluginDefinition(project="kotlin-acyclic-gradle-plugin")
+
+    ctx = SimpleNamespace(
+        config=config,
+        build_template=jinja2.Template(""),
+        settings_template=jinja2.Template(
+            "{% for plugin in extra_gradle_plugins %}[{{ plugin.plugin_id }}={{ plugin.version }}]{% endfor %}"
+        ),
+        repo_template=tmp_path,
+        gradle_properties_template=jinja2.Template(""),
+    )
+
+    workspace_root = tmp_path / "workspace"
+    setup_module._write_gradle_root_files(
+        ctx,
+        root_path=workspace_root,
+        root_project_name="workspace",
+        seed_projects=[project],
+        write_wrapper=False,
+        write_build=True,
+        include_external_dependencies=False,
+        write_dependency_substitutions=False,
+    )
+
+    settings_text = (workspace_root / "settings.gradle.kts").read_text(encoding="utf-8")
+    assert "[one.wabbit.acyclic=0.0.1]" in settings_text
+
+
 def test_write_gradle_root_files_renders_extra_gradle_plugins_in_settings(tmp_path: Path) -> None:
     from mu.types import Document
 
@@ -1139,13 +1373,13 @@ def test_write_gradle_root_files_renders_extra_gradle_plugins_in_settings(tmp_pa
 
     config = Config(raw=Document([]))
     config.defined_projects["demo"] = project
-    config.plugins["acyclic-gradle"] = KotlinPluginDefinition(name="one.wabbit.acyclic", version="0.0.1")
+    config.plugins["acyclic-gradle"] = KotlinPluginDefinition(plugin_id="one.wabbit.acyclic", version="0.0.1")
     config.repositories["repo:company"] = MavenRepositoryDefinition(
         name="repo:company",
         url="https://repo.example.com/releases",
     )
     config.plugins["company-plugin"] = KotlinPluginDefinition(
-        name="com.example.company",
+        plugin_id="com.example.company",
         version="1.2.3",
         repo="repo:company",
     )

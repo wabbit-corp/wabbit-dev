@@ -226,6 +226,35 @@ def test_gradle_kmp_platforms_and_source_set_dependencies_are_loaded(tmp_path: P
     assert len(project.source_set_dependencies["androidMain"]) == 1
 
 
+def test_gradle_kmp_source_set_dep_call_preserves_scope(tmp_path: Path) -> None:
+    from dev.config import GradleProject, MavenDependencyTarget
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(define-maven-library "kotlin-stdlib" "org.jetbrains.kotlin:kotlin-stdlib:2.2.20")',
+                "("
+                'gradle "demo-kmp" '
+                ':version "0.1.0" '
+                ':targets [{"kind": "jvm"} {"kind": "iosArm64"}] '
+                ':sourceSetDependencies {"commonMain": [(dep "kotlin-stdlib" "api")]})',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo-kmp"]
+    assert isinstance(project, GradleProject)
+    common_main_dependencies = project.source_set_dependencies["commonMain"]
+    assert len(common_main_dependencies) == 1
+    dependency = common_main_dependencies[0]
+    assert dependency.scope == "api"
+    assert isinstance(dependency.target, MavenDependencyTarget)
+    assert dependency.target.artifact == "org.jetbrains.kotlin:kotlin-stdlib:2.2.20"
+
+
 def test_gradle_kmp_allows_default_hierarchy_without_explicit_source_sets(tmp_path: Path) -> None:
     from dev.config import GradleProject
 
@@ -319,6 +348,95 @@ def test_gradle_project_loads_extra_gradle_plugin_feature(tmp_path: Path) -> Non
     project = config.defined_projects["demo"]
     assert isinstance(project, GradleProject)
     assert [entry.name for entry in get_gradle_plugin_applications(project)] == ["acyclic-gradle"]
+
+
+def test_gradle_project_accepts_local_gradle_plugin_definition(tmp_path: Path) -> None:
+    from dev.config import (
+        GradleProject,
+        get_gradle_plugin_applications,
+        resolve_kotlin_plugin_id,
+        resolve_kotlin_plugin_version,
+    )
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(define-kotlin-plugin "acyclic-gradle" ":kotlin-acyclic-gradle-plugin" :compilerPlugin "kotlin-acyclic-plugin")',
+                '(gradle "kotlin-acyclic-gradle-plugin" :version "0.1.0" :gradlePluginId "one.wabbit.acyclic" :features [(jvm-kotlin-library)])',
+                '(gradle "kotlin-acyclic-plugin" :version "0.1.0" :features [(jvm-kotlin-library)])',
+                "("
+                'gradle "demo" '
+                ':version "0.1.0" '
+                ':features [(jvm-kotlin-library) (gradle-plugin "acyclic-gradle")])',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo"]
+    plugin = config.plugins["acyclic-gradle"]
+    assert isinstance(project, GradleProject)
+    assert [entry.name for entry in get_gradle_plugin_applications(project)] == ["acyclic-gradle"]
+    assert resolve_kotlin_plugin_id(config, plugin) == "one.wabbit.acyclic"
+    assert resolve_kotlin_plugin_version(config, plugin) == "0.1.0"
+
+
+def test_add_default_gradle_plugin_applies_to_subsequent_projects_only(tmp_path: Path) -> None:
+    from dev.config import GradleProject, get_gradle_plugin_applications
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(define-kotlin-plugin "acyclic-gradle" "one.wabbit.acyclic:0.0.1")',
+                "("
+                'gradle "before" '
+                ':version "0.1.0" '
+                ':features [(jvm-kotlin-library)])',
+                '(add-default-gradle-plugin "acyclic-gradle")',
+                "("
+                'gradle "after" '
+                ':version "0.1.0" '
+                ':features [(jvm-kotlin-library)])',
+                "",
+            ]
+        ),
+    )
+
+    before = config.defined_projects["before"]
+    after = config.defined_projects["after"]
+    assert isinstance(before, GradleProject)
+    assert isinstance(after, GradleProject)
+    assert [entry.name for entry in get_gradle_plugin_applications(before)] == []
+    assert [entry.name for entry in get_gradle_plugin_applications(after)] == ["acyclic-gradle"]
+
+
+def test_add_default_gradle_plugin_merges_with_explicit_project_plugins(tmp_path: Path) -> None:
+    from dev.config import GradleProject, get_gradle_plugin_applications
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(define-kotlin-plugin "acyclic-gradle" "one.wabbit.acyclic:0.0.1")',
+                '(define-kotlin-plugin "company-plugin" "com.example.company:1.2.3")',
+                '(add-default-gradle-plugin "acyclic-gradle")',
+                "("
+                'gradle "demo" '
+                ':version "0.1.0" '
+                ':features [(jvm-kotlin-library) (gradle-plugin "acyclic-gradle") (gradle-plugin "company-plugin")])',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo"]
+    assert isinstance(project, GradleProject)
+    assert [entry.name for entry in get_gradle_plugin_applications(project)] == ["acyclic-gradle", "company-plugin"]
 
 
 def test_gradle_plugin_feature_rejects_non_plugin_id_definition(tmp_path: Path) -> None:
