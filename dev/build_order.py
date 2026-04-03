@@ -33,16 +33,35 @@ def build_dependency_graph(projects: dict[str, Project]) -> tuple[dict[str, list
     return dict(graph), in_degs
 
 
-def toposort_projects(projects: dict[str, Project], target_project: str | None = None) -> list[str]:
+def toposort_projects(
+    projects: dict[str, Project], target_project: str | list[str] | tuple[str, ...] | None = None
+) -> list[str]:
     """
-    Return a list of project names in topological order. If target_project is not None,
-    we only include the subgraph needed for that project.
+    Return a list of project names in topological order.
+
+    If target_project is not None, only include the subgraph needed for that project
+    (or for the provided list of target projects).
     """
     graph, in_degs = build_dependency_graph(projects)
 
     if target_project is not None:
-        if target_project not in projects:
-            raise ValueError(f"Unknown project: {target_project}")
+        if isinstance(target_project, str):
+            target_projects = [target_project]
+        else:
+            target_projects = list(target_project)
+        if not target_projects:
+            return []
+        for target in target_projects:
+            if target not in projects:
+                raise ValueError(f"Unknown project: {target}")
+        unique_targets: list[str] = []
+        seen_targets: set[str] = set()
+        for target in target_projects:
+            if target in seen_targets:
+                continue
+            seen_targets.add(target)
+            unique_targets.append(target)
+        target_projects = unique_targets
 
         # BFS upward from target_project in reversed edges
         rev: defaultdict[str, list[str]] = defaultdict(list)
@@ -51,7 +70,7 @@ def toposort_projects(projects: dict[str, Project], target_project: str | None =
                 rev[c].append(src)
 
         needed: set[str] = set()
-        queue: deque[str] = deque([target_project])
+        queue: deque[str] = deque(target_projects)
         while queue:
             cur = queue.popleft()
             if cur in needed:

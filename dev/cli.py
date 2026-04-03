@@ -113,6 +113,9 @@ async def async_main() -> int:
     with commands("publish") as cmd:
         cmd.add_argument("project", type=str, nargs="?")
 
+    with commands("build") as cmd:
+        cmd.add_argument("projects", type=str, nargs="*")
+
     with commands("jitpack/info") as cmd:
         # jitpack info <group> <artifact> [<version>]
         cmd.add_argument("group", type=str, nargs=1)
@@ -216,6 +219,11 @@ async def async_main() -> int:
             from dev.tasks.publish import publish_main
 
             await publish_main(args.project)
+
+        case "build":
+            from dev.tasks.build import build
+
+            build(args.projects)
 
         # TODO: review commands below
 
