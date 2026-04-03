@@ -61,7 +61,9 @@ def _compile_python_project(project: PythonProject) -> bool:
 def _gradle_command(gradle_root: Path) -> list[str]:
     wrapper_path = gradle_root / "gradlew"
     if wrapper_path.is_file():
-        return [str(wrapper_path)]
+        if os.name == "nt":
+            return ["./gradlew.bat"]
+        return ["./gradlew"]
     return ["gradle"]
 
 

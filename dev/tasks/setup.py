@@ -1149,24 +1149,37 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
     )
 
 
-def setup(mode: RepoSetupMode, *, interactive: bool = True, project: str | None = None) -> None:
+def setup(
+    mode: RepoSetupMode,
+    *,
+    interactive: bool = True,
+    project: str | None = None,
+    projects: list[str] | None = None,
+) -> None:
     config = load_config()
     ctx = create_repo_setup_context(config, mode)
 
-    if project is None:
+    selected_projects_input = projects if projects is not None else ([project] if project is not None else None)
+
+    if selected_projects_input is None:
         selected_project_names = list(config.defined_projects.keys())
     else:
-        selected_project_names = toposort_projects(config.defined_projects, target_project=project)
+        selected_project_names = toposort_projects(config.defined_projects, target_project=selected_projects_input)
+
     selected_projects = [config.defined_projects[name] for name in selected_project_names]
 
-    if project is None:
+    if selected_projects_input is None:
         info(f"Setting up projects in {mode.value} mode")
     else:
-        info(f"Setting up {project} and its dependencies in {mode.value} mode")
+        if len(selected_projects_input) == 1:
+            target_label = selected_projects_input[0]
+        else:
+            target_label = ", ".join(selected_projects_input)
+        info(f"Setting up {target_label} and its dependencies in {mode.value} mode")
 
     gradle_projects = [project_item for project_item in selected_projects if isinstance(project_item, GradleProject)]
     if gradle_projects:
-        if project is None:
+        if selected_projects_input is None:
             workspace_seed_projects = gradle_projects
             workspace_root_name = config.default_maven_project_group or "workspace"
             _write_gradle_root_files(
@@ -1242,7 +1255,7 @@ def setup(mode: RepoSetupMode, *, interactive: bool = True, project: str | None 
                 seed_projects=[standalone_project],
             )
 
-    if project is None:
+    if selected_projects_input is None:
         project_dirs: list[str] = []
         for project_item in selected_projects:
             relative_parts = project_item.path.parts
