@@ -91,7 +91,7 @@ async def async_main() -> int:
         pass
 
     with commands("setup") as cmd:
-        cmd.add_argument("project", type=str, nargs="?")
+        cmd.add_argument("projects", type=str, nargs="*")
         cmd.add_argument("--dev", action="store_true")
         cmd.add_argument("--local", action="store_true")
 
@@ -184,7 +184,7 @@ async def async_main() -> int:
                 mode = RepoSetupMode.DEV
             else:
                 mode = RepoSetupMode.PROD
-            setup(mode, project=args.project)
+            setup(mode, projects=args.projects)
 
         case "llmcopy":
             from dev.tasks.llmcopy import llmcopy
