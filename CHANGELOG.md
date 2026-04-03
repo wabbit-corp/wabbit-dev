@@ -1,6 +1,13 @@
 # Changelog
 
+## Unreleased
+- derive generated Paper Gradle plugin and `paperDevBundle` versions from config instead of hardcoded template defaults, and update the paperweight fallback to `2.0.0-beta.17`
+
 ## Unreleased (2026-02-17)
+- Generate real `java-gradle-plugin` JVM builds for `root.clj` Gradle projects that declare `:gradlePluginId`, including inferred plugin metadata, Kotlin Gradle plugin API/TestKit dependencies, and version expansion for `*gradle-plugin.properties` resources.
+- Add an explicit generated-file banner to all generated Gradle Kotlin DSL templates so emitted `build.gradle.kts`, `settings.gradle.kts`, and `settings.local.gradle.kts` files clearly state that setup generated them.
+- Let `(gradle-plugin "...")` and `(add-default-gradle-plugin "...")` carry generic `:compilerOptions` maps, and render those as raw Kotlin compiler plugin `-P plugin:<id>:key=value` flags in generated JVM/KMP Gradle builds.
+- Let `define-kotlin-plugin` optionally declare `:compilerPluginId` so generic companion-plugin configuration can target compiler plugin ids that differ from the Gradle plugin id.
 - Hardcode `-Xcontext-parameters` into the shared JVM/KMP Gradle templates so generated Kotlin builds keep the default flag even when no extra compiler args are configured.
 - Document the setup/versioning rule in `AGENTS.md`: project versions should only be incremented when preparing a real publish/release, not during in-progress migration work.
 - Let `define-kotlin-plugin` point at a local Gradle plugin project plus an optional `compilerPlugin` name, so `--local` overlays can include companion plugin builds without hand-authored composite-build wiring.

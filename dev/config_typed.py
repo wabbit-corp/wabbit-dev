@@ -557,6 +557,7 @@ class KotlinSerializationCommand:
 @dataclass(frozen=True)
 class GradlePluginCommand:
     name: str
+    compilerOptions: dict[str, str] | None = None
 
 
 @tag("kmp-android-library")
@@ -675,12 +676,14 @@ class DefineKotlinPluginCommand:
     value: str
     repo: str | None = None
     compilerPlugin: str | None = None
+    compilerPluginId: str | None = None
 
 
 @tag("add-default-gradle-plugin")
 @dataclass(frozen=True)
 class AddDefaultGradlePluginCommand:
     name: str
+    compilerOptions: dict[str, str] | None = None
 
 
 @tag("define-maven-library")

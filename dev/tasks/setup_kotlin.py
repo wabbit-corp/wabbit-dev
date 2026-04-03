@@ -29,6 +29,7 @@ from dev.config import (
     PurescriptProject,
     PythonProject,
     get_gradle_plugin_applications,
+    resolve_kotlin_compiler_plugin_id,
     resolve_kotlin_plugin_id,
     resolve_kotlin_plugin_version,
 )
@@ -41,9 +42,10 @@ DEFAULT_COMPOSE_PLUGIN_VERSION = "1.9.1"
 DOKKA_PLUGIN_VERSION = "2.0.0"
 KOVER_PLUGIN_VERSION = "0.9.3"
 INTELLIJ_GRADLE_PLUGIN_VERSION = "1.17.2"
-PAPERWEIGHT_USERDEV_PLUGIN_VERSION = "1.7.2"
+PAPERWEIGHT_USERDEV_PLUGIN_VERSION = "2.0.0-beta.17"
 BUKKIT_PLUGIN_YML_VERSION = "0.6.0"
 VANNIKTECH_MAVEN_PUBLISH_PLUGIN_VERSION = "0.36.0"
+DEFAULT_PAPER_DEV_BUNDLE_VERSION = "1.21.1-R0.1-SNAPSHOT"
 CONTEXT_PARAMETERS_COMPILER_FLAG = "-Xcontext-parameters"
 GITHUB_SOURCE_ROOT = "https://github.com"
 GITHUB_DEFAULT_BRANCH = "master"
@@ -217,6 +219,17 @@ def _compose_plugin_version(ctx: GradleSetupContext) -> str:
     return DEFAULT_COMPOSE_PLUGIN_VERSION
 
 
+def _library_version(ctx: GradleSetupContext, name: str, fallback: str) -> str:
+    library = ctx.config.libraries.get(name)
+    if library is None:
+        return fallback
+    return library.maven_urn.version
+
+
+def _paper_dev_bundle_version(ctx: GradleSetupContext) -> str:
+    return _library_version(ctx, "paper-api", DEFAULT_PAPER_DEV_BUNDLE_VERSION)
+
+
 def _builtin_gradle_plugin_ids(project: GradleProject) -> set[str]:
     builtins: set[str] = {"org.jetbrains.kotlin.multiplatform" if project.is_kmp else "org.jetbrains.kotlin.jvm"}
     for feature_name, plugin_ids in BUILTIN_GRADLE_PLUGIN_IDS_BY_FEATURE.items():
@@ -260,6 +273,65 @@ def _extra_gradle_plugins_for_projects(
     return plugin_specs, repositories
 
 
+def _kotlin_compiler_plugin_options_for_project(
+    ctx: GradleSetupContext,
+    project: GradleProject,
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    for application in get_gradle_plugin_applications(project):
+        if not application.compilerOptions:
+            continue
+        definition = ctx.config.plugins[application.name]
+        compiler_plugin_id = resolve_kotlin_compiler_plugin_id(ctx.config, definition)
+        for option_name, option_value in application.compilerOptions.items():
+            options.append(
+                {
+                    "plugin_id": compiler_plugin_id,
+                    "option_name": option_name,
+                    "option_value": option_value,
+                }
+            )
+    return options
+
+
+def _identifier_words(value: str) -> list[str]:
+    return [word for word in re.split(r"[^A-Za-z0-9]+", value) if word]
+
+
+def _pascal_case(value: str) -> str:
+    return "".join(word[:1].upper() + word[1:] for word in _identifier_words(value))
+
+
+def _camel_case(value: str) -> str:
+    words = _identifier_words(value)
+    if not words:
+        return "plugin"
+    head, *tail = words
+    return head.lower() + "".join(word[:1].upper() + word[1:] for word in tail)
+
+
+def _humanize_identifier(value: str) -> str:
+    return " ".join(word[:1].upper() + word[1:] for word in _identifier_words(value))
+
+
+def _gradle_plugin_project_context(project: GradleProject) -> dict[str, str] | None:
+    plugin_id = project.gradle_plugin_id
+    if plugin_id is None:
+        return None
+
+    plugin_tail = plugin_id.rsplit(".", 1)[-1]
+    plugin_class_prefix = _pascal_case(plugin_tail) or "Plugin"
+    plugin_label = _humanize_identifier(plugin_tail) or "Plugin"
+
+    return {
+        "gradle_plugin_id": plugin_id,
+        "gradle_plugin_declaration_name": _camel_case(plugin_tail),
+        "gradle_plugin_implementation_class": f"{plugin_id}.gradle.{plugin_class_prefix}GradlePlugin",
+        "gradle_plugin_display_name": f"{plugin_label} Gradle plugin",
+        "gradle_plugin_description": project.description or f"Gradle plugin for {plugin_id}.",
+    }
+
+
 def settings_plugin_versions(ctx: GradleSetupContext) -> dict[str, str]:
     def plugin_version(name: str, fallback: str) -> str:
         plugin = ctx.config.plugins.get(name)
@@ -280,7 +352,10 @@ def settings_plugin_versions(ctx: GradleSetupContext) -> dict[str, str]:
         "kover_version": KOVER_PLUGIN_VERSION,
         "maven_publish_plugin_version": VANNIKTECH_MAVEN_PUBLISH_PLUGIN_VERSION,
         "intellij_gradle_plugin_version": INTELLIJ_GRADLE_PLUGIN_VERSION,
-        "paperweight_userdev_plugin_version": PAPERWEIGHT_USERDEV_PLUGIN_VERSION,
+        "paperweight_userdev_plugin_version": plugin_version(
+            "paperweight-userdev",
+            PAPERWEIGHT_USERDEV_PLUGIN_VERSION,
+        ),
         "bukkit_plugin_yml_version": BUKKIT_PLUGIN_YML_VERSION,
     }
 
@@ -1093,6 +1168,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
     nested_gradle_project = _is_nested_gradle_project(project)
     kotlin_free_compiler_args = [CONTEXT_PARAMETERS_COMPILER_FLAG]
     extra_gradle_plugins, _extra_gradle_plugin_repositories = _extra_gradle_plugins_for_projects(ctx, [project])
+    kotlin_compiler_plugin_options = _kotlin_compiler_plugin_options_for_project(ctx, project)
     publish_to_maven_central = _supports_gradle_maven_central(project)
     maven_central_context = _maven_central_context(ctx, project) if publish_to_maven_central else {}
 
@@ -1139,7 +1215,9 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             kmp_jvm_runs=kmp_jvm_runs,
             native_framework_base_name=_native_framework_base_name(project),
             kotlin_free_compiler_args=kotlin_free_compiler_args,
+            kotlin_compiler_plugin_options=kotlin_compiler_plugin_options,
             extra_gradle_plugins=extra_gradle_plugins,
+            paper_dev_bundle_version=_paper_dev_bundle_version(ctx),
             dokka_source_link_remote_url=dokka_source_link_remote_url or "",
             has_dokka_source_link=dokka_source_link_remote_url is not None,
             company_legal_name=company_legal_name,
@@ -1150,6 +1228,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
         dokka_source_link_remote_url = _dokka_source_link_remote_url(project, "src/main/kotlin")
         company_legal_name = _company_legal_name(ctx)
         project_dependencies, other_dependencies = _make_dependency_strings(ctx, project)
+        gradle_plugin_project_context = _gradle_plugin_project_context(project) or {}
         result = render_template(
             ctx.subproject_build_template,
             project_name=project.name,
@@ -1169,12 +1248,16 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             mode=mode_value,
             serialization_library=ctx.config.libraries["kotlinx-serialization-core"].maven_urn.__str__(),
             kotlin_free_compiler_args=kotlin_free_compiler_args,
+            kotlin_compiler_plugin_options=kotlin_compiler_plugin_options,
             extra_gradle_plugins=extra_gradle_plugins,
+            paper_dev_bundle_version=_paper_dev_bundle_version(ctx),
             dokka_source_link_remote_url=dokka_source_link_remote_url or "",
             has_dokka_source_link=dokka_source_link_remote_url is not None,
             company_legal_name=company_legal_name,
             publish_to_maven_central=publish_to_maven_central,
+            is_gradle_plugin_project=project.gradle_plugin_id is not None,
             **maven_central_context,
+            **gradle_plugin_project_context,
         )
     result = clean_gradle_build_text(result)
     dev.io.write_text_file(project.path / "build.gradle.kts", result)

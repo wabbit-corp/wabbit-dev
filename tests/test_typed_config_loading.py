@@ -353,6 +353,7 @@ def test_gradle_project_loads_extra_gradle_plugin_feature(tmp_path: Path) -> Non
 def test_gradle_project_accepts_local_gradle_plugin_definition(tmp_path: Path) -> None:
     from dev.config import (
         GradleProject,
+        resolve_kotlin_compiler_plugin_id,
         get_gradle_plugin_applications,
         resolve_kotlin_plugin_id,
         resolve_kotlin_plugin_version,
@@ -363,7 +364,7 @@ def test_gradle_project_accepts_local_gradle_plugin_definition(tmp_path: Path) -
         "\n".join(
             [
                 '(default-maven-project-group "one.wabbit")',
-                '(define-kotlin-plugin "acyclic-gradle" ":kotlin-acyclic-gradle-plugin" :compilerPlugin "kotlin-acyclic-plugin")',
+                '(define-kotlin-plugin "acyclic-gradle" ":kotlin-acyclic-gradle-plugin" :compilerPlugin "kotlin-acyclic-plugin" :compilerPluginId "one.wabbit.acyclic")',
                 '(gradle "kotlin-acyclic-gradle-plugin" :version "0.1.0" :gradlePluginId "one.wabbit.acyclic" :features [(jvm-kotlin-library)])',
                 '(gradle "kotlin-acyclic-plugin" :version "0.1.0" :features [(jvm-kotlin-library)])',
                 "("
@@ -380,6 +381,7 @@ def test_gradle_project_accepts_local_gradle_plugin_definition(tmp_path: Path) -
     assert isinstance(project, GradleProject)
     assert [entry.name for entry in get_gradle_plugin_applications(project)] == ["acyclic-gradle"]
     assert resolve_kotlin_plugin_id(config, plugin) == "one.wabbit.acyclic"
+    assert resolve_kotlin_compiler_plugin_id(config, plugin) == "one.wabbit.acyclic"
     assert resolve_kotlin_plugin_version(config, plugin) == "0.1.0"
 
 
@@ -437,6 +439,64 @@ def test_add_default_gradle_plugin_merges_with_explicit_project_plugins(tmp_path
     project = config.defined_projects["demo"]
     assert isinstance(project, GradleProject)
     assert [entry.name for entry in get_gradle_plugin_applications(project)] == ["acyclic-gradle", "company-plugin"]
+
+
+def test_gradle_plugin_feature_keeps_compiler_options(tmp_path: Path) -> None:
+    from dev.config import GradleProject, get_gradle_plugin_applications
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(define-kotlin-plugin "acyclic-gradle" "one.wabbit.acyclic:0.0.1" :compilerPluginId "one.wabbit.acyclic")',
+                "("
+                'gradle "demo" '
+                ':version "0.1.0" '
+                ':features [(jvm-kotlin-library) (gradle-plugin "acyclic-gradle" :compilerOptions {compilationUnits: "enabled" declarations: "enabled"})])',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo"]
+    assert isinstance(project, GradleProject)
+    applications = get_gradle_plugin_applications(project)
+    assert len(applications) == 1
+    assert applications[0].compilerOptions == {
+        "compilationUnits": "enabled",
+        "declarations": "enabled",
+    }
+
+
+def test_default_gradle_plugin_compiler_options_merge_with_explicit_project_options(tmp_path: Path) -> None:
+    from dev.config import GradleProject, get_gradle_plugin_applications
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(define-kotlin-plugin "acyclic-gradle" "one.wabbit.acyclic:0.0.1" :compilerPluginId "one.wabbit.acyclic")',
+                '(add-default-gradle-plugin "acyclic-gradle" :compilerOptions {compilationUnits: "opt-in" declarations: "disabled"})',
+                "("
+                'gradle "demo" '
+                ':version "0.1.0" '
+                ':features [(jvm-kotlin-library) (gradle-plugin "acyclic-gradle" :compilerOptions {declarations: "enabled" declarationOrder: "top-down"})])',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo"]
+    assert isinstance(project, GradleProject)
+    applications = get_gradle_plugin_applications(project)
+    assert len(applications) == 1
+    assert applications[0].compilerOptions == {
+        "compilationUnits": "opt-in",
+        "declarations": "enabled",
+        "declarationOrder": "top-down",
+    }
 
 
 def test_gradle_plugin_feature_rejects_non_plugin_id_definition(tmp_path: Path) -> None:

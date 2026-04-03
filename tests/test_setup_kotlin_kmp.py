@@ -25,6 +25,7 @@ from dev.config import (
     MavenLibraryDefinition,
     MavenRepositoryDefinition,
     OwnershipType,
+    PaperPlugin,
     ProjectDependencyTarget,
     Version,
 )
@@ -416,6 +417,88 @@ def test_setup_gradle_project_renders_extra_gradle_plugin_in_kmp_build(
 
     build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
     assert "[one.wabbit.acyclic]" in build_text
+
+
+def test_setup_gradle_project_renders_gradle_plugin_compiler_options_in_jvm_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "jvm-proj", platforms=["jvm"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.resolved_features = {
+        "kotlin": Kotlin(),
+        "jvm-kotlin-library": JvmKotlinLibrary(),
+        "gradle-plugin": GradlePlugins(
+            entries=[
+                GradlePluginApplication(
+                    name="acyclic-gradle",
+                    compilerOptions={
+                        "compilationUnits": "enabled",
+                        "declarations": "enabled",
+                    },
+                )
+            ]
+        ),
+    }
+    ctx = _make_context(
+        tmp_path,
+        jvm_template=(
+            "{% for option in kotlin_compiler_plugin_options %}"
+            "[{{ option.plugin_id }}:{{ option.option_name }}={{ option.option_value }}]"
+            "{% endfor %}"
+        ),
+        kmp_template="KMP_TEMPLATE",
+    )
+    ctx.config.plugins["acyclic-gradle"] = KotlinPluginDefinition(
+        plugin_id="one.wabbit.acyclic",
+        version="0.0.1",
+        compiler_plugin_id="one.wabbit.acyclic",
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
+    assert "[one.wabbit.acyclic:compilationUnits=enabled]" in build_text
+    assert "[one.wabbit.acyclic:declarations=enabled]" in build_text
+
+
+def test_setup_gradle_project_renders_gradle_plugin_compiler_options_in_kmp_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "kmp-proj", platforms=["jvm", "iosArm64"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.resolved_features = {
+        "gradle-plugin": GradlePlugins(
+            entries=[
+                GradlePluginApplication(
+                    name="acyclic-gradle",
+                    compilerOptions={"declarationOrder": "bottom-up"},
+                )
+            ]
+        ),
+    }
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template=(
+            "{% for option in kotlin_compiler_plugin_options %}"
+            "[{{ option.plugin_id }}:{{ option.option_name }}={{ option.option_value }}]"
+            "{% endfor %}"
+        ),
+    )
+    ctx.config.plugins["acyclic-gradle"] = KotlinPluginDefinition(
+        plugin_id="one.wabbit.acyclic",
+        version="0.0.1",
+        compiler_plugin_id="one.wabbit.acyclic",
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
+    assert "[one.wabbit.acyclic:declarationOrder=bottom-up]" in build_text
 
 
 def test_setup_gradle_project_renders_desktop_native_targets_and_apple_framework_names(
@@ -862,3 +945,71 @@ def test_setup_gradle_project_skips_public_workflows_for_nested_repo_project(
     assert not (project.path / ".github" / "workflows" / "snapshot-publish.yml").exists()
     assert not (project.path / ".github" / "workflows" / "docs-quality.yml").exists()
     assert not (project.path / ".github" / "workflows" / "docs-deploy.yml").exists()
+
+
+def test_setup_gradle_project_renders_gradle_plugin_project_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "typeclasses-gradle-plugin", platforms=["jvm"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.gradle_plugin_id = "one.wabbit.typeclass"
+
+    repo_root = Path(__file__).resolve().parents[2]
+    jvm_template = (
+        repo_root / "data-repo-template" / "gradle-files" / "subproject-build.gradle.kts.jinja2"
+    ).read_text(encoding="utf-8")
+    ctx = _make_context(
+        tmp_path,
+        jvm_template=jvm_template,
+        kmp_template="KMP_TEMPLATE",
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
+    assert "`java-gradle-plugin`" in build_text
+    assert 'compileOnly("org.jetbrains.kotlin:kotlin-gradle-plugin-api:2.2.20")' in build_text
+    assert 'testImplementation("org.jetbrains.kotlin:kotlin-gradle-plugin-api:2.2.20")' in build_text
+    assert "testImplementation(gradleApi())" in build_text
+    assert "testImplementation(gradleTestKit())" in build_text
+    assert 'filesMatching("**/*gradle-plugin.properties")' in build_text
+    assert "pluginUnderTestMetadata {" in build_text
+    assert 'id = "one.wabbit.typeclass"' in build_text
+    assert 'implementationClass = "one.wabbit.typeclass.gradle.TypeclassGradlePlugin"' in build_text
+    assert 'displayName = "Typeclass Gradle plugin"' in build_text
+
+
+def test_setup_gradle_project_uses_configured_paper_versions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "paper-proj", platforms=["jvm"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.resolved_features = {
+        "paper-plugin": PaperPlugin(main="cc.Main", name="CC", apiVersion="1.20"),
+    }
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="BUNDLE={{ paper_dev_bundle_version }}",
+        kmp_template="KMP_TEMPLATE",
+    )
+    ctx.subproject_settings_template = jinja2.Template("PLUGIN={{ paperweight_userdev_plugin_version }}")
+    ctx.config.plugins["paperweight-userdev"] = KotlinPluginDefinition(
+        plugin_id="io.papermc.paperweight.userdev",
+        version="2.0.0-beta.19",
+    )
+    ctx.config.libraries["paper-api"] = MavenLibraryDefinition(
+        name="paper-api",
+        maven_urn=MavenCoordinate.parse("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT"),
+        repo="repo:papermc",
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8").strip()
+    settings_text = (project.path / "settings.gradle.kts").read_text(encoding="utf-8").strip()
+    assert build_text == "BUNDLE=1.21.11-R0.1-SNAPSHOT"
+    assert settings_text == "PLUGIN=2.0.0-beta.19"

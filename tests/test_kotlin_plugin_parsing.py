@@ -48,14 +48,18 @@ def test_define_kotlin_plugin_accepts_id_version(tmp_path: Path) -> None:
 
 
 def test_define_kotlin_plugin_accepts_local_project_reference(tmp_path: Path) -> None:
-    from dev.config import resolve_kotlin_plugin_id, resolve_kotlin_plugin_version
+    from dev.config import (
+        resolve_kotlin_compiler_plugin_id,
+        resolve_kotlin_plugin_id,
+        resolve_kotlin_plugin_version,
+    )
 
     config = _load_from_temp_root(
         tmp_path,
         "\n".join(
             [
                 '(default-maven-project-group "one.wabbit")',
-                '(define-kotlin-plugin "acyclic" ":kotlin-acyclic-gradle-plugin" :compilerPlugin "kotlin-acyclic-plugin")',
+                '(define-kotlin-plugin "acyclic" ":kotlin-acyclic-gradle-plugin" :compilerPlugin "kotlin-acyclic-plugin" :compilerPluginId "one.wabbit.acyclic")',
                 '(gradle "kotlin-acyclic-gradle-plugin" :version "0.0.1" :gradlePluginId "one.wabbit.acyclic" :features [(jvm-kotlin-library)])',
                 '(gradle "kotlin-acyclic-plugin" :version "0.0.1" :features [(jvm-kotlin-library)])',
                 "",
@@ -66,5 +70,7 @@ def test_define_kotlin_plugin_accepts_local_project_reference(tmp_path: Path) ->
     plugin = config.plugins["acyclic"]
     assert plugin.project == "kotlin-acyclic-gradle-plugin"
     assert plugin.compiler_plugin == "kotlin-acyclic-plugin"
+    assert plugin.compiler_plugin_id == "one.wabbit.acyclic"
     assert resolve_kotlin_plugin_id(config, plugin) == "one.wabbit.acyclic"
+    assert resolve_kotlin_compiler_plugin_id(config, plugin) == "one.wabbit.acyclic"
     assert resolve_kotlin_plugin_version(config, plugin) == "0.0.1"

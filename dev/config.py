@@ -296,10 +296,16 @@ class KotlinSerialization(Feature):
 @dataclass(frozen=True)
 class GradlePluginApplication:
     name: str
+    compilerOptions: dict[str, str] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("gradle-plugin.name must not be empty")
+        for key, value in self.compilerOptions.items():
+            if not key.strip():
+                raise ValueError("gradle-plugin.compilerOptions keys must not be empty")
+            if not value.strip():
+                raise ValueError(f"gradle-plugin.compilerOptions[{key!r}] must not be empty")
 
 
 @dataclass
@@ -378,11 +384,20 @@ def _merge_feature(existing: Feature, incoming: Feature) -> Feature:
     if isinstance(existing, GradlePlugins):
         assert isinstance(incoming, GradlePlugins)
         merged_entries = list(existing.entries)
-        seen = {entry.name for entry in existing.entries}
+        existing_indices = {entry.name: index for index, entry in enumerate(existing.entries)}
         for entry in incoming.entries:
-            if entry.name in seen:
+            existing_index = existing_indices.get(entry.name)
+            if existing_index is not None:
+                existing_entry = merged_entries[existing_index]
+                merged_entries[existing_index] = GradlePluginApplication(
+                    name=existing_entry.name,
+                    compilerOptions={
+                        **existing_entry.compilerOptions,
+                        **entry.compilerOptions,
+                    },
+                )
                 continue
-            seen.add(entry.name)
+            existing_indices[entry.name] = len(merged_entries)
             merged_entries.append(entry)
         return GradlePlugins(entries=merged_entries)
 
@@ -454,6 +469,7 @@ class KotlinPluginDefinition:
     repo: str | None = None
     project: str | None = None
     compiler_plugin: str | None = None
+    compiler_plugin_id: str | None = None
 
     def __post_init__(self) -> None:
         if (self.plugin_id is None) == (self.project is None):
@@ -498,6 +514,12 @@ def resolve_kotlin_plugin_version(config: "Config", definition: KotlinPluginDefi
     if project.version is None:
         raise ValueError(f"Gradle project {project.name} is used as a local plugin but has no version")
     return str(project.version)
+
+
+def resolve_kotlin_compiler_plugin_id(config: "Config", definition: KotlinPluginDefinition) -> str:
+    if definition.compiler_plugin_id is not None:
+        return definition.compiler_plugin_id
+    return resolve_kotlin_plugin_id(config, definition)
 
 
 def resolve_kotlin_plugin_compiler_plugin_project(
@@ -1575,7 +1597,14 @@ def load_config() -> Config:
         if isinstance(command, config_typed.KotlinSerializationCommand):
             return KotlinSerialization()
         if isinstance(command, config_typed.GradlePluginCommand):
-            return GradlePlugins(entries=[GradlePluginApplication(name=command.name)])
+            return GradlePlugins(
+                entries=[
+                    GradlePluginApplication(
+                        name=command.name,
+                        compilerOptions=dict(command.compilerOptions or {}),
+                    )
+                ]
+            )
         if isinstance(command, config_typed.KmpAndroidLibraryCommand):
             return KmpAndroidLibrary(
                 namespace=command.namespace,
@@ -2502,6 +2531,7 @@ def load_config() -> Config:
                     project=_normalize_project_reference(command.value, field_name=f"plugin {command.name}"),
                     repo=command.repo,
                     compiler_plugin=command.compilerPlugin,
+                    compiler_plugin_id=command.compilerPluginId,
                 )
                 return
             if ":" not in command.value:
@@ -2512,11 +2542,15 @@ def load_config() -> Config:
                 version=version,
                 repo=command.repo,
                 compiler_plugin=command.compilerPlugin,
+                compiler_plugin_id=command.compilerPluginId,
             )
             return
 
         if isinstance(command, config_typed.AddDefaultGradlePluginCommand):
-            application = GradlePluginApplication(name=command.name)
+            application = GradlePluginApplication(
+                name=command.name,
+                compilerOptions=dict(command.compilerOptions or {}),
+            )
             if application not in config.default_gradle_plugin_applications:
                 config.default_gradle_plugin_applications.append(application)
             return
