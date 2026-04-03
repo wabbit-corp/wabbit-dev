@@ -2365,7 +2365,8 @@ def load_config() -> Config:
                 raise ValueError(
                     f"Gradle project {display_name} cannot enable publishSnapshots for target {publish_target!r}"
                 )
-            docs_enabled_default = publish_target == "maven-central"
+            github_repo = _project_github_repo_for(command.repo, default_github_repo)
+            docs_enabled_default = github_repo is not None and not command.quarantine
             docs_enabled = command.docs if command.docs is not None else docs_enabled_default
             docs_system = _normalize_docs_system(
                 display_name,
@@ -2383,7 +2384,7 @@ def load_config() -> Config:
                 quarantine=command.quarantine,
                 license=command.license,
                 publish=command.publish,
-                github_repo=_project_github_repo_for(command.repo, default_github_repo),
+                github_repo=github_repo,
                 raw_dependencies=raw_dependencies,
                 raw_features=raw_features,
                 resolved_maven_repositories=maven_repositories,
