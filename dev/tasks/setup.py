@@ -651,11 +651,13 @@ def _write_gradle_root_files(
         dependency_substitutions = (
             _workspace_dependency_substitutions(ctx.config, included_projects) if write_dependency_substitutions else []
         )
+        inline_extra_build = setup_kotlin.read_optional_inline_gradle_build_script(root_path)
         build_text = render_template(
             ctx.build_template,
             **plugin_context,
             dependency_substitutions=dependency_substitutions,
-            inline_extra_build_script=setup_kotlin.read_optional_inline_gradle_build_script(root_path),
+            inline_extra_build_imports=inline_extra_build.imports,
+            inline_extra_build_script=inline_extra_build.body,
         )
         dev.io.write_text_file(root_path / "build.gradle.kts", setup_kotlin.clean_gradle_build_text(build_text))
 

@@ -196,19 +196,21 @@ def test_setup_gradle_project_inlines_optional_build_inline_script(
     project = _make_project(tmp_path / "inline-proj", platforms=["jvm"])
     project.path.mkdir(parents=True, exist_ok=True)
     (project.path / "build.inline.gradle.kts").write_text(
-        'println("inline build logic")\n',
+        'import java.time.Instant\n\nprintln(Instant.EPOCH)\n',
         encoding="utf-8",
     )
     ctx = _make_context(
         tmp_path,
-        jvm_template="before\n{{ inline_extra_build_script }}\nafter",
+        jvm_template="import org.example.Base\n{% for inline_import in inline_extra_build_imports %}import {{ inline_import }}\n{% endfor %}\nbefore\n{{ inline_extra_build_script }}\nafter",
         kmp_template="KMP_TEMPLATE",
     )
 
     setup_gradle_project(ctx, project, interactive=False)
 
     build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
-    assert 'println("inline build logic")' in build_text
+    assert "import java.time.Instant" in build_text
+    assert "import org.example.Base" in build_text
+    assert "println(Instant.EPOCH)" in build_text
     assert "before" in build_text
     assert "after" in build_text
 

@@ -5,6 +5,7 @@ import re
 import shlex
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -1095,11 +1096,36 @@ def clean_gradle_build_text(text: str) -> str:
     return text
 
 
-def read_optional_inline_gradle_build_script(root_path: Path) -> str:
+@dataclass(frozen=True)
+class InlineGradleBuildScript:
+    imports: list[str]
+    body: str
+
+
+def read_optional_inline_gradle_build_script(root_path: Path) -> InlineGradleBuildScript:
     inline_script_path = root_path / "build.inline.gradle.kts"
     if not inline_script_path.exists():
-        return ""
-    return dev.io.read_text_file(inline_script_path).rstrip()
+        return InlineGradleBuildScript(imports=[], body="")
+
+    lines = dev.io.read_text_file(inline_script_path).splitlines()
+    imports: list[str] = []
+    body_start_index = 0
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            body_start_index = index + 1
+            continue
+        if line.startswith("import "):
+            imports.append(line[len("import ") :].strip())
+            body_start_index = index + 1
+            continue
+        body_start_index = index
+        break
+    else:
+        body_start_index = len(lines)
+
+    body = "\n".join(lines[body_start_index:]).rstrip()
+    return InlineGradleBuildScript(imports=imports, body=body)
 
 
 def java_version_for_features(default_java_version: int, features: Mapping[str, object]) -> int:
@@ -1268,6 +1294,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
         android_application_target = _android_application_target(project)
         android_kmp_library_target = _android_kmp_library_target(project)
 
+        inline_extra_build = read_optional_inline_gradle_build_script(project.path)
         result = render_template(
             ctx.subproject_build_kmp_template,
             project_name=project.name,
@@ -1306,7 +1333,8 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             has_dokka_source_link=dokka_source_link_remote_url is not None,
             company_legal_name=company_legal_name,
             publish_to_maven_central=publish_to_maven_central,
-            inline_extra_build_script=read_optional_inline_gradle_build_script(project.path),
+            inline_extra_build_imports=inline_extra_build.imports,
+            inline_extra_build_script=inline_extra_build.body,
             **maven_central_context,
         )
     else:
@@ -1314,6 +1342,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
         company_legal_name = _company_legal_name(ctx)
         project_dependencies, other_dependencies = _make_dependency_strings(ctx, project)
         gradle_plugin_project_context = _gradle_plugin_project_context(project) or {}
+        inline_extra_build = read_optional_inline_gradle_build_script(project.path)
         result = render_template(
             ctx.subproject_build_template,
             project_name=project.name,
@@ -1341,7 +1370,8 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             company_legal_name=company_legal_name,
             publish_to_maven_central=publish_to_maven_central,
             is_gradle_plugin_project=project.gradle_plugin_id is not None,
-            inline_extra_build_script=read_optional_inline_gradle_build_script(project.path),
+            inline_extra_build_imports=inline_extra_build.imports,
+            inline_extra_build_script=inline_extra_build.body,
             **maven_central_context,
             **gradle_plugin_project_context,
         )

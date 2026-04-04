@@ -99,6 +99,7 @@ def test_gradle_build_templates_apply_optional_extra_file(template_name: str) ->
     template_path = Path(__file__).resolve().parents[2] / "data-repo-template" / "gradle-files" / template_name
     content = template_path.read_text(encoding="utf-8")
 
+    assert "inline_extra_build_imports" in content
     assert "inline_extra_build_script" in content
     assert 'file("build.extra.gradle.kts")' in content
     assert "apply(from = extraBuildFile)" in content
