@@ -16,6 +16,7 @@ from dev.config import (
     GradleProject,
     GradleSourceSet,
     GradleTargetSpec,
+    Jvm,
     JvmKotlinLibrary,
     KmpCompose,
     KmpJvmRunEntry,
@@ -24,9 +25,12 @@ from dev.config import (
     KotlinPluginDefinition,
     MavenLibraryDefinition,
     MavenRepositoryDefinition,
+    NpmDependencyTarget,
     OwnershipType,
     PaperPlugin,
     ProjectDependencyTarget,
+    RepoDefinition,
+    ShadowJar,
     Version,
 )
 from dev.maven import MavenCoordinate
@@ -148,6 +152,7 @@ def _make_repo_gradle_project(
     project.project_id = project_id
     project.repo_id = project_id.split("/", 1)[0] if "/" in project_id else None
     project.repo_root = repo_root
+    project.gradle_root = repo_root
     project.gradle_project_name = gradle_project_name
     project.github_repo = github_repo
     project.artifact_id = artifact_id
@@ -181,6 +186,142 @@ def test_setup_gradle_project_uses_jvm_template_for_jvm_only_platforms(
     build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
     assert "JVM_TEMPLATE" in build_text
     assert "KMP_TEMPLATE" not in build_text
+
+
+def test_setup_gradle_project_inlines_optional_build_inline_script(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "inline-proj", platforms=["jvm"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    (project.path / "build.inline.gradle.kts").write_text(
+        'println("inline build logic")\n',
+        encoding="utf-8",
+    )
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="before\n{{ inline_extra_build_script }}\nafter",
+        kmp_template="KMP_TEMPLATE",
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
+    assert 'println("inline build logic")' in build_text
+    assert "before" in build_text
+    assert "after" in build_text
+
+
+def test_setup_gradle_project_cleans_stale_standalone_legal_files_for_nested_repo_modules(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    repo_root = tmp_path / "repo"
+    project = _make_repo_gradle_project(
+        repo_root / "library",
+        project_id="repo/library",
+        repo_root=repo_root,
+        gradle_project_name="library",
+        github_repo="org/repo",
+        artifact_id="library",
+    )
+    project.path.mkdir(parents=True, exist_ok=True)
+
+    stale_paths = [
+        project.path / ".banner.png",
+        project.path / "LICENSE.md",
+        project.path / "CLA.md",
+        project.path / "CLA_EXPLANATIONS.md",
+        project.path / "CONTRIBUTOR_PRIVACY.md",
+        project.path / "CODE_OF_CONDUCT.md",
+        project.path / "settings.gradle.kts",
+        project.path / "settings.local.gradle.kts",
+        project.path / "gradlew",
+        project.path / "gradlew.bat",
+        project.path / "gradle.properties",
+    ]
+    for stale_path in stale_paths:
+        stale_path.parent.mkdir(parents=True, exist_ok=True)
+        stale_path.write_text("stale\n", encoding="utf-8")
+    (project.path / "gradle" / "wrapper").mkdir(parents=True, exist_ok=True)
+    (project.path / "gradle" / "wrapper" / "gradle-wrapper.properties").write_text("stale\n", encoding="utf-8")
+
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template="KMP_TEMPLATE",
+    )
+    ctx.config.defined_projects["repo/library"] = project
+    ctx.config.defined_repos["repo"] = RepoDefinition(
+        repo_id="repo",
+        path=repo_root,
+        github_repo="org/repo",
+        gradle_root_project_name="repo",
+        jvm_policy=None,
+        project_ids=["repo/library"],
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    for stale_path in stale_paths:
+        assert not stale_path.exists()
+    assert not (project.path / "gradle").exists()
+    assert (project.path / "build.gradle.kts").is_file()
+
+
+def test_setup_gradle_project_keeps_module_license_when_repo_licenses_differ(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    repo_root = tmp_path / "repo"
+    project = _make_repo_gradle_project(
+        repo_root / "library",
+        project_id="repo/library",
+        repo_root=repo_root,
+        gradle_project_name="library",
+        github_repo="org/repo",
+        artifact_id="library",
+    )
+    sibling = _make_repo_gradle_project(
+        repo_root / "compiler-plugin",
+        project_id="repo/compiler-plugin",
+        repo_root=repo_root,
+        gradle_project_name="compiler-plugin",
+        github_repo="org/repo",
+        artifact_id="compiler-plugin",
+    )
+    sibling.license = "MIT"
+    project.path.mkdir(parents=True, exist_ok=True)
+    (project.path / "LICENSE.md").write_text("stale\n", encoding="utf-8")
+    (project.path / "CLA.md").write_text("stale\n", encoding="utf-8")
+
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template="KMP_TEMPLATE",
+    )
+    ctx.config.defined_projects.update(
+        {
+            "repo/library": project,
+            "repo/compiler-plugin": sibling,
+        }
+    )
+    ctx.config.defined_repos["repo"] = RepoDefinition(
+        repo_id="repo",
+        path=repo_root,
+        github_repo="org/repo",
+        gradle_root_project_name="repo",
+        jvm_policy=None,
+        project_ids=["repo/library", "repo/compiler-plugin"],
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    assert (project.path / "LICENSE.md").is_file()
+    assert not (project.path / "CLA.md").exists()
 
 
 def test_setup_gradle_project_uses_kmp_template_and_renders_source_set_deps_and_runs(
@@ -347,6 +488,79 @@ def test_setup_gradle_project_always_renders_context_parameters_flag(
     setup_gradle_project(ctx, kmp_project, interactive=False)
     kmp_text = (kmp_project.path / "build.gradle.kts").read_text(encoding="utf-8").strip()
     assert kmp_text == "KMP=-Xcontext-parameters"
+
+
+def test_setup_gradle_project_renders_js_wasm_targets_and_custom_source_dirs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "kmp-web-proj", platforms=["jvm", "js", "wasmJs"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.targets = [
+        GradleTargetSpec(kind="jvm"),
+        GradleTargetSpec(kind="js", browser=True, browser_test="chromeHeadless"),
+        GradleTargetSpec(kind="wasmJs", browser=True, browser_test="chromeHeadless", executable=True),
+    ]
+    project.kotlin_free_compiler_args = ["-Xexpect-actual-classes"]
+    project.dokka_suppress_source_sets = ["wasmJsMain"]
+    project.source_sets = {
+        "jsMain": GradleSourceSet(name="jsMain", kotlin_src_dirs=["src/webShared/kotlin"]),
+        "wasmJsMain": GradleSourceSet(name="wasmJsMain", kotlin_src_dirs=["src/webShared/kotlin"]),
+    }
+    project.source_set_dependencies = {
+        "jsMain": [Dependency(scope=None, target=NpmDependencyTarget(package="onnxruntime-web", version="1.24.3"))],
+        "wasmJsMain": [Dependency(scope=None, target=NpmDependencyTarget(package="onnxruntime-web", version="1.24.3"))],
+    }
+
+    repo_root = Path(__file__).resolve().parents[2]
+    kmp_template = (
+        repo_root / "data-repo-template" / "gradle-files" / "subproject-build-kmp.gradle.kts.jinja2"
+    ).read_text(encoding="utf-8")
+    ctx = _make_context(tmp_path, jvm_template="JVM_TEMPLATE", kmp_template=kmp_template)
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
+    assert "import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl" in build_text
+    assert 'freeCompilerArgs.add("-Xexpect-actual-classes")' in build_text
+    assert "js {" in build_text
+    assert "wasmJs {" in build_text
+    assert "binaries.executable()" in build_text
+    assert build_text.count("useChromeHeadless()") == 2
+    assert build_text.count('kotlin.srcDir("src/webShared/kotlin")') == 2
+    assert build_text.count('implementation(npm("onnxruntime-web", "1.24.3"))') == 2
+    assert 'if (name == "wasmJsMain")' in build_text
+
+
+def test_setup_gradle_project_renders_depends_on_parents_via_source_set_providers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "kmp-native-proj", platforms=["jvm", "linuxX64"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.targets = [
+        GradleTargetSpec(kind="jvm"),
+        GradleTargetSpec(kind="linuxX64"),
+    ]
+    project.source_sets = {
+        "ortNativeMain": GradleSourceSet(name="ortNativeMain", depends_on=["nativeMain"]),
+        "linuxX64Main": GradleSourceSet(name="linuxX64Main", depends_on=["ortNativeMain"]),
+    }
+
+    repo_root = Path(__file__).resolve().parents[2]
+    kmp_template = (
+        repo_root / "data-repo-template" / "gradle-files" / "subproject-build-kmp.gradle.kts.jinja2"
+    ).read_text(encoding="utf-8")
+    ctx = _make_context(tmp_path, jvm_template="JVM_TEMPLATE", kmp_template=kmp_template)
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
+    assert 'dependsOn(sourceSets.getByName("nativeMain"))' in build_text
+    assert 'dependsOn(sourceSets.getByName("ortNativeMain"))' in build_text
+    assert build_text.index("val nativeMain by getting") < build_text.index("val ortNativeMain by creating")
 
 
 def test_setup_gradle_project_renders_extra_gradle_plugin_in_jvm_build_and_settings(
@@ -1013,3 +1227,39 @@ def test_setup_gradle_project_uses_configured_paper_versions(
     settings_text = (project.path / "settings.gradle.kts").read_text(encoding="utf-8").strip()
     assert build_text == "BUNDLE=1.21.11-R0.1-SNAPSHOT"
     assert settings_text == "PLUGIN=2.0.0-beta.19"
+
+
+def test_setup_gradle_project_renders_paper_depend_shadow_jar_and_java_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "paper-proj", platforms=["jvm"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.resolved_features = {
+        "paper-plugin": PaperPlugin(
+            main="cc.Main",
+            name="CC",
+            apiVersion="1.20",
+            depend=["ProtocolLib", "Vault"],
+        ),
+        "shadow-jar": ShadowJar(jarName="cc-shadow.jar"),
+        "kotlin": Kotlin(),
+        "jvm": Jvm(),
+    }
+    ctx = _make_context(
+        tmp_path,
+        jvm_template=(
+            "DEPEND={{ features['paper-plugin'].depend|join(',') }}\n"
+            "JAR={{ features['shadow-jar'].jarName }}\n"
+            "JAVA={{ java_version }}"
+        ),
+        kmp_template="KMP_TEMPLATE",
+    )
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8").strip()
+    assert "DEPEND=ProtocolLib,Vault" in build_text
+    assert "JAR=cc-shadow.jar" in build_text
+    assert "JAVA=21" in build_text

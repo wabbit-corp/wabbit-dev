@@ -231,6 +231,7 @@ class PaperPlugin(Feature):
     main: str
     name: str
     apiVersion: str
+    depend: list[str] | None = None
 
     def implied(self) -> list[Feature]:
         return [
@@ -571,6 +572,9 @@ class GradleTargetSpec:
     min_sdk: int | None = None
     target_sdk: int | None = None
     manifest_path: str | None = None
+    browser: bool | None = None
+    browser_test: str | None = None
+    executable: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -578,6 +582,7 @@ class GradleSourceSet:
     name: str
     depends_on: list[str] = dataclasses.field(default_factory=list)
     dependencies: list["Dependency"] = dataclasses.field(default_factory=list)
+    kotlin_src_dirs: list[str] = dataclasses.field(default_factory=list)
 
 
 # In general a dependency looks like:
@@ -590,6 +595,7 @@ class GradleDependencyScope(Enum):
     API = "api"
     IMPLEMENTATION = "implementation"
     COMPILE_ONLY = "compileOnly"
+    KAPT = "kapt"
     RUNTIME_ONLY = "runtimeOnly"
     TEST_IMPLEMENTATION = "testImplementation"
     TEST_COMPILE_ONLY = "testCompileOnly"
@@ -612,6 +618,8 @@ class Dependency:
             if target.artifact is None:
                 raise ValueError("Maven dependency is missing artifact")
             return target.artifact
+        if isinstance(target, NpmDependencyTarget):
+            return target.package
         raise ValueError(f"Unsupported dependency target type: {type(target).__name__}")
 
     @property
@@ -653,6 +661,9 @@ class Dependency:
             artifact = target.artifact or ""
             return f'{modifier}("{artifact}")'
 
+        if isinstance(target, NpmDependencyTarget):
+            return f'{modifier}(npm("{target.package}", "{target.version}"))'
+
         raise ValueError(f"Unsupported dependency target type: {type(target).__name__}")
 
 
@@ -660,6 +671,7 @@ class DependencyTarget:
     JarFile: type["JarFileDependencyTarget"] = None  # type: ignore
     Project: type["ProjectDependencyTarget"] = None  # type: ignore
     Maven: type["MavenDependencyTarget"] = None  # type: ignore
+    Npm: type["NpmDependencyTarget"] = None  # type: ignore
 
 
 @dataclass
@@ -685,6 +697,15 @@ class MavenDependencyTarget(DependencyTarget):
 
 
 DependencyTarget.Maven = MavenDependencyTarget
+
+
+@dataclass
+class NpmDependencyTarget(DependencyTarget):
+    package: str
+    version: str
+
+
+DependencyTarget.Npm = NpmDependencyTarget
 
 ################################################################################
 # Project base + Gradle/Python subtypes
@@ -951,6 +972,8 @@ class GradleProject(Project):
     build_model: str | None = None
     targets: list["GradleTargetSpec"] = dataclasses.field(default_factory=list)
     source_sets: dict[str, "GradleSourceSet"] = dataclasses.field(default_factory=dict)
+    kotlin_free_compiler_args: list[str] = dataclasses.field(default_factory=list)
+    dokka_suppress_source_sets: list[str] = dataclasses.field(default_factory=list)
     jvm_policy: str | None = None
     jvm_task_policies: dict[str, str] = dataclasses.field(default_factory=dict)
     publish_target: str | None = None
@@ -1117,6 +1140,8 @@ SUPPORTED_DOC_SYSTEMS: tuple[str, ...] = (
 SUPPORTED_KMP_PLATFORMS: tuple[str, ...] = (
     "jvm",
     "android",
+    "js",
+    "wasmJs",
     "iosArm64",
     "iosSimulatorArm64",
     "macosX64",
@@ -1129,6 +1154,8 @@ SUPPORTED_GRADLE_TARGET_KINDS: tuple[str, ...] = (
     "jvm",
     "android-application",
     "android-kmp-library",
+    "js",
+    "wasmJs",
     "iosArm64",
     "iosSimulatorArm64",
     "macosX64",
@@ -1141,6 +1168,8 @@ GRADLE_TARGET_KIND_TO_PLATFORM: dict[str, str] = {
     "jvm": "jvm",
     "android-application": "android",
     "android-kmp-library": "android",
+    "js": "js",
+    "wasmJs": "wasmJs",
     "iosArm64": "iosArm64",
     "iosSimulatorArm64": "iosSimulatorArm64",
     "macosX64": "macosX64",
@@ -1150,6 +1179,9 @@ GRADLE_TARGET_KIND_TO_PLATFORM: dict[str, str] = {
 }
 
 APPLE_KMP_PLATFORMS: frozenset[str] = frozenset({"iosArm64", "iosSimulatorArm64", "macosX64", "macosArm64"})
+NATIVE_KMP_PLATFORMS: frozenset[str] = frozenset(
+    {"iosArm64", "iosSimulatorArm64", "macosX64", "macosArm64", "linuxX64", "mingwX64"}
+)
 
 CANONICAL_KMP_SOURCE_SET_REQUIREMENTS: dict[str, str] = {
     "commonMain": "common",
@@ -1158,6 +1190,12 @@ CANONICAL_KMP_SOURCE_SET_REQUIREMENTS: dict[str, str] = {
     "jvmTest": "jvm",
     "androidMain": "android",
     "androidUnitTest": "android",
+    "jsMain": "js",
+    "jsTest": "js",
+    "wasmJsMain": "wasmJs",
+    "wasmJsTest": "wasmJs",
+    "nativeMain": "native",
+    "nativeTest": "native",
     "appleMain": "apple",
     "appleTest": "apple",
     "iosArm64Main": "iosArm64",
@@ -1265,6 +1303,9 @@ def _normalize_gradle_targets(
         min_sdk = target.minSdk
         target_sdk = target.targetSdk
         manifest_path = target.manifestPath.strip() if target.manifestPath is not None else None
+        browser = target.browser
+        browser_test = target.browserTest.strip() if target.browserTest is not None else None
+        executable = target.executable
 
         if name == "":
             raise ValueError(f"{project_name}.targets[{target_index}].name must not be empty")
@@ -1274,6 +1315,8 @@ def _normalize_gradle_targets(
             raise ValueError(f"{project_name}.targets[{target_index}].applicationId must not be empty")
         if manifest_path == "":
             raise ValueError(f"{project_name}.targets[{target_index}].manifestPath must not be empty")
+        if browser_test == "":
+            raise ValueError(f"{project_name}.targets[{target_index}].browserTest must not be empty")
 
         if name is not None:
             if name in seen_target_names:
@@ -1298,6 +1341,21 @@ def _normalize_gradle_targets(
             if manifest_path is None:
                 manifest_path = "src/androidMain/AndroidManifest.xml"
 
+        if browser_test is not None:
+            if browser is False:
+                raise ValueError(
+                    f"{project_name}.targets[{target_index}] browserTest requires browser=true"
+                )
+            browser = True
+
+        if browser_test is not None and browser_test != "chromeHeadless":
+            raise ValueError(
+                f"{project_name}.targets[{target_index}].browserTest must be chromeHeadless when specified"
+            )
+
+        if executable and kind != "wasmJs":
+            raise ValueError(f"{project_name}.targets[{target_index}] executable is only valid for wasmJs")
+
         normalized_targets.append(
             GradleTargetSpec(
                 kind=kind,
@@ -1308,6 +1366,9 @@ def _normalize_gradle_targets(
                 min_sdk=min_sdk,
                 target_sdk=target_sdk,
                 manifest_path=manifest_path,
+                browser=browser,
+                browser_test=browser_test,
+                executable=executable,
             )
         )
 
@@ -1409,6 +1470,8 @@ def _source_set_is_allowed_for_platforms(source_set: str, platforms: list[str]) 
     requirement = CANONICAL_KMP_SOURCE_SET_REQUIREMENTS[source_set]
     if requirement == "common":
         return True
+    if requirement == "native":
+        return any(platform in NATIVE_KMP_PLATFORMS for platform in platforms)
     if requirement == "apple":
         return any(platform in APPLE_KMP_PLATFORMS for platform in platforms)
     return requirement in platforms
@@ -1542,7 +1605,22 @@ def load_config() -> Config:
                 continue
             nested_token: object | None = getattr(value, "token", None)
             return nested_token if nested_token is not None else value
-        return None
+
+        values = getattr(expr, "values", None)
+        if isinstance(values, list):
+            for item in values:
+                nested = _extract_expr_span(item)
+                if nested is not None:
+                    return nested
+
+        for attr in ("key", "value"):
+            value = getattr(expr, attr, None)
+            if value is None:
+                continue
+            nested = _extract_expr_span(value)
+            if nested is not None:
+                return nested
+        return expr
 
     def _coerce_ownership(value: str | None) -> OwnershipType:
         if value is None:
@@ -1573,8 +1651,15 @@ def load_config() -> Config:
             return JvmScalaLibrary()
         if isinstance(command, config_typed.JvmKotlinApplicationCommand):
             return JvmKotlinApplication(command.main, command.jar)
+        if isinstance(command, config_typed.ShadowJarCommand):
+            return ShadowJar(jarName=command.jar)
         if isinstance(command, config_typed.PaperPluginCommand):
-            return PaperPlugin(command.main, command.name, command.apiVersion)
+            return PaperPlugin(
+                main=command.main,
+                name=command.name,
+                apiVersion=command.apiVersion,
+                depend=list(command.depend or []) or None,
+            )
         if isinstance(command, config_typed.JvmKotlinAgentCommand):
             return JvmKotlinAgent(command.main, command.jar)
         if isinstance(command, config_typed.IntellijPluginCommand):
@@ -1652,6 +1737,7 @@ def load_config() -> Config:
             "implementation",
             "api",
             "compileOnly",
+            "kapt",
             "runtimeOnly",
             "testImplementation",
             "testCompileOnly",
@@ -1696,6 +1782,15 @@ def load_config() -> Config:
                     target=ProjectDependencyTarget(project=resolved_project_name),
                 )
             ]
+
+        if dep.startswith("npm:"):
+            npm_spec = dep.removeprefix("npm:")
+            if ":" not in npm_spec:
+                raise ValueError(f"NPM dependency must be npm:<package>:<version>, got {dep!r}")
+            package, version = npm_spec.rsplit(":", 1)
+            if not package or not version:
+                raise ValueError(f"NPM dependency must be npm:<package>:<version>, got {dep!r}")
+            return [Dependency(scope=modifier, target=NpmDependencyTarget(package=package, version=version))]
 
         if dep in config.library_groups:
             group_result: list[Dependency] = []
@@ -2264,6 +2359,7 @@ def load_config() -> Config:
                             name=source_set_name,
                             depends_on=list(source_set_command.dependsOn or []),
                             dependencies=parsed_dependencies,
+                            kotlin_src_dirs=list(source_set_command.kotlinSrcDirs or []),
                         )
                         source_set_dependencies[source_set_name] = parsed_dependencies
                         resolved_dependencies.extend(parsed_dependencies)
@@ -2291,6 +2387,7 @@ def load_config() -> Config:
                             name=source_set_name,
                             depends_on=[],
                             dependencies=parsed_dependencies,
+                            kotlin_src_dirs=[],
                         )
                         source_set_dependencies[source_set_name] = parsed_dependencies
                         resolved_dependencies.extend(parsed_dependencies)
@@ -2407,6 +2504,8 @@ def load_config() -> Config:
                 build_model=build_model,
                 targets=normalized_targets,
                 source_sets=source_sets,
+                kotlin_free_compiler_args=list(command.kotlinFreeCompilerArgs or []),
+                dokka_suppress_source_sets=list(command.dokkaSuppressSourceSets or []),
                 jvm_policy=command.jvmPolicy or repo_jvm_policy,
                 jvm_task_policies=dict(command.jvmTaskPolicies or {}),
                 publish_target=publish_target,

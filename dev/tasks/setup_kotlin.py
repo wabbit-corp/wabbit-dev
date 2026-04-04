@@ -23,6 +23,7 @@ from dev.config import (
     KmpAndroidLibrary,
     KmpJvmRuns,
     MavenDependencyTarget,
+    NpmDependencyTarget,
     PremakeProject,
     Project,
     ProjectDependencyTarget,
@@ -33,7 +34,7 @@ from dev.config import (
     resolve_kotlin_plugin_id,
     resolve_kotlin_plugin_version,
 )
-from dev.licenses import license_display_name, license_spdx_url
+from dev.licenses import canonicalize_license_key, license_display_name, license_spdx_url
 from dev.messages import error, warning
 from dev.tasks.setup_common import RepoSetupMode, clean_text, render_template, write_banner, write_wabbit_legal_files
 
@@ -151,6 +152,8 @@ def _render_dependency_for_mode(ctx: GradleSetupContext, project: Project, depen
         return dependency.as_string()
     if isinstance(target, JarFileDependencyTarget):
         return dependency.as_string()
+    if isinstance(target, NpmDependencyTarget):
+        return dependency.as_string()
 
     if isinstance(target, ProjectDependencyTarget):
         name = target.project
@@ -190,7 +193,9 @@ def _make_dependency_strings(ctx: GradleSetupContext, project: Project) -> tuple
     project_dependencies: list[str] = []
     for dep in project.resolved_dependencies:
         target = dep.target
-        if isinstance(target, MavenDependencyTarget) or isinstance(target, JarFileDependencyTarget):
+        if isinstance(target, MavenDependencyTarget) or isinstance(target, JarFileDependencyTarget) or isinstance(
+            target, NpmDependencyTarget
+        ):
             other_dependencies.append(_render_dependency_for_mode(ctx, project, dep))
             continue
 
@@ -415,6 +420,10 @@ def _has_apple_targets(project: GradleProject) -> bool:
     )
 
 
+def _has_wasm_targets(project: GradleProject) -> bool:
+    return any(target.kind == "wasmJs" for target in _effective_targets(project))
+
+
 def _apple_framework_target_names(project: GradleProject) -> list[str]:
     names: list[str] = []
     for target in _effective_targets(project):
@@ -476,6 +485,10 @@ def _default_source_set_names(project: GradleProject) -> set[str]:
             result.update({"jvmMain", "jvmTest"})
         elif target.kind in ("android-application", "android-kmp-library"):
             result.update({"androidMain", "androidUnitTest"})
+        elif target.kind == "js":
+            result.update({"jsMain", "jsTest"})
+        elif target.kind == "wasmJs":
+            result.update({"wasmJsMain", "wasmJsTest"})
         elif target.kind == "iosArm64":
             has_native_targets = True
             has_apple_targets = True
@@ -523,6 +536,7 @@ def _source_set_entries(
                     "accessor": "getting" if source_set_name in default_source_sets else "creating",
                     "depends_on": [],
                     "dependencies": list(dependencies),
+                    "kotlin_src_dirs": [],
                 }
             )
         return entries
@@ -567,6 +581,10 @@ def _source_set_entries(
         if source_set_name in ("jvmMain", "androidMain"):
             return "commonMain"
         if source_set_name in ("jvmTest", "androidUnitTest"):
+            return "commonTest"
+        if source_set_name in ("jsMain", "wasmJsMain"):
+            return "commonMain"
+        if source_set_name in ("jsTest", "wasmJsTest"):
             return "commonTest"
         if source_set_name in ("iosArm64Main", "iosSimulatorArm64Main"):
             if "iosMain" in declared_source_sets:
@@ -634,10 +652,33 @@ def _source_set_entries(
                 "accessor": "getting",
                 "depends_on": [],
                 "dependencies": list(source_set_dependencies.get(source_set_name, [])),
+                "kotlin_src_dirs": [],
             }
         )
 
-    for source_set_name, source_set in project.source_sets.items():
+    ordered_project_source_set_names: list[str] = []
+    visited_source_sets: set[str] = set()
+    active_source_sets: set[str] = set()
+
+    def visit_source_set(source_set_name: str) -> None:
+        if source_set_name in visited_source_sets:
+            return
+        if source_set_name in active_source_sets:
+            raise ValueError(f"Cyclic KMP source set dependsOn chain detected at {project.name}.{source_set_name}")
+        active_source_sets.add(source_set_name)
+        source_set = project.source_sets[source_set_name]
+        for parent_source_set in source_set.depends_on:
+            if parent_source_set in project.source_sets:
+                visit_source_set(parent_source_set)
+        active_source_sets.remove(source_set_name)
+        visited_source_sets.add(source_set_name)
+        ordered_project_source_set_names.append(source_set_name)
+
+    for source_set_name in project.source_sets:
+        visit_source_set(source_set_name)
+
+    for source_set_name in ordered_project_source_set_names:
+        source_set = project.source_sets[source_set_name]
         depends_on = [parent for parent in source_set.depends_on if parent != implicit_parent(source_set_name)]
         entries.append(
             {
@@ -645,8 +686,16 @@ def _source_set_entries(
                 "accessor": "getting" if source_set_name in default_source_sets else "creating",
                 "depends_on": depends_on,
                 "dependencies": list(source_set_dependencies.get(source_set_name, [])),
+                "kotlin_src_dirs": list(source_set.kotlin_src_dirs),
             }
         )
+    accessor_by_name = {str(entry["name"]): str(entry["accessor"]) for entry in entries}
+    for entry in entries:
+        depends_on = entry["depends_on"]
+        assert isinstance(depends_on, list)
+        entry["depends_on_refs"] = [
+            f"{parent}.get()" if accessor_by_name.get(parent) == "getting" else parent for parent in depends_on
+        ]
     return entries
 
 
@@ -992,13 +1041,36 @@ def _write_gradle_repo_root_workflows(
 
 def _cleanup_nested_gradle_project_files(project: GradleProject) -> None:
     dev.io.delete_if_exists(project.path / "settings.gradle.kts")
+    dev.io.delete_if_exists(project.path / "settings.local.gradle.kts")
     dev.io.delete_if_exists(project.path / "gradlew")
     dev.io.delete_if_exists(project.path / "gradlew.bat")
     dev.io.delete_if_exists(project.path / "gradle.properties")
+    dev.io.delete_if_exists(project.path / ".banner.png")
+    dev.io.delete_if_exists(project.path / "CLA.md")
+    dev.io.delete_if_exists(project.path / "CLA_EXPLANATIONS.md")
+    dev.io.delete_if_exists(project.path / "CONTRIBUTOR_PRIVACY.md")
+    dev.io.delete_if_exists(project.path / "CODE_OF_CONDUCT.md")
     dev.io.delete_if_exists(project.path / ".is-local-mode")
     dev.io.delete_if_exists(project.path / ".is-ij-mode")
     dev.io.delete_if_exists(project.path / ".is-dev-mode")
     dev.io.delete_if_exists(project.path / "gradle")
+
+
+def _nested_gradle_project_keeps_license(ctx: GradleSetupContext, project: GradleProject) -> bool:
+    repo_id = project.repo_id
+    if repo_id is None:
+        return True
+    repo_definition = ctx.config.defined_repos.get(repo_id)
+    if repo_definition is None:
+        return True
+
+    normalized_licenses: set[str | None] = set()
+    for project_id in repo_definition.project_ids:
+        candidate = ctx.config.defined_projects.get(project_id)
+        if candidate is None:
+            continue
+        normalized_licenses.add(canonicalize_license_key(candidate.license))
+    return len(normalized_licenses) != 1
 
 
 def _mark_executable(path: Path) -> None:
@@ -1021,6 +1093,13 @@ def clean_gradle_build_text(text: str) -> str:
         if text == old_text:
             break
     return text
+
+
+def read_optional_inline_gradle_build_script(root_path: Path) -> str:
+    inline_script_path = root_path / "build.inline.gradle.kts"
+    if not inline_script_path.exists():
+        return ""
+    return dev.io.read_text_file(inline_script_path).rstrip()
 
 
 def java_version_for_features(default_java_version: int, features: Mapping[str, object]) -> int:
@@ -1167,6 +1246,9 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
     compose_plugin_version = _compose_plugin_version(ctx)
     nested_gradle_project = _is_nested_gradle_project(project)
     kotlin_free_compiler_args = [CONTEXT_PARAMETERS_COMPILER_FLAG]
+    kotlin_free_compiler_args.extend(
+        arg for arg in project.kotlin_free_compiler_args if arg != CONTEXT_PARAMETERS_COMPILER_FLAG
+    )
     extra_gradle_plugins, _extra_gradle_plugin_repositories = _extra_gradle_plugins_for_projects(ctx, [project])
     kotlin_compiler_plugin_options = _kotlin_compiler_plugin_options_for_project(ctx, project)
     publish_to_maven_central = _supports_gradle_maven_central(project)
@@ -1204,6 +1286,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             use_root_plugin_management=nested_gradle_project,
             platforms=project.platforms,
             targets=targets,
+            has_wasm_targets=_has_wasm_targets(project),
             has_apple_targets=_has_apple_targets(project),
             apple_framework_target_names=_apple_framework_target_names(project),
             needs_google_repository=_needs_google_repository(project),
@@ -1218,10 +1301,12 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             kotlin_compiler_plugin_options=kotlin_compiler_plugin_options,
             extra_gradle_plugins=extra_gradle_plugins,
             paper_dev_bundle_version=_paper_dev_bundle_version(ctx),
+            dokka_suppress_source_sets=project.dokka_suppress_source_sets,
             dokka_source_link_remote_url=dokka_source_link_remote_url or "",
             has_dokka_source_link=dokka_source_link_remote_url is not None,
             company_legal_name=company_legal_name,
             publish_to_maven_central=publish_to_maven_central,
+            inline_extra_build_script=read_optional_inline_gradle_build_script(project.path),
             **maven_central_context,
         )
     else:
@@ -1256,6 +1341,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             company_legal_name=company_legal_name,
             publish_to_maven_central=publish_to_maven_central,
             is_gradle_plugin_project=project.gradle_plugin_id is not None,
+            inline_extra_build_script=read_optional_inline_gradle_build_script(project.path),
             **maven_central_context,
             **gradle_plugin_project_context,
         )
@@ -1264,6 +1350,8 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
 
     if nested_gradle_project:
         _cleanup_nested_gradle_project_files(project)
+        if not _nested_gradle_project_keeps_license(ctx, project):
+            dev.io.delete_if_exists(project.path / "LICENSE.md")
     else:
         dev.io.write_text_file(
             project.path / "settings.gradle.kts",

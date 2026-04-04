@@ -637,8 +637,8 @@ def test_targeted_prod_setup_omits_cross_repo_gradle_projects_from_root_settings
     def fake_load_config() -> Config:
         return config
 
-    def fake_toposort_projects(_projects: object, target_project: str | None = None) -> list[str]:
-        assert target_project == "jeeves/server"
+    def fake_toposort_projects(_projects: object, target_project: object = None) -> list[str]:
+        assert target_project == ["jeeves/server"]
         return ["jeeves/api", "kotlin-dotenv-parser", "jeeves/server"]
 
     def fake_create_repo_setup_context(_config: Config, mode: object) -> object:
@@ -716,9 +716,15 @@ def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
         project_id="jeeves/api",
         repo_root_path=jeeves_root,
     )
+    impl_project = make_gradle_project(
+        jeeves_root / "impl",
+        project_id="jeeves/impl",
+        repo_root_path=jeeves_root,
+    )
+    impl_project.license = "MIT"
 
     config = Config(raw=Document([]))
-    config.defined_projects.update({"jeeves/api": api_project})
+    config.defined_projects.update({"jeeves/api": api_project, "jeeves/impl": impl_project})
     config.defined_repos.update(
         {
             "jeeves": RepoDefinition(
@@ -727,13 +733,14 @@ def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
                 github_repo="org/jeeves",
                 gradle_root_project_name="one.wabbit",
                 jvm_policy=None,
-                project_ids=["jeeves/api"],
+                project_ids=["jeeves/api", "jeeves/impl"],
             )
         }
     )
     config.plugins["kotlin-jvm"] = KotlinPluginDefinition(plugin_id="org.jetbrains.kotlin.jvm", version="2.2.20")
 
     written_paths: list[Path] = []
+    written_license_paths: list[Path] = []
 
     monkeypatch.setattr(setup_module, "load_config", lambda: config)
     monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["jeeves/api"])
@@ -745,11 +752,113 @@ def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_common_module, "write_wabbit_legal_documents", lambda _ctx, project: written_paths.append(project.path))
+    monkeypatch.setattr(setup_common_module, "write_wabbit_legal_files", lambda _ctx, project: written_license_paths.append(project.path))
     monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
 
     setup_module.setup(setup_module.RepoSetupMode.LOCAL, interactive=False, project="jeeves/api")
 
     assert written_paths == [jeeves_root]
+    assert written_license_paths == []
+
+
+def test_setup_writes_repo_root_license_when_repo_managed_gradle_project_licenses_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    import dev.tasks.setup_common as setup_common_module
+    from dev.config import Config, GradleProject, KotlinPluginDefinition, OwnershipType, RepoDefinition, Version
+
+    def make_gradle_project(
+        path: Path,
+        *,
+        project_id: str,
+        repo_root_path: Path,
+        license_name: str,
+    ) -> GradleProject:
+        return GradleProject(
+            path=path,
+            group_name="one.wabbit",
+            name=path.name,
+            version=Version.parse("0.0.1"),
+            description=None,
+            authors=[],
+            license=license_name,
+            quarantine=False,
+            publish=False,
+            github_repo="org/repo",
+            ownership=OwnershipType.WABBIT,
+            raw_dependencies=[],
+            raw_features=[],
+            resolved_dependencies=[],
+            resolved_maven_repositories=[],
+            resolved_features={},
+            platforms=["jvm"],
+            source_set_dependencies={},
+            project_id=project_id,
+            repo_id=project_id.split("/", 1)[0],
+            repo_root=repo_root_path,
+            managed_by_setup=False,
+            gradle_root=repo_root_path,
+            module_dir=Path(path.name),
+            gradle_project_name=path.name,
+        )
+
+    repo_root = tmp_path / "repo"
+    api_project = make_gradle_project(
+        repo_root / "api",
+        project_id="repo/api",
+        repo_root_path=repo_root,
+        license_name="AGPL",
+    )
+    impl_project = make_gradle_project(
+        repo_root / "impl",
+        project_id="repo/impl",
+        repo_root_path=repo_root,
+        license_name="AGPL",
+    )
+
+    config = Config(raw=Document([]))
+    config.defined_projects.update({"repo/api": api_project, "repo/impl": impl_project})
+    config.defined_repos["repo"] = RepoDefinition(
+        repo_id="repo",
+        path=repo_root,
+        github_repo="org/repo",
+        gradle_root_project_name="one.wabbit",
+        jvm_policy=None,
+        project_ids=["repo/api", "repo/impl"],
+    )
+    config.plugins["kotlin-jvm"] = KotlinPluginDefinition(plugin_id="org.jetbrains.kotlin.jvm", version="2.2.20")
+
+    written_license_paths: list[Path] = []
+    written_document_paths: list[Path] = []
+
+    monkeypatch.setattr(setup_module, "load_config", lambda: config)
+    monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["repo/api"])
+    monkeypatch.setattr(
+        setup_module,
+        "create_repo_setup_context",
+        lambda _config, mode: SimpleNamespace(config=config, mode=mode),
+    )
+    monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        setup_common_module,
+        "write_wabbit_legal_files",
+        lambda _ctx, project: written_license_paths.append(project.path),
+    )
+    monkeypatch.setattr(
+        setup_common_module,
+        "write_wabbit_legal_documents",
+        lambda _ctx, project: written_document_paths.append(project.path),
+    )
+    monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
+
+    setup_module.setup(setup_module.RepoSetupMode.LOCAL, interactive=False, project="repo/api")
+
+    assert written_license_paths == [repo_root]
+    assert written_document_paths == []
 
 
 def test_setup_does_not_commit_or_push_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -302,6 +302,50 @@ def test_gradle_kmp_supports_desktop_native_targets(tmp_path: Path) -> None:
     assert [target.kind for target in project.targets] == ["jvm", "linuxX64", "mingwX64", "macosX64"]
 
 
+def test_gradle_kmp_supports_js_wasm_targets_and_custom_source_set_dirs(tmp_path: Path) -> None:
+    from dev.config import GradleProject, NpmDependencyTarget
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(define-maven-library "kotlin-stdlib" "org.jetbrains.kotlin:kotlin-stdlib:2.2.20")',
+                "("
+                'gradle "demo-kmp" '
+                ':version "0.1.0" '
+                ':buildModel "kmp" '
+                ':targets ['
+                '{"kind": "jvm"} '
+                '{"kind": "js" "browser": true "browserTest": "chromeHeadless"} '
+                '{"kind": "wasmJs" "browser": true "browserTest": "chromeHeadless" "executable": true}'
+                '] '
+                ':kotlinFreeCompilerArgs ["-Xexpect-actual-classes"] '
+                ':dokkaSuppressSourceSets ["wasmJsMain"] '
+                ':sourceSets {'
+                '"jsMain": {"dependencies": ["npm:onnxruntime-web:1.24.3"] "kotlinSrcDirs": ["src/webShared/kotlin"]} '
+                '"wasmJsMain": {"dependencies": ["kotlin-stdlib" "npm:onnxruntime-web:1.24.3"] "kotlinSrcDirs": ["src/webShared/kotlin"]}'
+                "})",
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo-kmp"]
+    assert isinstance(project, GradleProject)
+    assert project.platforms == ["jvm", "js", "wasmJs"]
+    assert [target.kind for target in project.targets] == ["jvm", "js", "wasmJs"]
+    assert project.targets[1].browser is True
+    assert project.targets[1].browser_test == "chromeHeadless"
+    assert project.targets[2].executable is True
+    assert project.kotlin_free_compiler_args == ["-Xexpect-actual-classes"]
+    assert project.dokka_suppress_source_sets == ["wasmJsMain"]
+    assert project.source_sets["jsMain"].kotlin_src_dirs == ["src/webShared/kotlin"]
+    assert project.source_sets["wasmJsMain"].kotlin_src_dirs == ["src/webShared/kotlin"]
+    assert isinstance(project.source_sets["jsMain"].dependencies[0].target, NpmDependencyTarget)
+    assert project.source_sets["jsMain"].dependencies[0].target.package == "onnxruntime-web"
+
+
 def test_gradle_kmp_legacy_android_feature_still_backfills_targets(tmp_path: Path) -> None:
     from dev.config import GradleProject
 
@@ -515,6 +559,83 @@ def test_gradle_plugin_feature_rejects_non_plugin_id_definition(tmp_path: Path) 
                 ]
             ),
         )
+
+
+def test_gradle_project_loads_shadow_jar_feature(tmp_path: Path) -> None:
+    from dev.config import GradleProject, ShadowJar
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'gradle "demo" '
+                ':version "0.1.0" '
+                ':features [(shadow-jar :jar "demo-all.jar")]'
+                ")",
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo"]
+    assert isinstance(project, GradleProject)
+    assert isinstance(project.resolved_features["shadow-jar"], ShadowJar)
+    assert project.resolved_features["shadow-jar"].jarName == "demo-all.jar"
+
+
+def test_gradle_project_loads_paper_depend_feature(tmp_path: Path) -> None:
+    from dev.config import GradleProject, PaperPlugin, ShadowJar
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'gradle "demo" '
+                ':version "0.1.0" '
+                ':features [(paper-plugin :name "Demo" :main "cc.demo.Main" :apiVersion "1.21" :depend ["ProtocolLib" "Vault"])]'
+                ")",
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo"]
+    assert isinstance(project, GradleProject)
+    assert isinstance(project.resolved_features["paper-plugin"], PaperPlugin)
+    assert project.resolved_features["paper-plugin"].depend == ["ProtocolLib", "Vault"]
+    assert isinstance(project.resolved_features["shadow-jar"], ShadowJar)
+    assert project.resolved_features["shadow-jar"].jarName == "Demo.jar"
+
+
+def test_gradle_project_accepts_kapt_dependency_modifier(tmp_path: Path) -> None:
+    from dev.config import GradleProject, MavenDependencyTarget
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(define-maven-library "velocity-api" "com.velocitypowered:velocity-api:3.4.0-SNAPSHOT")',
+                "("
+                'gradle "demo" '
+                ':version "0.1.0" '
+                ':features [(jvm-kotlin-library)] '
+                ':dependencies [(dep "velocity-api" "kapt")])',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo"]
+    assert isinstance(project, GradleProject)
+    dependency = project.resolved_dependencies[0]
+    assert dependency.scope == "kapt"
+    assert isinstance(dependency.target, MavenDependencyTarget)
+    assert dependency.target.artifact == "com.velocitypowered:velocity-api:3.4.0-SNAPSHOT"
 
 
 def test_gradle_kmp_rejects_legacy_dependencies_key(tmp_path: Path) -> None:

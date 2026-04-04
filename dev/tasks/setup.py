@@ -29,7 +29,7 @@ from dev.config import (
     resolve_kotlin_plugin_project,
 )
 from dev.git_changes import ChangeType, FileDiff, FileType, compute_repo_diffs
-from dev.licenses import load_license_texts
+from dev.licenses import canonicalize_license_key, load_license_texts
 from dev.messages import ask, error, info, warning
 from dev.tasks import setup_common, setup_kotlin, setup_python
 from dev.tasks.setup_common import RepoSetupMode, render_template
@@ -330,8 +330,22 @@ def _write_repo_root_wabbit_legal_documents(
     if representative_project.ownership != OwnershipType.WABBIT:
         return
 
-    repo_root_project = dataclasses.replace(representative_project, path=representative_project.effective_repo_root)
+    repo_root_path = representative_project.effective_repo_root
+    normalized_licenses = {canonicalize_license_key(project.license) for project in repo_projects}
+    shared_license = next(iter(normalized_licenses)) if len(normalized_licenses) == 1 else None
+
+    if shared_license is not None:
+        repo_root_project = dataclasses.replace(
+            representative_project,
+            path=repo_root_path,
+            license=shared_license,
+        )
+        setup_common.write_wabbit_legal_files(ctx, repo_root_project)
+        return
+
+    repo_root_project = dataclasses.replace(representative_project, path=repo_root_path)
     setup_common.write_wabbit_legal_documents(ctx, repo_root_project)
+    dev.io.delete_if_exists(repo_root_path / "LICENSE.md")
 
 
 def _write_banner(ctx: setup_common.CommonSetupContext, project: Project) -> None:
@@ -641,6 +655,7 @@ def _write_gradle_root_files(
             ctx.build_template,
             **plugin_context,
             dependency_substitutions=dependency_substitutions,
+            inline_extra_build_script=setup_kotlin.read_optional_inline_gradle_build_script(root_path),
         )
         dev.io.write_text_file(root_path / "build.gradle.kts", setup_kotlin.clean_gradle_build_text(build_text))
 

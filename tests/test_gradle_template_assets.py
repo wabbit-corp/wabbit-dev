@@ -85,3 +85,28 @@ def test_gradle_templates_enable_context_parameters_by_default(template_name: st
 
     assert 'freeCompilerArgs.add("-Xcontext-parameters")' in content
     assert "-Xcontext-receivers" not in content
+
+
+@pytest.mark.parametrize(
+    "template_name",
+    [
+        "build.gradle.kts.jinja2",
+        "subproject-build.gradle.kts.jinja2",
+        "subproject-build-kmp.gradle.kts.jinja2",
+    ],
+)
+def test_gradle_build_templates_apply_optional_extra_file(template_name: str) -> None:
+    template_path = Path(__file__).resolve().parents[2] / "data-repo-template" / "gradle-files" / template_name
+    content = template_path.read_text(encoding="utf-8")
+
+    assert "inline_extra_build_script" in content
+    assert 'file("build.extra.gradle.kts")' in content
+    assert "apply(from = extraBuildFile)" in content
+
+
+def test_gradle_jvm_subproject_template_sets_java_release_and_paper_depend() -> None:
+    template_path = Path(__file__).resolve().parents[2] / "data-repo-template" / "gradle-files" / "subproject-build.gradle.kts.jinja2"
+    content = template_path.read_text(encoding="utf-8")
+
+    assert "options.release.set({{ java_version }})" in content
+    assert "features['paper-plugin'].depend or []" in content

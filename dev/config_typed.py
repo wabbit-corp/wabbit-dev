@@ -166,6 +166,9 @@ def _decode_gradle_target_commands(expr: Expr, ctx: DecodeContext) -> list[Gradl
         min_sdk: int | None = None
         target_sdk: int | None = None
         manifest_path: str | None = None
+        browser: bool | None = None
+        browser_test: str | None = None
+        executable: bool | None = None
         for field_index, field in enumerate(item.values):
             key = ctx.decode(field.key, str, path=f"{ctx.path}[{index}].keys[{field_index}]")
             value_path = f"{ctx.path}[{index}].values[{field_index}]"
@@ -193,6 +196,15 @@ def _decode_gradle_target_commands(expr: Expr, ctx: DecodeContext) -> list[Gradl
             if key == "manifestPath":
                 manifest_path = ctx.decode(field.value, str, path=value_path)
                 continue
+            if key == "browser":
+                browser = ctx.decode(field.value, bool, path=value_path)
+                continue
+            if key == "browserTest":
+                browser_test = ctx.decode(field.value, str, path=value_path)
+                continue
+            if key == "executable":
+                executable = ctx.decode(field.value, bool, path=value_path)
+                continue
             raise DecodeError(
                 path=f"{ctx.path}[{index}]",
                 expected="Gradle target field",
@@ -217,6 +229,9 @@ def _decode_gradle_target_commands(expr: Expr, ctx: DecodeContext) -> list[Gradl
                 minSdk=min_sdk,
                 targetSdk=target_sdk,
                 manifestPath=manifest_path,
+                browser=browser,
+                browserTest=browser_test,
+                executable=executable,
             )
         )
     return result
@@ -307,6 +322,7 @@ def _decode_gradle_source_sets(expr: Expr, ctx: DecodeContext) -> dict[str, Grad
 
         depends_on: list[str] | None = None
         dependencies: list[DependencyInput] | None = None
+        kotlin_src_dirs: list[str] | None = None
         for nested_index, nested_field in enumerate(field.value.values):
             nested_key = ctx.decode(
                 nested_field.key,
@@ -320,14 +336,21 @@ def _decode_gradle_source_sets(expr: Expr, ctx: DecodeContext) -> dict[str, Grad
             if nested_key == "dependencies":
                 dependencies = ctx.decode(nested_field.value, list[DependencyInput], path=nested_path)
                 continue
+            if nested_key == "kotlinSrcDirs":
+                kotlin_src_dirs = ctx.decode(nested_field.value, list[str], path=nested_path)
+                continue
             raise DecodeError(
                 path=f"{ctx.path}.values[{index}]",
-                expected="source-set fields dependsOn/dependencies",
+                expected="source-set fields dependsOn/dependencies/kotlinSrcDirs",
                 got=nested_key,
                 span=getattr(nested_field.key, "span", None),
             )
 
-        result[source_set_name] = GradleSourceSetCommand(dependsOn=depends_on, dependencies=dependencies)
+        result[source_set_name] = GradleSourceSetCommand(
+            dependsOn=depends_on,
+            dependencies=dependencies,
+            kotlinSrcDirs=kotlin_src_dirs,
+        )
     return result
 
 
@@ -513,12 +536,19 @@ class JvmKotlinApplicationCommand:
     jar: str | None = None
 
 
+@tag("shadow-jar")
+@dataclass(frozen=True)
+class ShadowJarCommand:
+    jar: str | None = None
+
+
 @tag("paper-plugin")
 @dataclass(frozen=True)
 class PaperPluginCommand:
     name: str
     main: str
     apiVersion: str
+    depend: list[str] | None = None
 
 
 @tag("jvm-kotlin-agent")
@@ -594,6 +624,7 @@ class KmpJvmRunsCommand:
 class GradleSourceSetCommand:
     dependsOn: list[str] | None = None
     dependencies: list[DependencyInput] | None = None
+    kotlinSrcDirs: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -606,6 +637,9 @@ class GradleTargetCommand:
     minSdk: int | None = None
     targetSdk: int | None = None
     manifestPath: str | None = None
+    browser: bool | None = None
+    browserTest: str | None = None
+    executable: bool | None = None
 
 
 @tag("python-deptry")
@@ -639,6 +673,7 @@ FeatureCommand = (
     JvmKotlinLibraryCommand
     | JvmScalaLibraryCommand
     | JvmKotlinApplicationCommand
+    | ShadowJarCommand
     | PaperPluginCommand
     | JvmKotlinAgentCommand
     | IntellijPluginCommand
@@ -813,6 +848,8 @@ class GradleProjectCommand:
         dict[str, GradleSourceSetCommand] | None,
         DecodeWith(_decode_gradle_source_sets),
     ] = None
+    kotlinFreeCompilerArgs: list[str] | None = None
+    dokkaSuppressSourceSets: list[str] | None = None
     features: list[FeatureCommand] | None = None
     publishTarget: str | None = None
     publishSnapshots: bool | None = None
@@ -989,6 +1026,7 @@ __all__ = [
     "PythonFeatureCommand",
     "PythonImportlinterCommand",
     "PythonProjectCommand",
+    "ShadowJarCommand",
     "Value",
     "VarName",
     "AnthropicKeyCommand",
