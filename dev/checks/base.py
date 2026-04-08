@@ -385,6 +385,12 @@ class RepoCheck(Check):
         raise NotImplementedError()
 
 
+class RootCheck(Check):
+    @abc.abstractmethod
+    def check(self, path: Path, project: Project | None) -> list[Issue]:
+        raise NotImplementedError()
+
+
 class ProjectCheck(Check):
     @abc.abstractmethod
     def check(self, path: Path, project: Project | None) -> list[Issue]:

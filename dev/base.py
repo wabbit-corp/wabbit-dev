@@ -38,6 +38,7 @@ CHECK_MODULE_IMPORTS: tuple[str, ...] = (
     "dev.checks.python_vulture",
     "dev.checks.repo_contributors",
     "dev.checks.repo_properties",
+    "dev.checks.root_paths",
     "dev.checks.text_quality",
     "dev.checks.trufflehog",
 )

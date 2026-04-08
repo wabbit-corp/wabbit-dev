@@ -193,6 +193,29 @@ async def test_cli_completion_bash_prints_script(
 
 
 @pytest.mark.asyncio
+async def test_cli_check_describe_does_not_infer_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dev.repo_resolution as repo_resolution
+    from dev import cli
+    from dev.tasks import check as check_task
+
+    called: list[str] = []
+
+    monkeypatch.setattr(cli, "_load_workspace_config", lambda: object())
+
+    def fail_infer(*_args, **_kwargs):
+        raise AssertionError("check --describe should not infer a target")
+
+    monkeypatch.setattr(repo_resolution, "inferred_project_targets", fail_infer)
+    monkeypatch.setattr(check_task, "describe_check", lambda name, json_output=False: called.append(name) or 0)
+    monkeypatch.setattr("sys.argv", ["dev.py", "check", "--describe", "SpdxHeaderCheck"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == ["SpdxHeaderCheck"]
+
+
+@pytest.mark.asyncio
 async def test_cli_doctor_prints_next_steps(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from dev import cli
     from dev.tasks import doctor as doctor_task

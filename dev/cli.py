@@ -126,7 +126,12 @@ def _apply_context_defaults(command_path: str, args: argparse.Namespace) -> None
             if inferred_targets is not None:
                 args.targets = inferred_targets
 
-    if command_path == "check" and getattr(args, "project_or_dir_or_file", None) is None:
+    if (
+        command_path == "check"
+        and getattr(args, "project_or_dir_or_file", None) is None
+        and not getattr(args, "list", False)
+        and getattr(args, "describe", None) is None
+    ):
         inferred_targets = inferred_project_targets(config)
         if inferred_targets is not None:
             args.project_or_dir_or_file = inferred_targets[0]

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from dev.checks.base import FileCheck, FileContext, Issue, IssueType, RepoCheck, Severity
+from dev.checks.base import FileCheck, FileContext, Issue, IssueType, RepoCheck, RootCheck, Severity
 from dev.tasks import check as check_task
 
 E_TEST_ERROR = IssueType("E_TEST_RUNNER_ERROR", "runner error")
@@ -91,12 +91,14 @@ class ValueMatchCheck(FileCheck):
 
 ORDER_CALLS: list[str] = []
 FILE_CALLS: list[str] = []
+ROOT_CALLS: list[str] = []
 
 
 @pytest.fixture(autouse=True)
 def clear_calls() -> None:
     ORDER_CALLS.clear()
     FILE_CALLS.clear()
+    ROOT_CALLS.clear()
 
 
 def _make_repo(root: Path) -> None:
@@ -208,6 +210,89 @@ def test_checkignore_applies_without_git_repo(tmp_path: Path, monkeypatch: pytes
     joined = "\n".join(FILE_CALLS)
     assert "keep.txt" in joined
     assert "skip.txt" not in joined
+
+
+def test_explicit_checks_do_not_report_unselected_root_issues(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / ".gitignore").write_text("skip.txt\n", encoding="utf-8")
+    (tmp_path / "keep.txt").write_text("keep\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"FileRecorder": FileRecorder()}),
+    )
+
+    assert check_task.check_main(str(tmp_path), ["FileRecorder"]) == 0
+    assert "E_GITIGNORE_WITHOUT_REPO" not in capsys.readouterr().out
+
+
+def test_root_checks_run_once_per_selected_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class RootRecorder(RootCheck):
+        order = 100
+
+        def check(self, path: Path, project: object) -> list[Issue]:
+            del project
+            ROOT_CALLS.append(path.as_posix())
+            return []
+
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (tmp_path / "sample.txt").write_text("x\n", encoding="utf-8")
+    (nested / "sample.txt").write_text("x\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"RootRecorder": RootRecorder(), "FileRecorder": FileRecorder()}),
+    )
+
+    assert check_task.check_main(str(tmp_path)) == 0
+    assert ROOT_CALLS == [tmp_path.as_posix()]
+
+
+def test_gitignore_without_repo_check_uses_selected_root_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev.checks.root_paths import GitignoreWithoutRepoCheck
+
+    (tmp_path / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"GitignoreWithoutRepoCheck": GitignoreWithoutRepoCheck()}),
+    )
+
+    assert check_task.check_main(str(tmp_path), ["GitignoreWithoutRepoCheck"]) == 1
+    assert "E_GITIGNORE_WITHOUT_REPO" in capsys.readouterr().out
+
+
+def test_gitignore_without_repo_check_does_not_fire_inside_enclosing_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev.checks.root_paths import GitignoreWithoutRepoCheck
+
+    _make_repo(tmp_path)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"GitignoreWithoutRepoCheck": GitignoreWithoutRepoCheck()}),
+    )
+
+    assert check_task.check_main(str(nested), ["GitignoreWithoutRepoCheck"]) == 0
+    assert "E_GITIGNORE_WITHOUT_REPO" not in capsys.readouterr().out
 
 
 def test_checkignore_overrides_gitignore(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

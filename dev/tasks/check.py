@@ -24,20 +24,17 @@ from dev.checks.base import (
     IssueType,
     ProjectCheck,
     RepoCheck,
+    RootCheck,
     ScopedFindingIgnoreRule,
     ScopedReadSuppressions,
     Severity,
     known_issue_types,
 )
+from dev.checks.root_paths import E_GITIGNORE_WITHOUT_REPO
 from dev.config import Project, find_workspace_root, load_config
 from dev.discoverability import did_you_mean_suffix, unknown_name_message
 from dev.messages import error, info, warning
 from dev.repo_resolution import inferred_project_targets, resolve_check_paths
-
-E_GITIGNORE_WITHOUT_REPO = IssueType(
-    "E_GITIGNORE_WITHOUT_REPO",
-    "Gitignore file found without a git repository.",
-)
 
 _ISSUE_ID_RE = re.compile(r"\b(E_[A-Z0-9_]+)\b")
 
@@ -79,6 +76,8 @@ def _load_all_checks(config: object | None) -> dict[str, Check]:
 
 
 def _check_kind(check: Check) -> str:
+    if isinstance(check, RootCheck):
+        return "root"
     if isinstance(check, RepoCheck):
         return "repo"
     if isinstance(check, ProjectCheck):
@@ -359,7 +358,7 @@ def check_main(
         for project in config.defined_projects.values():
             projects_by_path[project.path.resolve()] = project
 
-    root_paths = resolve_check_paths(effective_target, config=config)
+    root_paths = [path.resolve() for path in resolve_check_paths(effective_target, config=config)]
 
     for path in root_paths:
         if not path.exists():
@@ -383,6 +382,7 @@ def check_main(
             key=lambda c: (getattr(c, "order", 1000), c.__class__.__name__),
         )
 
+    root_checks: list[RootCheck] = sort_checks_typed([v for v in all_checks.values() if isinstance(v, RootCheck)])
     repo_checks: list[RepoCheck] = sort_checks_typed([v for v in all_checks.values() if isinstance(v, RepoCheck)])
     project_checks: list[ProjectCheck] = sort_checks_typed(
         [v for v in all_checks.values() if isinstance(v, ProjectCheck)]
@@ -598,6 +598,13 @@ def check_main(
                 # info(f"Skipping {path} due to .gitignore")
                 return
 
+        if repo is None:
+            repo_root = find_repo_root(path)
+            if repo_root is not None:
+                repo = RepoContext(root=repo_root, ignore=["/.git"])
+                project_at_root = projects_by_path.get(repo_root.resolve())
+                maybe_run_repo_checks(repo_root, project_at_root)
+
         if path.is_dir():
             # It could be a project
             # print(f"path: {repr(path)} -> {path in projects_by_path}")
@@ -620,9 +627,7 @@ def check_main(
                 maybe_run_repo_checks(path, project)
 
             if (path / ".gitignore").exists():
-                if repo is None:
-                    report(E_GITIGNORE_WITHOUT_REPO.at(path))
-                else:
+                if repo is not None:
                     ignore = read_ignore_patterns(path / ".gitignore")
                     repo = repo.with_ignore(ignore)
 
@@ -654,13 +659,6 @@ def check_main(
                 go(child, project=project, repo=repo)
 
         else:
-            if repo is None:
-                repo_root = find_repo_root(path)
-                if repo_root is not None:
-                    repo = RepoContext(root=repo_root, ignore=["/.git"])
-                    project_at_root = projects_by_path.get(repo_root.resolve())
-                    maybe_run_repo_checks(repo_root, project_at_root)
-
             file_scope = project.get_coarse_file_scope(path) if project else None
             project_type = project.coarse_project_type if project else None
 
@@ -689,6 +687,10 @@ def check_main(
                     issue.fix()
 
     for path in root_paths:
+        project_at_root = projects_by_path.get(path.resolve()) if path.is_dir() else None
+        for root_check in root_checks:
+            issues = root_check.check(path, project_at_root)
+            report(issues)
         go(path)
 
     return 1 if has_errors else 0
