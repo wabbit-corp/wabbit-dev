@@ -793,7 +793,8 @@ def preflight_for_command(
     if not failures:
         return True
 
-    error(f"Preflight checks failed for `{command_text(command_path)}`.")
+    display_command = command_path.replace("/", " ")
+    error(f"Preflight checks failed for `{command_text(display_command)}`.")
     for finding in failures:
         _emit_finding(finding)
     target_suffix = f" {' '.join(projects)}" if projects else ""

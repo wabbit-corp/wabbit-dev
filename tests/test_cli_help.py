@@ -112,6 +112,25 @@ async def test_cli_config_check_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
+async def test_cli_config_check_slash_alias_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import check_config as check_config_task
+
+    called: list[str] = []
+
+    def fake_check_config() -> None:
+        called.append("called")
+
+    monkeypatch.setattr(check_config_task, "check_config", fake_check_config)
+    monkeypatch.setattr("sys.argv", ["dev.py", "config/check"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == ["called"]
+
+
+@pytest.mark.asyncio
 async def test_cli_doctor_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev import cli
     from dev.tasks import doctor as doctor_task
@@ -316,6 +335,71 @@ async def test_unknown_command_suggests_similar_name(
     err = capsys.readouterr().err
     assert "invalid choice: 'proje'" in err
     assert "Did you mean 'project'?" in err
+
+
+@pytest.mark.asyncio
+async def test_help_alias_prints_root_help(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "help"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        await cli.async_main()
+
+    assert excinfo.value.code == 0
+    output = capsys.readouterr().out
+    assert "Wabbit development toolkit." in output
+
+
+@pytest.mark.asyncio
+async def test_parent_help_alias_prints_parent_help(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "project", "help"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        await cli.async_main()
+
+    assert excinfo.value.code == 0
+    output = capsys.readouterr().out
+    assert "Explore the projects defined in root.clj" in output
+
+
+def test_print_failure_context_includes_rerun_command(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from argparse import Namespace
+
+    from dev import cli
+
+    workspace_root = tmp_path / "workspace"
+    nested = workspace_root / "apps" / "demo"
+    nested.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "root.clj").write_text("()", encoding="utf-8")
+    (workspace_root / "dev").write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.chdir(nested)
+
+    cli._print_failure_context(
+        "build",
+        args=Namespace(
+            targets=["demo"],
+            json=False,
+        ),
+    )
+
+    err = capsys.readouterr().err
+    assert "Resolved context:" in err
+    assert "workspace root:" in err
+    assert "Retry from workspace root:" in err
+    assert "./dev build demo" in err
 
 
 @pytest.mark.asyncio

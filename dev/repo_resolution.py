@@ -28,7 +28,17 @@ class WorkspaceResolutionContext:
 
 
 def _configured_target_names(config: Config) -> list[str]:
-    return list(dict.fromkeys([*config.defined_projects.keys(), *config.defined_repos.keys()]))
+    defined_projects = getattr(config, "defined_projects", {})
+    defined_repos = getattr(config, "defined_repos", {})
+    return list(dict.fromkeys([*defined_projects.keys(), *defined_repos.keys()]))
+
+
+def _defined_projects(config: Config | object) -> dict[str, Project]:
+    return getattr(config, "defined_projects", {})
+
+
+def _defined_repos(config: Config | object) -> dict[str, object]:
+    return getattr(config, "defined_repos", {})
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -51,12 +61,13 @@ def _normalized_start_path(start: str | Path | None = None) -> Path:
 
 
 def _repo_project_ids(config: Config, repo_id: str) -> list[str]:
-    repo_definition = config.defined_repos[repo_id]
+    defined_repos = _defined_repos(config)
+    repo_definition = defined_repos[repo_id]
     if repo_definition.project_ids:
         return list(repo_definition.project_ids)
     return [
         project_id
-        for project_id, project in config.defined_projects.items()
+        for project_id, project in _defined_projects(config).items()
         if project.repo_id == repo_id
     ]
 
@@ -64,7 +75,7 @@ def _repo_project_ids(config: Config, repo_id: str) -> list[str]:
 def _deepest_matching_projects(config: Config, path: Path) -> list[Project]:
     matches = [
         project
-        for project in config.defined_projects.values()
+        for project in _defined_projects(config).values()
         if _is_within(path, _resolved_path(project.path))
     ]
     if not matches:
@@ -78,7 +89,7 @@ def _deepest_matching_projects(config: Config, path: Path) -> list[Project]:
 
 
 def _exact_repo_id_for_path(config: Config, path: Path) -> str | None:
-    for repo_id, repo_definition in config.defined_repos.items():
+    for repo_id, repo_definition in _defined_repos(config).items():
         if _resolved_path(repo_definition.path) == path:
             return repo_id
     return None
@@ -87,14 +98,14 @@ def _exact_repo_id_for_path(config: Config, path: Path) -> str | None:
 def _deepest_repo_id_for_path(config: Config, path: Path) -> str | None:
     matches = [
         repo_id
-        for repo_id, repo_definition in config.defined_repos.items()
+        for repo_id, repo_definition in _defined_repos(config).items()
         if _is_within(path, _resolved_path(repo_definition.path))
     ]
     if not matches:
         return None
     return max(
         matches,
-        key=lambda repo_id: len(_resolved_path(config.defined_repos[repo_id].path).parts),
+        key=lambda repo_id: len(_resolved_path(_defined_repos(config)[repo_id].path).parts),
     )
 
 
@@ -116,17 +127,18 @@ def resolve_workspace_context(
     if active_config is None:
         return WorkspaceResolutionContext(cwd=cwd, workspace_root=workspace_root)
 
+    defined_repos = _defined_repos(active_config)
     project_matches = _deepest_matching_projects(active_config, cwd)
     current_project = next((project for project in project_matches if project.project_id is not None), None)
 
     repo_id = _deepest_repo_id_for_path(active_config, cwd)
     repo_target = repo_id
-    repo_path = active_config.defined_repos[repo_id].path if repo_id is not None else None
+    repo_path = defined_repos[repo_id].path if repo_id is not None and repo_id in defined_repos else None
 
-    if current_project is not None and current_project.repo_id is not None and current_project.repo_id in active_config.defined_repos:
+    if current_project is not None and current_project.repo_id is not None and current_project.repo_id in defined_repos:
         repo_id = current_project.repo_id
         repo_target = repo_id
-        repo_path = active_config.defined_repos[repo_id].path
+        repo_path = defined_repos[repo_id].path
     elif current_project is not None and current_project.project_id is not None:
         repo_target = current_project.project_id
         repo_path = current_project.effective_repo_root
@@ -216,8 +228,10 @@ def _normalize_lookup_target(target: str) -> tuple[str, bool]:
 
 def resolve_project_ids(config: Config, targets: Sequence[str] | None = None) -> list[str]:
     context = resolve_workspace_context(config=config)
+    defined_projects = _defined_projects(config)
+    defined_repos = _defined_repos(config)
     if not targets:
-        return list(config.defined_projects.keys())
+        return list(defined_projects.keys())
 
     resolved_project_ids: list[str] = []
     seen: set[str] = set()
@@ -226,9 +240,9 @@ def resolve_project_ids(config: Config, targets: Sequence[str] | None = None) ->
         normalized_target, had_prefix = _normalize_lookup_target(target)
 
         project_ids: list[str] | None = None
-        if normalized_target in config.defined_projects:
+        if normalized_target in defined_projects:
             project_ids = [normalized_target]
-        elif normalized_target in config.defined_repos:
+        elif normalized_target in defined_repos:
             project_ids = _repo_project_ids(config, normalized_target)
         else:
             path = Path(target)

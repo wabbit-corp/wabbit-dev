@@ -18,6 +18,7 @@ from dev.config import (
     load_config,
     resolve_kotlin_plugin_compiler_plugin_project,
 )
+from dev.failure_context import contextualize_failure
 from dev.messages import error, info, success, warning
 from dev.repo_resolution import inferred_project_targets, resolve_project_ids
 
@@ -232,7 +233,7 @@ def build(projects: str | list[str] | None = None, *, json_output: bool = False)
                 selected_project_names = resolve_project_ids(config, effective_requested_projects)
             except ValueError as ex:
                 payload["error"] = str(ex)
-                error(str(ex))
+                error(contextualize_failure(str(ex), ["build", *effective_requested_projects]))
                 _update_build_summary(payload)
                 return 1
 

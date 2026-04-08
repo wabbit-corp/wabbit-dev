@@ -1,6 +1,7 @@
 from git import Repo
 
 from dev.config import load_config
+from dev.failure_context import contextualize_failure
 from dev.messages import accent, error, info, muted, success
 from dev.repo_resolution import configured_repo_targets, resolve_repo_targets
 
@@ -25,7 +26,7 @@ def push(targets: str | list[str] | None = None, *, dry_run: bool = False) -> in
         try:
             repo_targets = resolve_repo_targets(requested_targets, config=load_config())
         except ValueError as ex:
-            error(str(ex))
+            error(contextualize_failure(str(ex), ["push", *requested_targets]))
             return 1
 
     if dry_run:

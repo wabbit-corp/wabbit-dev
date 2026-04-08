@@ -7,6 +7,7 @@ from typing import Literal
 
 from dev.build_order import toposort_projects
 from dev.config import GradleProject, Project, PythonProject, load_config
+from dev.failure_context import contextualize_failure
 from dev.jitpack import JitPackAPI
 from dev.messages import accent, error, muted, success, warning
 from dev.repo_resolution import resolve_project_ids
@@ -46,7 +47,7 @@ async def publish_main(projects: str | list[str] | None = None, *, dry_run: bool
         try:
             selected_project_names = resolve_project_ids(config, requested_projects)
         except ValueError as ex:
-            error(str(ex))
+            error(contextualize_failure(str(ex), ["publish", *requested_projects]))
             return 1
 
     order = toposort_projects(all_projects, target_project=selected_project_names)

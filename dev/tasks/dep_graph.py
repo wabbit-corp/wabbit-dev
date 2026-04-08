@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from graphviz import Digraph
 
 from dev.config import load_config
+from dev.failure_context import contextualize_failure
 from dev.messages import error, info
 from dev.repo_resolution import inferred_project_targets, resolve_project_ids
 
@@ -25,7 +26,7 @@ def get_project_dependencies(
         try:
             resolved_focus_projects = resolve_project_ids(config, list(effective_focus_project_names))
         except ValueError as ex:
-            error(str(ex))
+            error(contextualize_failure(str(ex), ["dep", "graph", *effective_focus_project_names]))
             return
 
     # Determine the graph title

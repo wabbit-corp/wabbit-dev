@@ -31,6 +31,7 @@ from dev.config import (
     resolve_kotlin_plugin_compiler_plugin_project,
     resolve_kotlin_plugin_project,
 )
+from dev.failure_context import contextualize_failure
 from dev.generated_files import stamp_managed_text
 from dev.git_changes import ChangeType, FileDiff, FileType, compute_repo_diffs
 from dev.licenses import canonicalize_license_key, load_license_texts
@@ -1281,7 +1282,7 @@ def setup(
                 resolved_project_ids = resolve_project_ids(config, effective_selected_projects_input)
             except ValueError as ex:
                 payload["error"] = str(ex)
-                error(str(ex))
+                error(contextualize_failure(str(ex), ["setup", *effective_selected_projects_input]))
                 return 1
             selected_project_names = toposort_projects(config.defined_projects, target_project=resolved_project_ids)
 

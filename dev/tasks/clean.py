@@ -10,6 +10,7 @@ from pathlib import Path
 
 import dev.io
 from dev.config import GradleProject, PythonProject, load_config
+from dev.failure_context import contextualize_failure
 from dev.messages import error
 from dev.repo_resolution import inferred_project_targets, resolve_project_ids
 
@@ -227,7 +228,7 @@ def clean(projects: str | list[str] | None) -> None:
         try:
             selected_project_names = resolve_project_ids(config, effective_requested_projects)
         except ValueError as ex:
-            error(str(ex))
+            error(contextualize_failure(str(ex), ["clean", *effective_requested_projects]))
             return
 
     dev.io.delete_if_exists(Path("__pycache__"))

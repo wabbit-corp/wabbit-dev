@@ -6,7 +6,9 @@ import re
 import sys
 import textwrap
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
+from dev.bootstrap import canonical_rerun_command, maybe_reexec_to_workspace_venv
 from dev.discoverability import did_you_mean_suffix
 from dev.messages import command_text, heading
 
@@ -18,6 +20,30 @@ type ArgParser = argparse.ArgumentParser
 type AddParser = Callable[..., ArgParser]
 
 _INVALID_CHOICE_RE = re.compile(r"invalid choice: '([^']+)' \(choose from (.+)\)")
+_CONFIG_CONTEXT_COMMANDS = {
+    "where",
+    "config/check",
+    "doctor",
+    "setup",
+    "dep/graph",
+    "dep/updates",
+    "publish",
+    "build",
+    "clean",
+    "cloc",
+    "status",
+    "commit",
+    "push",
+    "project/list",
+    "project/show",
+    "project/deps",
+    "project/repo",
+    "project/targets",
+    "check",
+    "spdx/headers",
+    "secrets/scan",
+    "contributors/audit",
+}
 
 
 class SuggestingArgumentParser(argparse.ArgumentParser):
@@ -68,6 +94,225 @@ def _epilog(*, examples: Sequence[str] = (), notes: Sequence[str] = ()) -> str |
     if not sections:
         return None
     return "\n\n".join(sections)
+
+
+def _human_command_path(command_path: str) -> str:
+    return command_path.replace("/", " ")
+
+
+def _normalize_cli_argv(raw_argv: Sequence[str], commands: "Commands") -> list[str]:
+    argv = list(raw_argv)
+    if not argv:
+        return []
+
+    valid_paths = set(commands.parsers) | set(commands.subparsers)
+    normalized: list[str] = []
+    current_parts: list[str] = []
+    index = 0
+
+    while index < len(argv):
+        token = argv[index]
+
+        if token == "help" and index == len(argv) - 1:
+            current_path = "/".join(current_parts)
+            if not current_parts or current_path in valid_paths:
+                normalized.append("--help")
+                return normalized
+
+        if token == "--" or token.startswith("-"):
+            normalized.extend(argv[index:])
+            return normalized
+
+        if "/" in token:
+            split_parts = [part for part in token.split("/") if part]
+            split_path = "/".join([*current_parts, *split_parts])
+            if split_parts and split_path in valid_paths:
+                normalized.extend(split_parts)
+                current_parts.extend(split_parts)
+                index += 1
+                continue
+
+        candidate_path = "/".join([*current_parts, token])
+        if candidate_path in valid_paths:
+            normalized.append(token)
+            current_parts.append(token)
+            index += 1
+            continue
+
+        normalized.extend(argv[index:])
+        return normalized
+
+    return normalized
+
+
+def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
+    match command_path:
+        case "where":
+            tokens = ["where"]
+            if args.json:
+                tokens.append("--json")
+            return tokens
+        case "config/check":
+            return ["config", "check"]
+        case "doctor":
+            tokens = ["doctor"]
+            for value in args.only or []:
+                tokens.extend(["--only", value])
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "setup":
+            tokens = ["setup"]
+            if args.dev:
+                tokens.append("--dev")
+            if args.local:
+                tokens.append("--local")
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "completion/bash":
+            return ["completion", "bash"]
+        case "completion/zsh":
+            return ["completion", "zsh"]
+        case "dep/updates":
+            return ["dep", "updates"]
+        case "dep/graph":
+            tokens = ["dep", "graph"]
+            if args.artifacts:
+                tokens.append("--artifacts")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "publish":
+            tokens = ["publish"]
+            if args.dry_run:
+                tokens.append("--dry-run")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "build":
+            tokens = ["build"]
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "clean":
+            return ["clean", *(args.targets or [])]
+        case "cloc":
+            return ["cloc", *(args.targets or [])]
+        case "status":
+            tokens = ["status"]
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "commit":
+            tokens = ["commit"]
+            if args.dry_run:
+                tokens.append("--dry-run")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "push":
+            tokens = ["push"]
+            if args.dry_run:
+                tokens.append("--dry-run")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "project/list":
+            return ["project", "list"]
+        case "project/show":
+            tokens = ["project", "show"]
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "project/deps":
+            tokens = ["project", "deps"]
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "project/repo":
+            tokens = ["project", "repo"]
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "project/targets":
+            tokens = ["project", "targets"]
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "check":
+            tokens = ["check"]
+            if args.list:
+                tokens.append("--list")
+                if args.json:
+                    tokens.append("--json")
+            elif args.describe is not None:
+                tokens.extend(["--describe", args.describe])
+                if args.json:
+                    tokens.append("--json")
+            else:
+                if args.fix:
+                    tokens.append("--fix")
+                if args.project_or_dir_or_file is not None:
+                    tokens.append(args.project_or_dir_or_file)
+                tokens.extend(args.checks or [])
+            return tokens
+        case "spdx/headers":
+            tokens = ["spdx", "headers"]
+            if args.fix:
+                tokens.append("--fix")
+            if args.project_or_dir_or_file is not None:
+                tokens.append(args.project_or_dir_or_file)
+            return tokens
+        case "secrets/scan":
+            tokens = ["secrets", "scan"]
+            if args.target is not None:
+                tokens.append(args.target)
+            return tokens
+        case "contributors/audit":
+            return ["contributors", "audit"]
+        case _:
+            return [part for part in command_path.split("/") if part]
+
+
+def _format_failure_context() -> str:
+    try:
+        from dev.repo_resolution import format_workspace_context, resolve_workspace_context
+
+        return format_workspace_context(resolve_workspace_context())
+    except Exception:
+        from dev.bootstrap import find_workspace_root
+
+        cwd = Path.cwd().resolve()
+        workspace_root = find_workspace_root(cwd)
+        workspace_root_text = str(workspace_root) if workspace_root is not None else "-"
+        return "\n".join(
+            [
+                "Resolved context:",
+                f"  cwd: {cwd}",
+                f"  workspace root: {workspace_root_text}",
+                "  current project: -",
+                "  current repo: -",
+            ]
+        )
+
+
+def _print_failure_context(command_path: str, *, args: argparse.Namespace) -> None:
+    if command_path not in _CONFIG_CONTEXT_COMMANDS:
+        return
+
+    print(_format_failure_context(), file=sys.stderr)
+    rerun_command = canonical_rerun_command(_command_tokens(command_path, args))
+    if rerun_command is None:
+        return
+
+    print(file=sys.stderr)
+    print(heading("Retry from workspace root:", stream=sys.stderr), file=sys.stderr)
+    print(f"  {command_text(rerun_command, stream=sys.stderr)}", file=sys.stderr)
 
 
 def _guidance_target(args: argparse.Namespace) -> str | None:
@@ -205,17 +450,28 @@ class Commands:
         self.parsers: dict[str, ArgParser] = {}
         self.subparsers: dict[str, AddParser] = {}
 
+    @staticmethod
+    def _normalize_name(name: str | Sequence[str], extra_parts: Sequence[str] = ()) -> str:
+        if isinstance(name, str):
+            parts = tuple(part for part in name.split("/") if part)
+        else:
+            parts = tuple(str(part) for part in name if str(part))
+        if extra_parts:
+            parts = (*parts, *extra_parts)
+        return "/".join(parts)
+
     class Command:
         def __init__(
             self,
             commands: "Commands",
-            name: str,
-            *,
+            name: str | Sequence[str],
+            *name_parts: str,
             help: str | None = None,
             description: str | None = None,
             epilog: str | None = None,
         ) -> None:
-            path = name.split("/")
+            normalized_name = commands._normalize_name(name, name_parts)
+            path = normalized_name.split("/")
             parsers = commands.parsers
             subparsers = commands.subparsers
 
@@ -258,14 +514,14 @@ class Commands:
                     )
                     subparsers[p] = child_subparsers.add_parser
 
-            self.parser = parsers[name]
+            self.parser = parsers[normalized_name]
             self.parser.formatter_class = HelpFormatter
             self.parser._completion_hidden = help == argparse.SUPPRESS
             if description is not None:
                 self.parser.description = description
             if epilog is not None:
                 self.parser.epilog = epilog
-            self.parser.set_defaults(command_path=name)
+            self.parser.set_defaults(command_path=normalized_name)
 
         def __enter__(self) -> ArgParser:
             return self.parser
@@ -280,8 +536,8 @@ class Commands:
 
     def __call__(
         self,
-        name: str,
-        *,
+        name: str | Sequence[str],
+        *name_parts: str,
         help: str | None = None,
         description: str | None = None,
         epilog: str | None = None,
@@ -289,6 +545,7 @@ class Commands:
         return Commands.Command(
             self,
             name,
+            *name_parts,
             help=help,
             description=description,
             epilog=epilog,
@@ -321,7 +578,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             f"{prog} project list",
         ],
         notes=[
-            "Install the package and run `wabbit-dev`, or run it from the repo with `python3 dev.py`.",
+            "Install the package and run `wabbit-dev`, or run `./dev` from the workspace root.",
+            "When a workspace `.venv` exists next to `root.clj`, the launcher prefers it automatically.",
             "Config-driven commands walk upward from the current directory to find root.clj and root.private.clj.",
         ],
     )
@@ -393,7 +651,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         del cmd
 
     with commands(
-        "completion/bash",
+        "completion",
+        "bash",
         help="Print a bash completion script.",
         description=_doc(
             """
@@ -408,7 +667,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         del cmd
 
     with commands(
-        "completion/zsh",
+        "completion",
+        "zsh",
         help="Print a zsh completion script.",
         description=_doc(
             """
@@ -423,7 +683,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         del cmd
 
     with commands(
-        "completion/query",
+        "completion",
+        "query",
         help=argparse.SUPPRESS,
         description=argparse.SUPPRESS,
     ) as cmd:
@@ -432,7 +693,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         cmd.add_argument("words", nargs="*", help=argparse.SUPPRESS)
 
     with commands(
-        "config/check",
+        "config",
+        "check",
         help="Parse and validate root.clj and root.private.clj.",
         description=_doc(
             """
@@ -600,7 +862,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         del cmd
 
     with commands(
-        "dep/graph",
+        "dep",
+        "graph",
         help="Render an SVG graph of project dependencies.",
         description=_doc(
             """
@@ -640,7 +903,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         )
 
     with commands(
-        "dep/updates",
+        "dep",
+        "updates",
         help="Check configured libraries for newer upstream versions.",
         description=_doc(
             """
@@ -824,7 +1088,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         del cmd
 
     with commands(
-        "jitpack/info",
+        "jitpack",
+        "info",
         help="Show refs, commits, versions, and build info for a JitPack artifact.",
         description=_doc(
             """
@@ -1070,7 +1335,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         del cmd
 
     with commands(
-        "project/list",
+        "project",
+        "list",
         help="List configured projects grouped by repository.",
         description=_doc(
             """
@@ -1084,7 +1350,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         del cmd
 
     with commands(
-        "project/show",
+        "project",
+        "show",
         help="Show detailed metadata for one or more configured projects.",
         description=_doc(
             """
@@ -1124,7 +1391,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         )
 
     with commands(
-        "project/deps",
+        "project",
+        "deps",
         help="Show resolved dependencies for one or more configured projects.",
         description=_doc(
             """
@@ -1163,7 +1431,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         )
 
     with commands(
-        "project/repo",
+        "project",
+        "repo",
         help="Show repository metadata for one or more configured targets.",
         description=_doc(
             """
@@ -1203,7 +1472,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         )
 
     with commands(
-        "project/targets",
+        "project",
+        "targets",
         help="Show Kotlin Multiplatform target platforms for configured projects.",
         description=_doc(
             """
@@ -1337,7 +1607,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         del cmd
 
     with commands(
-        "spdx/headers",
+        "spdx",
+        "headers",
         help="Audit or fix SPDX file headers.",
         description=_doc(
             """
@@ -1388,7 +1659,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         del cmd
 
     with commands(
-        "secrets/scan",
+        "secrets",
+        "scan",
         help="Run the high-entropy-string secret check.",
         description=_doc(
             """
@@ -1433,7 +1705,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         del cmd
 
     with commands(
-        "contributors/audit",
+        "contributors",
+        "audit",
         help="Audit git contributor identity mismatches across configured repos.",
         description=_doc(
             """
@@ -1466,7 +1739,8 @@ async def async_main() -> int:
     parser, commands = build_parser()
     prog = parser.prog
 
-    args = parser.parse_args()
+    normalized_argv = _normalize_cli_argv(sys.argv[1:], commands)
+    args = parser.parse_args(normalized_argv)
     command_path = getattr(args, "command_path", None)
     if command_path is None:
         parser.print_help()
@@ -1492,6 +1766,7 @@ async def async_main() -> int:
         projects=selected_projects,
         dry_run=getattr(args, "dry_run", False),
     ):
+        _print_failure_context(command_path, args=args)
         return 2
 
     try:
@@ -1674,8 +1949,13 @@ async def async_main() -> int:
 
             case _:
                 raise ValueError(f"Unknown command: {command_path}")
+    except ModuleNotFoundError as ex:
+        print(f"{prog}: error: Missing Python dependency: {ex.name!r}.", file=sys.stderr)
+        _print_failure_context(command_path, args=args)
+        return 2
     except ValueError as ex:
         print(f"{prog}: error: {ex}", file=sys.stderr)
+        _print_failure_context(command_path, args=args)
         return 2
 
     if command_path in {"doctor", "setup", "build", "publish", "project/show", "commit", "push"}:
@@ -1684,5 +1964,6 @@ async def async_main() -> int:
     return exit_code
 
 
-def main() -> None:
+def main(*, launch_mode: str = "script") -> None:
+    maybe_reexec_to_workspace_venv(launch_mode=launch_mode)
     raise SystemExit(asyncio.run(async_main()))

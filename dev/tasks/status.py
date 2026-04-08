@@ -6,6 +6,7 @@ from pathlib import Path
 from git import Repo
 
 from dev.config import find_workspace_root, load_config
+from dev.failure_context import contextualize_failure
 from dev.messages import accent, error, heading, info, muted, success
 from dev.repo_resolution import configured_repo_targets, inferred_repo_targets, resolve_repo_targets
 
@@ -28,7 +29,7 @@ def status(targets: str | list[str] | None, *, json_output: bool = False) -> int
             if json_output:
                 print(json.dumps(payload, indent=2))
                 return 1
-            error(payload["error"])
+            error(contextualize_failure(payload["error"], ["status"]))
             return 1
         resolved_targets = configured_repo_targets(config)
     else:
@@ -39,7 +40,7 @@ def status(targets: str | list[str] | None, *, json_output: bool = False) -> int
             if json_output:
                 print(json.dumps(payload, indent=2))
                 return 1
-            error(str(ex))
+            error(contextualize_failure(str(ex), ["status", *effective_targets]))
             return 1
 
     exit_code = 0

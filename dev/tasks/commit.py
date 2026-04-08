@@ -9,6 +9,7 @@ from git.exc import InvalidGitRepositoryError, NoSuchPathError
 from dev.base import Scope
 from dev.build_order import toposort_projects
 from dev.config import Project, load_config, project_repo_root
+from dev.failure_context import contextualize_failure
 from dev.messages import accent, error, info, muted, warning
 from dev.repo_resolution import resolve_project_ids
 from dev.tasks.setup import (
@@ -60,7 +61,8 @@ def commit(projects: str | list[str] | None = None, *, dry_run: bool = False) ->
         try:
             config, selected_project_names = _resolve_target_projects(projects)
         except ValueError as ex:
-            error(str(ex))
+            requested_projects = [projects] if isinstance(projects, str) else list(projects or [])
+            error(contextualize_failure(str(ex), ["commit", *requested_projects]))
             return 1
 
         if getattr(config, "openai_key", None) is None:
