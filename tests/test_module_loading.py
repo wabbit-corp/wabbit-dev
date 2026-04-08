@@ -12,4 +12,8 @@ def test_load_modules_does_not_require_checks_directory_iteration(monkeypatch: p
     monkeypatch.setattr(Path, "iterdir", _fail_iterdir)
     modules = Module.load_modules()
 
+    assert "DuplicateFilesCheck" in modules
+    assert "LargeFileCheck" in modules
+    assert "CheckedInBinaryDependencyCheck" in modules
+    assert "RepoContributorIdentityCheck" in modules
     assert "TextQualityCheck" in modules

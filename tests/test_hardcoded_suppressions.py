@@ -63,3 +63,17 @@ def test_hardcoded_internal_host_ip_config_suppression(tmp_path: Path) -> None:
     values = _issue_values(ctx)
     assert "10.0.0.0" not in values
     assert "172.16.0.1" in values
+
+
+def test_hardcoded_internal_host_ip_scans_documentation_files(tmp_path: Path) -> None:
+    path = tmp_path / "README.md"
+    path.write_text(
+        "Connect to the internal host at 10.10.10.10.\n",
+        encoding="utf-8",
+    )
+
+    ctx = FileContext(check_name="HardcodedInternalHostnameIpCheck", path=path)
+    HardcodedInternalHostnameIpCheck().check(ctx)
+
+    values = _issue_values(ctx)
+    assert "10.10.10.10" in values

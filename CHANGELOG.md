@@ -4,6 +4,10 @@
 - derive generated Paper Gradle plugin and `paperDevBundle` versions from config instead of hardcoded template defaults, and update the paperweight fallback to `2.0.0-beta.17`
 - let `dev setup` create or refresh a minimal repo-root `AGENTS.md` facts block without overwriting existing human-authored agent guidance
 - fix multiple check/runtime correctness issues across AI tooling, caching, banner generation, AGENTS block replacement, and file/check diagnostics (line numbers, locations, formatter failure classification, symlink/path validation, naming conventions, stale TODO aging, and issue deduplication)
+- turn `dev.checks.file_duplicates` into a real repo check by reusing the shared duplicates task logic for duplicate files and duplicate directory trees
+- turn `dev.checks.large_files` into real file checks for oversized files and checked-in binary dependency artifacts
+- turn `dev.checks.repo_contributors` into a real repo check for invalid, generic, and prohibited git contributor identities
+- make `HardcodedInternalHostnameIpCheck` scan documentation files so the implementation matches the documented policy
 
 ## Unreleased (2026-02-17)
 - Generate real `java-gradle-plugin` JVM builds for `root.clj` Gradle projects that declare `:gradlePluginId`, including inferred plugin metadata, Kotlin Gradle plugin API/TestKit dependencies, and version expansion for `*gradle-plugin.properties` resources.

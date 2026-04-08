@@ -559,9 +559,6 @@ class HardcodedInternalHostnameIpCheck(FileCheck):
         if _should_skip_hardcoded_scan(ctx.path):
             return
 
-        if ctx.path.suffix.lower() in {".md", ".markdown", ".txt"}:
-            return
-
         text = ctx.read_text(E_HARDCODED_INTERNAL_HOSTNAME_IP)
         for line_number, line in enumerate(text.splitlines(), start=1):
             stripped_line = line.strip()
