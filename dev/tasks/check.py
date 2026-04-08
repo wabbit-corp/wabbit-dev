@@ -210,6 +210,14 @@ def _catalog(config: object | None = None) -> dict[str, CheckCatalogEntry]:
     }
 
 
+def load_check_catalog(config: object | None = None) -> dict[str, CheckCatalogEntry]:
+    return _catalog(config)
+
+
+def list_check_names(config: object | None = None) -> list[str]:
+    return sorted(load_check_catalog(config))
+
+
 def _config_target_choices(config: object | None) -> list[str]:
     if config is None or not hasattr(config, "defined_projects") or not hasattr(config, "defined_repos"):
         return []
@@ -728,6 +736,8 @@ __all__ = [
     "E_GITIGNORE_WITHOUT_REPO",
     "check_main",
     "describe_check",
+    "load_check_catalog",
+    "list_check_names",
     "list_checks",
     "secrets_scan",
 ]

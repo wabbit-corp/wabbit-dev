@@ -39,6 +39,21 @@ class HelpFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentDefau
     pass
 
 
+def _add_argument(
+    parser: argparse.ArgumentParser,
+    *args: object,
+    completion_kind: str | None = None,
+    completion_allow_files: bool = False,
+    completion_blocks_positionals: bool = False,
+    **kwargs: object,
+) -> argparse.Action:
+    action = parser.add_argument(*args, **kwargs)
+    setattr(action, "_completion_kind", completion_kind)
+    setattr(action, "_completion_allow_files", completion_allow_files)
+    setattr(action, "_completion_blocks_positionals", completion_blocks_positionals)
+    return action
+
+
 def _doc(text: str) -> str:
     return textwrap.dedent(text).strip()
 
@@ -182,6 +197,7 @@ class Commands:
 
             self.parser = parsers[name]
             self.parser.formatter_class = HelpFormatter
+            setattr(self.parser, "_completion_hidden", help == argparse.SUPPRESS)
             if description is not None:
                 self.parser.description = description
             if epilog is not None:
@@ -216,15 +232,7 @@ class Commands:
         )
 
 
-async def async_main() -> int:
-    if sys.platform.lower() == "win32":
-        os.system("color")
-        os.system("chcp 65001 > nul")
-        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore
-        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore
-
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-
+def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     parser = SuggestingArgumentParser(
         description=_doc(
             """
@@ -242,6 +250,7 @@ async def async_main() -> int:
     parser.epilog = _epilog(
         examples=[
             f"{prog} doctor",
+            f"{prog} completion bash",
             f"{prog} setup --local app-datatron",
             f"{prog} build app-datatron",
             f"{prog} secrets scan .",
@@ -275,6 +284,68 @@ async def async_main() -> int:
         epilog=examples("config check"),
     ) as cmd:
         del cmd
+
+    with commands(
+        "completion",
+        help="Generate shell completion scripts.",
+        description=_doc(
+            """
+            Generate shell completion scripts for the wabbit-dev CLI.
+
+            The generated completions include top-level commands, nested
+            subcommands, configured project and repo IDs, and loaded check names.
+            """
+        ),
+        epilog=examples(
+            "completion bash",
+            "completion zsh",
+            notes=[
+                f"Use `source <({prog} completion bash)` for bash.",
+                f"Use `autoload -Uz compinit && compinit && source <({prog} completion zsh)` for zsh.",
+                "Completions query the current workspace config at completion time, so project and repo IDs stay up to date.",
+            ],
+        ),
+    ) as cmd:
+        del cmd
+
+    with commands(
+        "completion/bash",
+        help="Print a bash completion script.",
+        description=_doc(
+            """
+            Print a bash completion script to stdout.
+
+            Source it from your shell profile or interactively to enable command,
+            subcommand, target, and check-name completion.
+            """
+        ),
+        epilog=examples("completion bash"),
+    ) as cmd:
+        del cmd
+
+    with commands(
+        "completion/zsh",
+        help="Print a zsh completion script.",
+        description=_doc(
+            """
+            Print a zsh completion script to stdout.
+
+            Source it from your shell profile after `compinit` to enable command,
+            subcommand, target, and check-name completion.
+            """
+        ),
+        epilog=examples("completion zsh"),
+    ) as cmd:
+        del cmd
+
+    with commands(
+        "completion/query",
+        help=argparse.SUPPRESS,
+        description=argparse.SUPPRESS,
+    ) as cmd:
+        cmd.add_argument("shell", help=argparse.SUPPRESS)
+        cmd.add_argument("index", type=int, help=argparse.SUPPRESS)
+        cmd.add_argument("words", nargs="*", help=argparse.SUPPRESS)
 
     with commands(
         "config/check",
@@ -349,11 +420,14 @@ async def async_main() -> int:
             ],
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "targets",
             metavar="TARGET",
             type=str,
             nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
             help="Project IDs, repo IDs, or paths. Omit to process every configured project.",
         )
         cmd.add_argument(
@@ -386,11 +460,14 @@ async def async_main() -> int:
             ],
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "path",
             metavar="PATH",
             type=str,
             nargs="+",
+            completion_kind="path",
+            completion_allow_files=True,
             help="Files, directories, or glob patterns to include in the clipboard bundle.",
         )
 
@@ -428,11 +505,14 @@ async def async_main() -> int:
             "dep graph --artifacts kotlin-web-openai",
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "targets",
             metavar="TARGET",
             type=str,
             nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
             help="Project IDs, repo IDs, or paths. Omit to graph the full workspace.",
         )
         cmd.add_argument(
@@ -485,11 +565,14 @@ async def async_main() -> int:
             ],
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "targets",
             metavar="TARGET",
             type=str,
             nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
             help="Project IDs, repo IDs, or paths. Omit to publish every publishable configured project.",
         )
         cmd.add_argument(
@@ -521,11 +604,14 @@ async def async_main() -> int:
             ],
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "targets",
             metavar="TARGET",
             type=str,
             nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
             help="Project IDs, repo IDs, or paths. Omit to build every buildable configured project.",
         )
 
@@ -548,11 +634,14 @@ async def async_main() -> int:
             "duplicates archives --zip-contents --weak-encrypted-zip",
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "folders",
             metavar="FOLDER",
             type=str,
             nargs="+",
+            completion_kind="path",
+            completion_allow_files=True,
             help="Folders to scan for duplicate files and directory trees.",
         )
         cmd.add_argument(
@@ -669,11 +758,14 @@ async def async_main() -> int:
             ],
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "targets",
             metavar="TARGET",
             type=str,
             nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
             help="Project IDs, repo IDs, or paths. Omit to clean every configured project.",
         )
 
@@ -691,11 +783,14 @@ async def async_main() -> int:
         ),
         epilog=examples("cloc", "cloc app-wabbit-dev", "cloc jeeves", "cloc app-wabbit-dev/dev"),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "targets",
             metavar="TARGET",
             type=str,
             nargs="*",
+            completion_kind="path-or-target",
+            completion_allow_files=True,
             help="Project IDs, repo IDs, or filesystem paths. Omit to analyze every configured project.",
         )
 
@@ -721,11 +816,14 @@ async def async_main() -> int:
             ],
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "targets",
             metavar="TARGET",
             type=str,
             nargs="+",
+            completion_kind="repo-target",
+            completion_allow_files=True,
             help="Repo IDs, project IDs, or paths inside git repositories.",
         )
 
@@ -751,11 +849,14 @@ async def async_main() -> int:
             ],
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "targets",
             metavar="TARGET",
             type=str,
             nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
             help="Project IDs, repo IDs, or paths. Omit to process every configured project.",
         )
         cmd.add_argument(
@@ -790,11 +891,14 @@ async def async_main() -> int:
             ],
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "targets",
             metavar="TARGET",
             type=str,
             nargs="*",
+            completion_kind="push-target",
+            completion_allow_files=True,
             help="Use `.` for all configured repos, or provide repo IDs, project IDs, or paths.",
         )
         cmd.add_argument(
@@ -849,11 +953,14 @@ async def async_main() -> int:
             "project show app-wabbit-dev --json",
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "targets",
             metavar="TARGET",
             type=str,
             nargs="+",
+            completion_kind="project-target",
+            completion_allow_files=True,
             help="Project IDs, repo IDs, or paths inside configured projects or repos.",
         )
         cmd.add_argument(
@@ -880,11 +987,14 @@ async def async_main() -> int:
             "project deps jeeves --json",
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "targets",
             metavar="TARGET",
             type=str,
             nargs="+",
+            completion_kind="project-target",
+            completion_allow_files=True,
             help="Project IDs, repo IDs, or paths inside configured projects or repos.",
         )
         cmd.add_argument(
@@ -912,11 +1022,14 @@ async def async_main() -> int:
             "project repo jeeves --json",
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "targets",
             metavar="TARGET",
             type=str,
             nargs="+",
+            completion_kind="repo-target",
+            completion_allow_files=True,
             help="Project IDs, repo IDs, or paths inside configured projects or repos.",
         )
         cmd.add_argument(
@@ -959,14 +1072,19 @@ async def async_main() -> int:
             ],
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "--list",
             action="store_true",
+            completion_blocks_positionals=True,
             help="List all loaded checks with their scope, auto-fix support, and short summary.",
         )
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "--describe",
             metavar="CHECK",
+            completion_kind="check-name",
+            completion_blocks_positionals=True,
             help="Show issue IDs, config commands, and suppression examples for one check.",
         )
         cmd.add_argument(
@@ -974,19 +1092,24 @@ async def async_main() -> int:
             action="store_true",
             help="When used with `--list` or `--describe`, emit JSON instead of text.",
         )
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "project_or_dir_or_file",
             metavar="TARGET",
             type=str,
             nargs="?",
             default=".",
+            completion_kind="check-target",
+            completion_allow_files=True,
             help="Filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`.",
         )
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "checks",
             metavar="CHECK",
             type=str,
             nargs="*",
+            completion_kind="check-name",
             help="Optional explicit check class names. Omit to run every loaded check.",
         )
         cmd.add_argument(
@@ -1023,12 +1146,15 @@ async def async_main() -> int:
             "spdx headers jeeves",
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "project_or_dir_or_file",
             metavar="TARGET",
             type=str,
             nargs="?",
             default=".",
+            completion_kind="check-target",
+            completion_allow_files=True,
             help="Filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`.",
         )
         cmd.add_argument(
@@ -1072,12 +1198,15 @@ async def async_main() -> int:
             ],
         ),
     ) as cmd:
-        cmd.add_argument(
+        _add_argument(
+            cmd,
             "target",
             metavar="TARGET",
             type=str,
             nargs="?",
             default=".",
+            completion_kind="check-target",
+            completion_allow_files=True,
             help="Filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`.",
         )
 
@@ -1112,6 +1241,21 @@ async def async_main() -> int:
     ) as cmd:
         del cmd
 
+    return parser, commands
+
+
+async def async_main() -> int:
+    if sys.platform.lower() == "win32":
+        os.system("color")
+        os.system("chcp 65001 > nul")
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore
+        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    parser, commands = build_parser()
+    prog = parser.prog
+
     args = parser.parse_args()
     command_path = getattr(args, "command_path", None)
     if command_path is None:
@@ -1141,6 +1285,21 @@ async def async_main() -> int:
     try:
         exit_code = 0
         match command_path:
+            case "completion/bash":
+                from dev.tasks.completion import print_completion_script
+
+                exit_code = print_completion_script("bash", prog=prog)
+
+            case "completion/zsh":
+                from dev.tasks.completion import print_completion_script
+
+                exit_code = print_completion_script("zsh", prog=prog)
+
+            case "completion/query":
+                from dev.tasks.completion import print_completion_query
+
+                return print_completion_query(args.shell, args.index, args.words)
+
             case "doctor":
                 from dev.tasks.doctor import doctor
 

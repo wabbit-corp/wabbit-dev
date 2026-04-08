@@ -18,6 +18,8 @@ async def test_root_help_includes_command_summaries(
     assert excinfo.value.code == 0
     output = capsys.readouterr().out
     assert "Wabbit development toolkit." in output
+    assert "completion" in output
+    assert "Generate shell completion scripts." in output
     assert "doctor" in output
     assert "Diagnose workspace, toolchain, and credential readiness." in output
     assert "config" in output
@@ -48,6 +50,24 @@ async def test_parent_command_without_subcommand_prints_help(
     assert "Analyze the dependency metadata loaded from root.clj." in output
     assert "graph     Render an SVG graph of project dependencies." in output
     assert "updates   Check configured libraries for newer upstream versions." in output
+
+
+@pytest.mark.asyncio
+async def test_completion_parent_help_lists_shells(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "completion"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "bash" in output
+    assert "zsh" in output
+    assert "source <(dev.py completion bash)" in output
 
 
 @pytest.mark.asyncio
@@ -107,6 +127,23 @@ async def test_cli_doctor_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result == 0
     assert called == ["called"]
+
+
+@pytest.mark.asyncio
+async def test_cli_completion_bash_prints_script(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "completion", "bash"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "complete -o bashdefault" in output
+    assert "completion query bash" in output
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,16 @@ wabbit-dev --help
 wabbit-dev doctor
 ```
 
+Enable shell completion:
+
+```bash
+source <(wabbit-dev completion bash)
+autoload -Uz compinit && compinit && source <(wabbit-dev completion zsh)
+```
+
+Persist one of those lines in your shell profile if you want completion on every
+new shell session.
+
 ## Install from a Checkout
 
 Create and activate a virtual environment:

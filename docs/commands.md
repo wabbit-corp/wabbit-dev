@@ -40,6 +40,7 @@ configured projects that belong to that repo.
 
 | Command | Summary |
 | --- | --- |
+| `completion bash` / `completion zsh` | Print shell completion scripts with dynamic command, target, and check-name completion. |
 | `doctor [--json]` | Diagnose workspace, toolchain, and credential readiness. |
 | `config check` | Parse and validate `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...]` | Generate or refresh managed project files. |
@@ -65,6 +66,42 @@ configured projects that belong to that repo.
 | `spdx headers [TARGET] [--fix]` | Run only the SPDX header check. |
 | `secrets scan [TARGET]` | Run the internal high-entropy-string secret scan. |
 | `contributors audit` | Audit contributor identity mismatches across configured repos. |
+
+## Shell Completion
+
+### `completion bash`
+
+```bash
+wabbit-dev completion bash
+```
+
+Prints a bash completion script. Source it directly:
+
+```bash
+source <(wabbit-dev completion bash)
+```
+
+### `completion zsh`
+
+```bash
+wabbit-dev completion zsh
+```
+
+Prints a zsh completion script. Initialize completion, then source it:
+
+```bash
+autoload -Uz compinit && compinit
+source <(wabbit-dev completion zsh)
+```
+
+The generated completion scripts query the live workspace when you press tab, so
+they can complete:
+
+- top-level commands
+- nested subcommands
+- configured project IDs
+- configured repo IDs
+- loaded check names
 
 ## Environment Diagnostics
 

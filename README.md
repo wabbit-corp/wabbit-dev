@@ -56,6 +56,13 @@ Docs dependencies live outside `requirements-dev.txt`. Install them separately:
 python3 -m pip install "mkdocs>=1.6,<2.0" "mkdocs-material>=9.6,<9.7" "pymdown-extensions>=10,<11"
 ```
 
+Enable shell completion:
+
+```bash
+source <(wabbit-dev completion bash)
+autoload -Uz compinit && compinit && source <(wabbit-dev completion zsh)
+```
+
 ## Quick Start
 
 Validate the workspace configuration:
@@ -97,6 +104,7 @@ Every command is documented here and in the MkDocs reference under
 
 | Command | What it does |
 | --- | --- |
+| `completion bash` / `completion zsh` | Prints shell completion scripts with dynamic command, target, and check-name completion. |
 | `doctor [--json]` | Diagnoses workspace, toolchain, and credential readiness. |
 | `config check` | Parses and validates `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...]` | Generates or refreshes managed project files from configuration. |
