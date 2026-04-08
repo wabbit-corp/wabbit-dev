@@ -19,7 +19,7 @@ from dev.config import (
     resolve_kotlin_plugin_compiler_plugin_project,
 )
 from dev.messages import error, info, success, warning
-from dev.repo_resolution import resolve_project_ids
+from dev.repo_resolution import inferred_project_targets, resolve_project_ids
 
 
 def _python_source_files(root: Path) -> Iterator[Path]:
@@ -214,6 +214,7 @@ def build(projects: str | list[str] | None = None, *, json_output: bool = False)
     requested_projects = [projects] if isinstance(projects, str) else projects
     payload: dict[str, object] = {
         "requestedTargets": list(requested_projects or []),
+        "inferredTargets": [],
         "resolvedTargets": [],
         "topologicalOrder": [],
         "results": [],
@@ -221,10 +222,14 @@ def build(projects: str | list[str] | None = None, *, json_output: bool = False)
 
     def run() -> int:
         config = load_config()
+        effective_requested_projects = inferred_project_targets(config, requested_projects)
+        if requested_projects is None and effective_requested_projects is not None:
+            payload["inferredTargets"] = list(effective_requested_projects)
+
         selected_project_names: list[str] | None = None
-        if requested_projects:
+        if effective_requested_projects:
             try:
-                selected_project_names = resolve_project_ids(config, requested_projects)
+                selected_project_names = resolve_project_ids(config, effective_requested_projects)
             except ValueError as ex:
                 payload["error"] = str(ex)
                 error(str(ex))

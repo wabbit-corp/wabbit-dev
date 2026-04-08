@@ -1,13 +1,13 @@
 # pyright: reportUnknownMemberType=false
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from graphviz import Digraph
 
 from dev.config import load_config
 from dev.messages import error, info
-from dev.repo_resolution import resolve_project_ids
+from dev.repo_resolution import inferred_project_targets, resolve_project_ids
 
 
 def get_project_dependencies(
@@ -18,11 +18,12 @@ def get_project_dependencies(
     graph_title: str | None = None,
 ) -> None:
     config = load_config()
+    effective_focus_project_names = inferred_project_targets(config, focus_project_names)
 
     resolved_focus_projects: list[str] | None = None
-    if focus_project_names:
+    if effective_focus_project_names:
         try:
-            resolved_focus_projects = resolve_project_ids(config, list(focus_project_names))
+            resolved_focus_projects = resolve_project_ids(config, list(effective_focus_project_names))
         except ValueError as ex:
             error(str(ex))
             return

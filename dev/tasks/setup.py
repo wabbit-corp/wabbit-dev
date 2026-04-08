@@ -35,6 +35,7 @@ from dev.generated_files import stamp_managed_text
 from dev.git_changes import ChangeType, FileDiff, FileType, compute_repo_diffs
 from dev.licenses import canonicalize_license_key, load_license_texts
 from dev.messages import ask, error, info, warning
+from dev.repo_resolution import inferred_project_targets
 from dev.tasks import setup_common, setup_kotlin, setup_python
 from dev.tasks.setup_common import RepoSetupMode, render_template
 
@@ -1244,6 +1245,7 @@ def setup(
     payload: dict[str, object] = {
         "mode": mode.value,
         "requestedTargets": list(selected_projects_input or []),
+        "inferredTargets": [],
         "selectedProjectIds": [],
         "projects": [],
         "workspaceGradleRootWritten": False,
@@ -1266,14 +1268,17 @@ def setup(
     def run() -> int:
         config = load_config()
         ctx = create_repo_setup_context(config, mode)
+        effective_selected_projects_input = inferred_project_targets(config, selected_projects_input)
+        if selected_projects_input is None and effective_selected_projects_input is not None:
+            payload["inferredTargets"] = list(effective_selected_projects_input)
 
-        if selected_projects_input is None:
+        if effective_selected_projects_input is None:
             selected_project_names = list(config.defined_projects.keys())
         else:
-            from dev.repo_resolution import resolve_project_ids
-
             try:
-                resolved_project_ids = resolve_project_ids(config, selected_projects_input)
+                from dev.repo_resolution import resolve_project_ids
+
+                resolved_project_ids = resolve_project_ids(config, effective_selected_projects_input)
             except ValueError as ex:
                 payload["error"] = str(ex)
                 error(str(ex))
@@ -1284,18 +1289,18 @@ def setup(
         selected_projects = [config.defined_projects[name] for name in selected_project_names]
         payload["projects"] = [project_payload(project_item) for project_item in selected_projects]
 
-        if selected_projects_input is None:
+        if effective_selected_projects_input is None:
             info(f"Setting up projects in {mode.value} mode")
         else:
-            if len(selected_projects_input) == 1:
-                target_label = selected_projects_input[0]
+            if len(effective_selected_projects_input) == 1:
+                target_label = effective_selected_projects_input[0]
             else:
-                target_label = ", ".join(selected_projects_input)
+                target_label = ", ".join(effective_selected_projects_input)
             info(f"Setting up {target_label} and its dependencies in {mode.value} mode")
 
         gradle_projects = [project_item for project_item in selected_projects if isinstance(project_item, GradleProject)]
         if gradle_projects:
-            if selected_projects_input is None:
+            if effective_selected_projects_input is None:
                 workspace_seed_projects = gradle_projects
                 workspace_root_name = config.default_maven_project_group or "workspace"
                 payload["workspaceGradleRootWritten"] = True
@@ -1380,14 +1385,14 @@ def setup(
             payload["localOverlayRootsWritten"] = local_overlay_roots_written
         else:
             overlay_roots: set[Path] = set()
-            if selected_projects_input is None and gradle_projects:
+            if effective_selected_projects_input is None and gradle_projects:
                 overlay_roots.add(Path("."))
             overlay_roots.update(project_item.effective_gradle_root for project_item in gradle_projects)
             payload["localOverlayRootsRemoved"] = [str(overlay_root.resolve()) for overlay_root in sorted(overlay_roots)]
             for overlay_root in sorted(overlay_roots):
                 _delete_gradle_local_overlay(root_path=overlay_root)
 
-        if selected_projects_input is None:
+        if effective_selected_projects_input is None:
             project_dirs: list[str] = []
             for project_item in selected_projects:
                 relative_parts = project_item.path.parts

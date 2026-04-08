@@ -7,7 +7,7 @@ from pathlib import Path
 from dev.config import GradleProject, PremakeProject, PythonProject, find_workspace_root, load_config
 from dev.discoverability import did_you_mean_suffix
 from dev.messages import warning
-from dev.repo_resolution import resolve_project_ids
+from dev.repo_resolution import inferred_project_targets, resolve_project_ids
 
 
 @dataclass
@@ -77,7 +77,11 @@ def cloc(
     direct_paths: list[Path] = []
     if not requested_targets:
         if config is not None:
-            project_names = list(config.defined_projects.keys())
+            inferred_targets = inferred_project_targets(config)
+            if inferred_targets is not None:
+                project_names = resolve_project_ids(config, inferred_targets)
+            else:
+                project_names = list(config.defined_projects.keys())
         else:
             warning("No project specified and no config found. Nothing to do.")
             return

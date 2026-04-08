@@ -59,7 +59,7 @@ def test_status_json_output_reports_tracked_changes(tmp_path: Path, monkeypatch,
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(status_task, "resolve_repo_targets", lambda targets: [repo_target])
+    monkeypatch.setattr(status_task, "resolve_repo_targets", lambda targets, config=None: [repo_target])
     monkeypatch.setattr(status_task, "Repo", FakeRepo)
 
     result = status_task.status(["alpha"], json_output=True)
@@ -69,3 +69,30 @@ def test_status_json_output_reports_tracked_changes(tmp_path: Path, monkeypatch,
     assert payload["requestedTargets"] == ["alpha"]
     assert payload["repos"][0]["name"] == "alpha"
     assert payload["repos"][0]["trackedChanges"] == ["src/main.py", "README.md"]
+
+
+def test_status_json_output_uses_inferred_repo_target(tmp_path: Path, monkeypatch, capsys) -> None:
+    import dev.tasks.status as status_task
+
+    repo_target = SimpleNamespace(name="alpha", path=tmp_path)
+
+    class FakeRepo:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.index = SimpleNamespace(diff=lambda _other: [SimpleNamespace(a_path="src/main.py")])
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(status_task, "find_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(status_task, "load_config", lambda: object())
+    monkeypatch.setattr(status_task, "inferred_repo_targets", lambda config, targets=None: ["alpha"])
+    monkeypatch.setattr(status_task, "resolve_repo_targets", lambda targets, config=None: [repo_target])
+    monkeypatch.setattr(status_task, "Repo", FakeRepo)
+
+    result = status_task.status(None, json_output=True)
+
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["requestedTargets"] == []
+    assert payload["inferredTargets"] == ["alpha"]
+    assert payload["repos"][0]["name"] == "alpha"

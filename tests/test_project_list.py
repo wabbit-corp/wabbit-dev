@@ -19,11 +19,11 @@ from dev.tasks.project_list import (
     project_dependency_payload,
     project_repo_payload,
     project_show_payload,
-    render_project_target_lines,
     render_project_dependency_lines,
     render_project_list_lines,
     render_project_repo_lines,
     render_project_show_lines,
+    render_project_target_lines,
     show_project_targets,
 )
 
@@ -449,6 +449,32 @@ async def test_cli_project_show_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
+async def test_cli_project_show_defaults_to_current_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dev.repo_resolution as repo_resolution
+    from dev import cli
+    from dev.tasks import doctor as doctor_task
+    from dev.tasks import project_list
+
+    called: list[list[str]] = []
+
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
+    monkeypatch.setattr(cli, "_load_workspace_config", lambda: object())
+    monkeypatch.setattr(repo_resolution, "inferred_project_targets", lambda config, targets=None: ["app-wabbit-dev"])
+
+    def fake_show_projects(project_ids: list[str], *, json_output: bool = False) -> None:
+        assert json_output is False
+        called.append(project_ids)
+
+    monkeypatch.setattr(project_list, "show_projects", fake_show_projects)
+    monkeypatch.setattr("sys.argv", ["dev.py", "project", "show"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [["app-wabbit-dev"]]
+
+
+@pytest.mark.asyncio
 async def test_cli_project_deps_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev import cli
     from dev.tasks import doctor as doctor_task
@@ -523,3 +549,4 @@ async def test_cli_project_show_suggests_close_project_id(
     err = capsys.readouterr().err
     assert "Unknown project or repo: 'app-wabbit-de'" in err
     assert "Did you mean 'app-wabbit-dev'?" in err
+    assert "Resolved context:" in err

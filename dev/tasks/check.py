@@ -32,7 +32,7 @@ from dev.checks.base import (
 from dev.config import Project, find_workspace_root, load_config
 from dev.discoverability import did_you_mean_suffix, unknown_name_message
 from dev.messages import error, info, warning
-from dev.repo_resolution import resolve_check_paths
+from dev.repo_resolution import inferred_project_targets, resolve_check_paths
 
 E_GITIGNORE_WITHOUT_REPO = IssueType(
     "E_GITIGNORE_WITHOUT_REPO",
@@ -322,14 +322,14 @@ def describe_check(check_name: str, *, json_output: bool = False) -> int:
 
 
 def secrets_scan(
-    project_or_dir_or_file: str = ".",
+    project_or_dir_or_file: str | None = None,
     fix: bool = False,
 ) -> int:
     return check_main(project_or_dir_or_file, ["HighEntropyStringCheck"], fix)
 
 
 def check_main(
-    project_or_dir_or_file: str,
+    project_or_dir_or_file: str | None,
     enabled_checks: list[str] | None = None,
     fix: bool = False,
 ) -> int:
@@ -337,9 +337,16 @@ def check_main(
     Main function to run checks on the project.
     """
 
-    config = _load_optional_config(project_or_dir_or_file)
+    lookup_target = project_or_dir_or_file or "."
+    config = _load_optional_config(lookup_target)
     if config is None:
         warning("No config file found. Some checks may not have sufficient context to run.")
+
+    effective_target = lookup_target
+    if project_or_dir_or_file is None and config is not None:
+        inferred_targets = inferred_project_targets(config)
+        if inferred_targets is not None:
+            effective_target = inferred_targets[0]
 
     config_root = (
         config.workspace_root
@@ -352,11 +359,11 @@ def check_main(
         for project in config.defined_projects.values():
             projects_by_path[project.path.resolve()] = project
 
-    root_paths = resolve_check_paths(project_or_dir_or_file, config=config)
+    root_paths = resolve_check_paths(effective_target, config=config)
 
     for path in root_paths:
         if not path.exists():
-            suggestion = did_you_mean_suffix(project_or_dir_or_file, _config_target_choices(config))
+            suggestion = did_you_mean_suffix(effective_target, _config_target_choices(config))
             raise ValueError(f"Path does not exist: {path}.{suggestion}")
 
     all_checks = _load_all_checks(config)

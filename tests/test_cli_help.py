@@ -22,6 +22,8 @@ async def test_root_help_includes_command_summaries(
     assert "Generate shell completion scripts." in output
     assert "doctor" in output
     assert "Diagnose workspace, toolchain, and credential readiness." in output
+    assert "where" in output
+    assert "Show the workspace, repo, and project context inferred" in output
     assert "config" in output
     assert "Validate workspace configuration files." in output
     assert "project" in output
@@ -130,6 +132,26 @@ async def test_cli_doctor_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result == 0
     assert called == ["called"]
+
+
+@pytest.mark.asyncio
+async def test_cli_where_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import where as where_task
+
+    called: list[bool] = []
+
+    def fake_show_where(*, json_output: bool = False) -> int:
+        called.append(json_output)
+        return 0
+
+    monkeypatch.setattr(where_task, "show_where", fake_show_where)
+    monkeypatch.setattr("sys.argv", ["dev.py", "where", "--json"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [True]
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from dev.config import (
@@ -17,7 +17,14 @@ from dev.config import (
 )
 from dev.discoverability import require_project
 from dev.jvms import resolve_project_jvm_policy
-from dev.repo_resolution import ResolvedRepoTarget, resolve_project_ids
+from dev.repo_resolution import (
+    ResolvedRepoTarget,
+    contextualize_resolution_error,
+    inferred_project_targets,
+    inferred_repo_targets,
+    resolve_project_ids,
+    resolve_workspace_context,
+)
 
 
 def _colored(text: str, color: str, *, attrs: tuple[str, ...] = ()) -> str:
@@ -460,7 +467,17 @@ def list_projects(config: Config | None = None) -> None:
 
 def show_projects(project_targets: list[str], config: Config | None = None, *, json_output: bool = False) -> None:
     active_config = load_config() if config is None else config
-    project_ids = resolve_project_ids(active_config, project_targets)
+    requested_targets = inferred_project_targets(active_config, project_targets)
+    if requested_targets is None:
+        context = resolve_workspace_context(config=active_config)
+        raise ValueError(
+            contextualize_resolution_error(
+                "No target was provided, and the current directory does not map to a configured project or repo. "
+                "Use `where` or pass an explicit target.",
+                context,
+            )
+        )
+    project_ids = resolve_project_ids(active_config, requested_targets)
     if json_output:
         print(
             json.dumps(
@@ -487,7 +504,17 @@ def show_project_dependencies(
     json_output: bool = False,
 ) -> None:
     active_config = load_config() if config is None else config
-    project_ids = resolve_project_ids(active_config, project_targets)
+    requested_targets = inferred_project_targets(active_config, project_targets)
+    if requested_targets is None:
+        context = resolve_workspace_context(config=active_config)
+        raise ValueError(
+            contextualize_resolution_error(
+                "No target was provided, and the current directory does not map to a configured project or repo. "
+                "Use `where` or pass an explicit target.",
+                context,
+            )
+        )
+    project_ids = resolve_project_ids(active_config, requested_targets)
     if json_output:
         print(
             json.dumps(
@@ -505,7 +532,8 @@ def show_project_dependencies(
 
 def show_project_repos(project_targets: list[str], config: Config | None = None, *, json_output: bool = False) -> None:
     active_config = load_config() if config is None else config
-    project_ids = resolve_project_ids(active_config, project_targets)
+    requested_targets = inferred_repo_targets(active_config, project_targets)
+    project_ids = resolve_project_ids(active_config, requested_targets)
     seen_repo_keys: set[Path] = set()
     repo_targets: list[ResolvedRepoTarget] = []
     for project_id in project_ids:
@@ -535,11 +563,8 @@ def show_project_targets(
     json_output: bool = False,
 ) -> None:
     active_config = load_config() if config is None else config
-    resolved_project_ids = (
-        resolve_project_ids(active_config, project_targets)
-        if project_targets
-        else list(active_config.defined_projects.keys())
-    )
+    requested_targets = inferred_project_targets(active_config, project_targets)
+    resolved_project_ids = resolve_project_ids(active_config, requested_targets) if requested_targets else list(active_config.defined_projects.keys())
     kmp_project_ids = [
         project_id
         for project_id in resolved_project_ids

@@ -48,9 +48,9 @@ def _add_argument(
     **kwargs: object,
 ) -> argparse.Action:
     action = parser.add_argument(*args, **kwargs)
-    setattr(action, "_completion_kind", completion_kind)
-    setattr(action, "_completion_allow_files", completion_allow_files)
-    setattr(action, "_completion_blocks_positionals", completion_blocks_positionals)
+    action._completion_kind = completion_kind
+    action._completion_allow_files = completion_allow_files
+    action._completion_blocks_positionals = completion_blocks_positionals
     return action
 
 
@@ -83,6 +83,63 @@ def _guidance_target(args: argparse.Namespace) -> str | None:
         return project_or_dir_or_file
 
     return None
+
+
+def _load_workspace_config() -> object | None:
+    from dev.config import find_workspace_root, load_config
+
+    if find_workspace_root() is None:
+        return None
+    try:
+        return load_config()
+    except Exception:
+        return None
+
+
+def _apply_context_defaults(command_path: str, args: argparse.Namespace) -> None:
+    config = _load_workspace_config()
+    if config is None:
+        return
+
+    from dev.repo_resolution import inferred_project_targets, inferred_repo_targets
+
+    if command_path in {
+        "setup",
+        "build",
+        "clean",
+        "cloc",
+        "dep/graph",
+        "project/show",
+        "project/deps",
+        "project/targets",
+    }:
+        targets = getattr(args, "targets", None)
+        if isinstance(targets, list) and not targets:
+            inferred_targets = inferred_project_targets(config)
+            if inferred_targets is not None:
+                args.targets = inferred_targets
+
+    if command_path in {"project/repo", "status"}:
+        targets = getattr(args, "targets", None)
+        if isinstance(targets, list) and not targets:
+            inferred_targets = inferred_repo_targets(config)
+            if inferred_targets is not None:
+                args.targets = inferred_targets
+
+    if command_path == "check" and getattr(args, "project_or_dir_or_file", None) is None:
+        inferred_targets = inferred_project_targets(config)
+        if inferred_targets is not None:
+            args.project_or_dir_or_file = inferred_targets[0]
+
+    if command_path == "spdx/headers" and getattr(args, "project_or_dir_or_file", None) is None:
+        inferred_targets = inferred_project_targets(config)
+        if inferred_targets is not None:
+            args.project_or_dir_or_file = inferred_targets[0]
+
+    if command_path == "secrets/scan" and getattr(args, "target", None) is None:
+        inferred_targets = inferred_project_targets(config)
+        if inferred_targets is not None:
+            args.target = inferred_targets[0]
 
 
 def _print_next_steps(command_path: str, *, prog: str, args: argparse.Namespace) -> None:
@@ -197,7 +254,7 @@ class Commands:
 
             self.parser = parsers[name]
             self.parser.formatter_class = HelpFormatter
-            setattr(self.parser, "_completion_hidden", help == argparse.SUPPRESS)
+            self.parser._completion_hidden = help == argparse.SUPPRESS
             if description is not None:
                 self.parser.description = description
             if epilog is not None:
@@ -250,6 +307,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     parser.epilog = _epilog(
         examples=[
             f"{prog} doctor",
+            f"{prog} where",
             f"{prog} completion bash",
             f"{prog} setup --local app-datatron",
             f"{prog} build app-datatron",
@@ -267,6 +325,26 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         return _epilog(
             examples=[f"{prog} {example}" for example in command_examples],
             notes=notes,
+        )
+
+    with commands(
+        "where",
+        help="Show the workspace, repo, and project context inferred from the current directory.",
+        description=_doc(
+            """
+            Print the CLI context inferred from the current working directory.
+
+            This shows the resolved workspace root, current configured project,
+            current repo target, and the commands that inherit those defaults
+            when you omit explicit targets.
+            """
+        ),
+        epilog=examples("where", "where --json"),
+    ) as cmd:
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit the resolved cwd context as JSON.",
         )
 
     with commands(
@@ -437,7 +515,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "setup --dev kotlin-web-openai",
             notes=[
                 "Targets can be project IDs, repo IDs, or paths inside configured projects or repos.",
-                "With no targets, setup processes every configured project.",
+                "With no targets from the workspace root, setup processes every configured project.",
+                "With no targets inside a configured project or repo, setup defaults to that current project or repo.",
                 "`--local` writes local composite-build overlays for multi-repo development.",
                 "`--dev` switches to the DEV setup mode; the default is PROD.",
             ],
@@ -531,6 +610,10 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "dep graph app-datatron",
             "dep graph jeeves",
             "dep graph --artifacts kotlin-web-openai",
+            notes=[
+                "With no targets from inside a configured project or repo, the graph defaults to that current project or repo.",
+                "From the workspace root, omitting targets still graphs the full workspace.",
+            ],
         ),
     ) as cmd:
         _add_argument(
@@ -629,6 +712,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "build kotlin-web-openai app-wabbit-dev",
             notes=[
                 "Only Gradle and Python projects are buildable through this command.",
+                "With no targets from inside a configured project or repo, build defaults to that current project or repo.",
+                "From the workspace root, omitting targets still builds every buildable configured project.",
             ],
         ),
     ) as cmd:
@@ -788,6 +873,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "clean jeeves",
             notes=[
                 "Targets can be project IDs, repo IDs, or paths inside configured projects or repos.",
+                "With no targets from inside a configured project or repo, clean defaults to that current project or repo.",
             ],
         ),
     ) as cmd:
@@ -814,7 +900,16 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             `cloc` directly on that path.
             """
         ),
-        epilog=examples("cloc", "cloc app-wabbit-dev", "cloc jeeves", "cloc app-wabbit-dev/dev"),
+        epilog=examples(
+            "cloc",
+            "cloc app-wabbit-dev",
+            "cloc jeeves",
+            "cloc app-wabbit-dev/dev",
+            notes=[
+                "With no targets from inside a configured project or repo, cloc defaults to that current project or repo.",
+                "From the workspace root, omitting targets still analyzes every configured project.",
+            ],
+        ),
     ) as cmd:
         _add_argument(
             cmd,
@@ -840,12 +935,15 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             """
         ),
         epilog=examples(
+            "status",
             "status app-wabbit-dev",
             "status jeeves",
             "status ./app-wabbit-dev",
             "status app-wabbit-dev jeeves/client",
             notes=[
                 "The command reports tracked working-tree changes. Untracked files are not shown.",
+                "With no targets from inside a configured project or repo, status defaults to that current repo.",
+                "From the workspace root, omitting targets inspects every configured repo.",
             ],
         ),
     ) as cmd:
@@ -854,7 +952,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "targets",
             metavar="TARGET",
             type=str,
-            nargs="+",
+            nargs="*",
             completion_kind="repo-target",
             completion_allow_files=True,
             help="Repo IDs, project IDs, or paths inside git repositories.",
@@ -956,6 +1054,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         ),
         epilog=examples(
             "project list",
+            "project repo",
             "project show app-wabbit-dev",
             "project deps jeeves",
             "project repo jeeves",
@@ -991,10 +1090,15 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             """
         ),
         epilog=examples(
+            "project show",
             "project show app-wabbit-dev",
             "project show jeeves",
             "project show ./jeeves/client",
             "project show app-wabbit-dev --json",
+            notes=[
+                "With no targets from inside a configured project or repo, the command defaults to that current project or repo.",
+                "From the workspace root, pass an explicit target to avoid dumping the entire workspace.",
+            ],
         ),
     ) as cmd:
         _add_argument(
@@ -1002,7 +1106,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "targets",
             metavar="TARGET",
             type=str,
-            nargs="+",
+            nargs="*",
             completion_kind="project-target",
             completion_allow_files=True,
             help="Project IDs, repo IDs, or paths inside configured projects or repos.",
@@ -1025,10 +1129,15 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             """
         ),
         epilog=examples(
+            "project deps",
             "project deps app-wabbit-dev",
             "project deps jeeves",
             "project deps ./jeeves/client",
             "project deps jeeves --json",
+            notes=[
+                "With no targets from inside a configured project or repo, the command defaults to that current project or repo.",
+                "From the workspace root, pass an explicit target to avoid dumping the entire workspace.",
+            ],
         ),
     ) as cmd:
         _add_argument(
@@ -1036,7 +1145,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "targets",
             metavar="TARGET",
             type=str,
-            nargs="+",
+            nargs="*",
             completion_kind="project-target",
             completion_allow_files=True,
             help="Project IDs, repo IDs, or paths inside configured projects or repos.",
@@ -1060,10 +1169,15 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             """
         ),
         epilog=examples(
+            "project repo",
             "project repo app-wabbit-dev",
             "project repo jeeves",
             "project repo ./jeeves/client",
             "project repo jeeves --json",
+            notes=[
+                "With no targets from inside a configured project or repo, the command defaults to that current repo.",
+                "From the workspace root, omitting targets lists every configured repo.",
+            ],
         ),
     ) as cmd:
         _add_argument(
@@ -1071,7 +1185,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "targets",
             metavar="TARGET",
             type=str,
-            nargs="+",
+            nargs="*",
             completion_kind="repo-target",
             completion_allow_files=True,
             help="Project IDs, repo IDs, or paths inside configured projects or repos.",
@@ -1101,6 +1215,10 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "project targets kotlin-filesystem",
             "project targets jeeves",
             "project targets kotlin-filesystem --json",
+            notes=[
+                "With no targets from inside a configured project or repo, the command defaults to that current project or repo.",
+                "From the workspace root, omitting targets still lists every configured KMP project.",
+            ],
         ),
     ) as cmd:
         _add_argument(
@@ -1147,6 +1265,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "check :root --fix",
             "check . SpdxHeaderCheck",
             notes=[
+                "When TARGET is omitted from inside a configured project or repo, the command defaults to that current project or repo.",
                 "Use `--list` to browse loaded checks and `--describe <check>` for issue IDs and suppression examples.",
                 "Explicit check names use the Python class names registered by the check modules.",
                 "Checks honor `.gitignore`, `.checkignore`, and suppressions configured in root.clj.",
@@ -1179,10 +1298,10 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             metavar="TARGET",
             type=str,
             nargs="?",
-            default=".",
+            default=None,
             completion_kind="check-target",
             completion_allow_files=True,
-            help="Filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`.",
+            help="Filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`. Omit to infer the current configured project or repo when possible.",
         )
         _add_argument(
             cmd,
@@ -1225,6 +1344,9 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "spdx headers .",
             "spdx headers app-wabbit-dev --fix",
             "spdx headers jeeves",
+            notes=[
+                "When TARGET is omitted from inside a configured project or repo, the command defaults to that current project or repo.",
+            ],
         ),
     ) as cmd:
         _add_argument(
@@ -1233,10 +1355,10 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             metavar="TARGET",
             type=str,
             nargs="?",
-            default=".",
+            default=None,
             completion_kind="check-target",
             completion_allow_files=True,
-            help="Filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`.",
+            help="Filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`. Omit to infer the current configured project or repo when possible.",
         )
         cmd.add_argument(
             "--fix",
@@ -1276,6 +1398,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "secrets scan jeeves",
             notes=[
                 "Targets can be a filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`.",
+                "When TARGET is omitted from inside a configured project or repo, the command defaults to that current project or repo.",
             ],
         ),
     ) as cmd:
@@ -1285,10 +1408,10 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             metavar="TARGET",
             type=str,
             nargs="?",
-            default=".",
+            default=None,
             completion_kind="check-target",
             completion_allow_files=True,
-            help="Filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`.",
+            help="Filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`. Omit to infer the current configured project or repo when possible.",
         )
 
     with commands(
@@ -1347,6 +1470,8 @@ async def async_main() -> int:
         commands.parsers[command_path].print_help()
         return 0
 
+    _apply_context_defaults(command_path, args)
+
     from dev.tasks.doctor import preflight_for_command
 
     selected_projects: tuple[str, ...] | None = None
@@ -1366,6 +1491,11 @@ async def async_main() -> int:
     try:
         exit_code = 0
         match command_path:
+            case "where":
+                from dev.tasks.where import show_where
+
+                exit_code = show_where(json_output=args.json)
+
             case "completion/bash":
                 from dev.tasks.completion import print_completion_script
 
@@ -1502,13 +1632,13 @@ async def async_main() -> int:
                 from dev.tasks.check import check_main, describe_check, list_checks
 
                 if args.list:
-                    if args.project_or_dir_or_file != "." or args.checks or args.describe is not None or args.fix:
+                    if args.project_or_dir_or_file is not None or args.checks or args.describe is not None or args.fix:
                         raise ValueError("`check --list` does not accept TARGET, CHECK, --describe, or --fix.")
                     exit_code = list_checks(json_output=args.json)
                     return exit_code
 
                 if args.describe is not None:
-                    if args.project_or_dir_or_file != "." or args.checks or args.fix:
+                    if args.project_or_dir_or_file is not None or args.checks or args.fix:
                         raise ValueError("`check --describe` does not accept TARGET, CHECK, or --fix.")
                     exit_code = describe_check(args.describe, json_output=args.json)
                     return exit_code

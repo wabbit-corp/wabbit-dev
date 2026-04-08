@@ -11,7 +11,7 @@ from pathlib import Path
 import dev.io
 from dev.config import GradleProject, PythonProject, load_config
 from dev.messages import error
-from dev.repo_resolution import resolve_project_ids
+from dev.repo_resolution import inferred_project_targets, resolve_project_ids
 
 DRY_RUN = False
 PathLikeStr = str | os.PathLike[str]
@@ -221,10 +221,11 @@ if __name__ == "__main__":
 def clean(projects: str | list[str] | None) -> None:
     config = load_config()
     requested_projects = [projects] if isinstance(projects, str) else projects
+    effective_requested_projects = inferred_project_targets(config, requested_projects)
     selected_project_names: list[str] | None = None
-    if requested_projects:
+    if effective_requested_projects:
         try:
-            selected_project_names = resolve_project_ids(config, requested_projects)
+            selected_project_names = resolve_project_ids(config, effective_requested_projects)
         except ValueError as ex:
             error(str(ex))
             return

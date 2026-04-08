@@ -16,6 +16,17 @@ class ResolvedRepoTarget:
     project_ids: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class WorkspaceResolutionContext:
+    cwd: Path
+    workspace_root: Path | None
+    current_project_id: str | None = None
+    current_project_path: Path | None = None
+    current_repo_target: str | None = None
+    current_repo_id: str | None = None
+    current_repo_path: Path | None = None
+
+
 def _configured_target_names(config: Config) -> list[str]:
     return list(dict.fromkeys([*config.defined_projects.keys(), *config.defined_repos.keys()]))
 
@@ -30,6 +41,13 @@ def _is_within(path: Path, root: Path) -> bool:
 
 def _resolved_path(path: Path) -> Path:
     return path.resolve()
+
+
+def _normalized_start_path(start: str | Path | None = None) -> Path:
+    current = Path.cwd() if start is None else Path(start)
+    if current.is_file():
+        current = current.parent
+    return current.resolve()
 
 
 def _repo_project_ids(config: Config, repo_id: str) -> list[str]:
@@ -80,6 +98,116 @@ def _deepest_repo_id_for_path(config: Config, path: Path) -> str | None:
     )
 
 
+def resolve_workspace_context(
+    start: str | Path | None = None,
+    *,
+    config: Config | None = None,
+) -> WorkspaceResolutionContext:
+    cwd = _normalized_start_path(start)
+    workspace_root = find_workspace_root(cwd)
+    active_config = config
+
+    if active_config is None and workspace_root is not None:
+        try:
+            active_config = load_config(cwd)
+        except Exception:
+            active_config = None
+
+    if active_config is None:
+        return WorkspaceResolutionContext(cwd=cwd, workspace_root=workspace_root)
+
+    project_matches = _deepest_matching_projects(active_config, cwd)
+    current_project = next((project for project in project_matches if project.project_id is not None), None)
+
+    repo_id = _deepest_repo_id_for_path(active_config, cwd)
+    repo_target = repo_id
+    repo_path = active_config.defined_repos[repo_id].path if repo_id is not None else None
+
+    if current_project is not None and current_project.repo_id is not None and current_project.repo_id in active_config.defined_repos:
+        repo_id = current_project.repo_id
+        repo_target = repo_id
+        repo_path = active_config.defined_repos[repo_id].path
+    elif current_project is not None and current_project.project_id is not None:
+        repo_target = current_project.project_id
+        repo_path = current_project.effective_repo_root
+
+    return WorkspaceResolutionContext(
+        cwd=cwd,
+        workspace_root=workspace_root.resolve() if workspace_root is not None else None,
+        current_project_id=current_project.project_id if current_project is not None else None,
+        current_project_path=current_project.path if current_project is not None else None,
+        current_repo_target=repo_target,
+        current_repo_id=repo_id,
+        current_repo_path=repo_path,
+    )
+
+
+def inferred_project_targets(
+    config: Config,
+    targets: Sequence[str] | None = None,
+    *,
+    start: str | Path | None = None,
+) -> list[str] | None:
+    if targets:
+        return list(targets)
+
+    context = resolve_workspace_context(start, config=config)
+    if context.workspace_root is None or context.cwd == context.workspace_root:
+        return None
+    if context.current_project_id is not None:
+        return [context.current_project_id]
+    if context.current_repo_target is not None:
+        return [context.current_repo_target]
+    return None
+
+
+def inferred_repo_targets(
+    config: Config,
+    targets: Sequence[str] | None = None,
+    *,
+    start: str | Path | None = None,
+) -> list[str] | None:
+    if targets:
+        return list(targets)
+
+    context = resolve_workspace_context(start, config=config)
+    if context.workspace_root is None or context.cwd == context.workspace_root:
+        return None
+    if context.current_repo_target is not None:
+        return [context.current_repo_target]
+    if context.current_project_id is not None:
+        return [context.current_project_id]
+    return None
+
+
+def format_workspace_context(context: WorkspaceResolutionContext) -> str:
+    project_line = "-"
+    if context.current_project_id is not None and context.current_project_path is not None:
+        project_line = f"{context.current_project_id} ({context.current_project_path})"
+
+    repo_line = "-"
+    if context.current_repo_target is not None and context.current_repo_path is not None:
+        repo_line = f"{context.current_repo_target} ({context.current_repo_path})"
+
+    workspace_root = str(context.workspace_root) if context.workspace_root is not None else "-"
+    return "\n".join(
+        [
+            "Resolved context:",
+            f"  cwd: {context.cwd}",
+            f"  workspace root: {workspace_root}",
+            f"  current project: {project_line}",
+            f"  current repo: {repo_line}",
+        ]
+    )
+
+
+def contextualize_resolution_error(
+    message: str,
+    context: WorkspaceResolutionContext,
+) -> str:
+    return f"{message}\n{format_workspace_context(context)}"
+
+
 def _normalize_lookup_target(target: str) -> tuple[str, bool]:
     if target.startswith(":") and target != ":root":
         return target[1:], True
@@ -87,6 +215,7 @@ def _normalize_lookup_target(target: str) -> tuple[str, bool]:
 
 
 def resolve_project_ids(config: Config, targets: Sequence[str] | None = None) -> list[str]:
+    context = resolve_workspace_context(config=config)
     if not targets:
         return list(config.defined_projects.keys())
 
@@ -122,12 +251,20 @@ def resolve_project_ids(config: Config, targets: Sequence[str] | None = None) ->
                             project_ids = _repo_project_ids(config, repo_id)
                         else:
                             raise ValueError(
-                                f"Path does not map to a configured project or repo: {target!r}."
+                                contextualize_resolution_error(
+                                    f"Path does not map to a configured project or repo: {target!r}.",
+                                    context,
+                                )
                             )
 
         if project_ids is None:
             lookup_target = normalized_target if had_prefix else target
-            raise ValueError(unknown_name_message("project or repo", lookup_target, _configured_target_names(config)))
+            raise ValueError(
+                contextualize_resolution_error(
+                    unknown_name_message("project or repo", lookup_target, _configured_target_names(config)),
+                    context,
+                )
+            )
 
         for project_id in project_ids:
             if project_id in seen:
@@ -139,6 +276,7 @@ def resolve_project_ids(config: Config, targets: Sequence[str] | None = None) ->
 
 
 def resolve_check_paths(target: str, config: Config | None = None) -> list[Path]:
+    context = resolve_workspace_context(config=config) if config is not None else resolve_workspace_context()
     if target == ":root":
         if config is None:
             raise ValueError("No config file found. Cannot resolve project paths.")
@@ -159,7 +297,12 @@ def resolve_check_paths(target: str, config: Config | None = None) -> list[Path]
         raise ValueError(f"Path does not exist: {path}.")
 
     lookup_target = normalized_target if had_prefix else target
-    raise ValueError(unknown_name_message("project or repo", lookup_target, _configured_target_names(config)))
+    raise ValueError(
+        contextualize_resolution_error(
+            unknown_name_message("project or repo", lookup_target, _configured_target_names(config)),
+            context,
+        )
+    )
 
 
 def _resolved_repo_target_from_project(project: Project) -> ResolvedRepoTarget:
@@ -193,6 +336,7 @@ def _load_config_if_available() -> Config | None:
 
 def resolve_repo_target(target: str, *, config: Config | None = None) -> ResolvedRepoTarget:
     active_config = config if config is not None else _load_config_if_available()
+    context = resolve_workspace_context(config=active_config) if active_config is not None else resolve_workspace_context()
     normalized_target, had_prefix = _normalize_lookup_target(target)
 
     if active_config is not None:
@@ -225,8 +369,11 @@ def resolve_repo_target(target: str, *, config: Config | None = None) -> Resolve
 
     lookup_target = normalized_target if had_prefix else target
     raise ValueError(
-        "Target does not exist as a path and is not a configured project or repo: "
-        f"{lookup_target!r}.{did_you_mean_suffix(lookup_target, _configured_target_names(active_config))}"
+        contextualize_resolution_error(
+            "Target does not exist as a path and is not a configured project or repo: "
+            f"{lookup_target!r}.{did_you_mean_suffix(lookup_target, _configured_target_names(active_config))}",
+            context,
+        )
     )
 
 
@@ -265,10 +412,16 @@ def configured_repo_targets(config: Config) -> list[ResolvedRepoTarget]:
 
 
 __all__ = [
+    "WorkspaceResolutionContext",
     "ResolvedRepoTarget",
     "configured_repo_targets",
+    "contextualize_resolution_error",
+    "format_workspace_context",
+    "inferred_project_targets",
+    "inferred_repo_targets",
     "resolve_check_paths",
     "resolve_project_ids",
+    "resolve_workspace_context",
     "resolve_repo_target",
     "resolve_repo_targets",
 ]

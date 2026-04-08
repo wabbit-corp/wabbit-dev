@@ -13,6 +13,9 @@ directory until `root.clj` and `root.private.clj` can be loaded.
 The CLI suggests close matches for mistyped commands, project IDs, checks, and
 path-or-project targets when it can infer what you meant.
 
+Use `wabbit-dev where` to inspect the exact workspace, project, and repo context
+the CLI inferred from the current directory.
+
 ## Target Model
 
 Many commands now share the same target conventions.
@@ -36,12 +39,18 @@ Many commands now share the same target conventions.
 When a repo target is supplied to a project-oriented command, it expands to the
 configured projects that belong to that repo.
 
+When you omit targets from inside a configured project or repo, many commands
+default to that current project or repo instead of widening to the full
+workspace. The workspace-wide behavior remains the default when you invoke those
+commands from the workspace root.
+
 ## Command Index
 
 | Command | Summary |
 | --- | --- |
 | `completion bash` / `completion zsh` | Print shell completion scripts with dynamic command, target, and check-name completion. |
 | `doctor [TARGET ...] [--only CHECK_OR_COMMAND] [--json]` | Diagnose workspace, toolchain, and credential readiness. |
+| `where [--json]` | Show the workspace, repo, and project context inferred from the current directory. |
 | `config check` | Parse and validate `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...] [--json]` | Generate or refresh managed project files. |
 | `llmcopy PATH ...` | Copy file contents to the clipboard in an LLM-friendly wrapper. |
@@ -53,13 +62,13 @@ configured projects that belong to that repo.
 | `jitpack info GROUP ARTIFACT [VERSION]` | Show refs, commits, versions, and build info from JitPack. |
 | `clean [TARGET ...]` | Remove generated build and cache directories. |
 | `cloc [TARGET ...]` | Run `cloc` for configured targets or direct paths. |
-| `status TARGET ... [--json]` | Show tracked working-tree changes for repo targets. |
+| `status [TARGET ...] [--json]` | Show tracked working-tree changes for the current or selected repo targets. |
 | `commit [TARGET ...] [--dry-run]` | Run PROD setup, stage changes, and create commits, or print the commit plan. |
 | `push [TARGET ...] [--dry-run]` | Push `origin/master` and tags, or print the push plan. |
 | `project list` | List configured projects grouped by repository. |
-| `project show TARGET ... [--json]` | Show detailed metadata for one or more configured projects. |
-| `project deps TARGET ... [--json]` | Show resolved dependencies for one or more configured projects. |
-| `project repo TARGET ... [--json]` | Show repo metadata for one or more configured targets. |
+| `project show [TARGET ...] [--json]` | Show detailed metadata for one or more configured projects. |
+| `project deps [TARGET ...] [--json]` | Show resolved dependencies for one or more configured projects. |
+| `project repo [TARGET ...] [--json]` | Show repo metadata for one or more configured targets. |
 | `project targets [TARGET ...] [--json]` | Show Kotlin Multiplatform target platforms for matching configured projects. |
 | `check --list [--json]` | List the loaded checks and what they do. |
 | `check --describe CHECK [--json]` | Show issue IDs, config knobs, and suppression examples for one check. |
@@ -141,6 +150,25 @@ Use `--only` to narrow the report to either:
 Optional targets scope project- and publish-related checks to the selected
 project closure.
 
+### `where`
+
+```bash
+wabbit-dev where
+wabbit-dev where --json
+```
+
+Prints the cwd context the CLI inferred, including:
+
+- resolved workspace root
+- current configured project, if any
+- current repo target, if any
+- the commands that inherit project defaults from this directory
+- the commands that inherit repo defaults from this directory
+
+Use this when an AI agent or shell session is running from a nested directory
+and you want to confirm what `build`, `check`, `project show`, `project repo`,
+or `status` will target when you omit explicit arguments.
+
 ## Configuration and Inventory
 
 ### `config check`
@@ -172,8 +200,8 @@ detected project type such as `python`, `kotlin/jvm`, or `kotlin/kmp`.
 ### `project show`
 
 ```bash
-wabbit-dev project show TARGET ...
-wabbit-dev project show TARGET ... --json
+wabbit-dev project show [TARGET ...]
+wabbit-dev project show [TARGET ...] --json
 ```
 
 Prints the resolved metadata for one or more configured projects, including:
@@ -189,16 +217,21 @@ Prints the resolved metadata for one or more configured projects, including:
 Example:
 
 ```bash
+wabbit-dev project show
 wabbit-dev project show app-wabbit-dev
 wabbit-dev project show jeeves
 wabbit-dev project show app-wabbit-dev --json
 ```
 
+With no targets from inside a configured project or repo, the command defaults
+to that current project or repo. From the workspace root, pass an explicit
+target to avoid dumping the full workspace.
+
 ### `project deps`
 
 ```bash
-wabbit-dev project deps TARGET ...
-wabbit-dev project deps TARGET ... --json
+wabbit-dev project deps [TARGET ...]
+wabbit-dev project deps [TARGET ...] --json
 ```
 
 Prints just the resolved dependency list for one or more configured projects.
@@ -208,16 +241,21 @@ post-resolution dependency view.
 Examples:
 
 ```bash
+wabbit-dev project deps
 wabbit-dev project deps app-wabbit-dev
 wabbit-dev project deps jeeves
 wabbit-dev project deps jeeves --json
 ```
 
+With no targets from inside a configured project or repo, the command defaults
+to that current project or repo. From the workspace root, pass an explicit
+target to avoid dumping the full workspace.
+
 ### `project repo`
 
 ```bash
-wabbit-dev project repo TARGET ...
-wabbit-dev project repo TARGET ... --json
+wabbit-dev project repo [TARGET ...]
+wabbit-dev project repo [TARGET ...] --json
 ```
 
 Prints repo-level metadata for the repos associated with one or more configured
@@ -236,10 +274,15 @@ The output includes:
 Examples:
 
 ```bash
+wabbit-dev project repo
 wabbit-dev project repo app-wabbit-dev
 wabbit-dev project repo jeeves
 wabbit-dev project repo jeeves --json
 ```
+
+With no targets from inside a configured project or repo, the command defaults
+to that current repo. From the workspace root, omitting targets lists every
+configured repo.
 
 ### `project targets`
 
@@ -253,7 +296,8 @@ configured projects.
 
 Behavior:
 
-- with no targets, lists every configured KMP project in declaration order
+- with no targets from inside a configured project or repo, defaults to that current project or repo
+- with no targets from the workspace root, lists every configured KMP project in declaration order
 - with explicit targets, resolves project IDs, repo IDs, or paths inside configured projects or repos
 - non-KMP projects are skipped rather than treated as errors
 

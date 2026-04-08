@@ -5,25 +5,42 @@ from pathlib import Path
 
 from git import Repo
 
+from dev.config import find_workspace_root, load_config
 from dev.messages import error, info
-from dev.repo_resolution import resolve_repo_targets
+from dev.repo_resolution import configured_repo_targets, inferred_repo_targets, resolve_repo_targets
 
 
-def status(targets: str | list[str], *, json_output: bool = False) -> int:
+def status(targets: str | list[str] | None, *, json_output: bool = False) -> int:
     requested_targets = [targets] if isinstance(targets, str) else targets
     payload: dict[str, object] = {
-        "requestedTargets": list(requested_targets),
+        "requestedTargets": list(requested_targets or []),
+        "inferredTargets": [],
         "repos": [],
     }
-    try:
-        resolved_targets = resolve_repo_targets(requested_targets)
-    except ValueError as ex:
-        payload["error"] = str(ex)
-        if json_output:
-            print(json.dumps(payload, indent=2))
+    config = load_config() if find_workspace_root() is not None else None
+    effective_targets = inferred_repo_targets(config, requested_targets) if config is not None else list(requested_targets or [])
+    if requested_targets is None and config is not None and effective_targets is not None:
+        payload["inferredTargets"] = list(effective_targets)
+
+    if not effective_targets:
+        if config is None:
+            payload["error"] = "No config file found. Pass an explicit repo target or run inside a configured workspace."
+            if json_output:
+                print(json.dumps(payload, indent=2))
+                return 1
+            error(payload["error"])
             return 1
-        error(str(ex))
-        return 1
+        resolved_targets = configured_repo_targets(config)
+    else:
+        try:
+            resolved_targets = resolve_repo_targets(effective_targets, config=config)
+        except ValueError as ex:
+            payload["error"] = str(ex)
+            if json_output:
+                print(json.dumps(payload, indent=2))
+                return 1
+            error(str(ex))
+            return 1
 
     exit_code = 0
     for index, resolved_target in enumerate(resolved_targets):

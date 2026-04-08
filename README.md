@@ -75,6 +75,7 @@ Inspect the configured project inventory:
 
 ```bash
 python3 dev.py project list
+python3 dev.py where
 ```
 
 Generate managed files for a project and its dependencies:
@@ -106,6 +107,7 @@ Every command is documented here and in the MkDocs reference under
 | --- | --- |
 | `completion bash` / `completion zsh` | Prints shell completion scripts with dynamic command, target, and check-name completion. |
 | `doctor [TARGET ...] [--only CHECK_OR_COMMAND] [--json]` | Diagnoses workspace, toolchain, and credential readiness, optionally scoped to selected checks or targets. |
+| `where [--json]` | Shows the workspace, repo, and project context inferred from the current directory. |
 | `config check` | Parses and validates `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...] [--json]` | Generates or refreshes managed project files from configuration. |
 | `llmcopy PATH ...` | Copies file contents to the clipboard in an LLM-friendly wrapper. |
@@ -117,13 +119,13 @@ Every command is documented here and in the MkDocs reference under
 | `jitpack info GROUP ARTIFACT [VERSION]` | Shows refs, commits, versions, and build info for a JitPack artifact. |
 | `clean [TARGET ...]` | Deletes generated build and cache directories for configured projects. |
 | `cloc [TARGET ...]` | Runs `cloc` for configured targets or arbitrary filesystem paths. |
-| `status TARGET ... [--json]` | Shows tracked working-tree changes for configured or direct repo targets. |
+| `status [TARGET ...] [--json]` | Shows tracked working-tree changes for the current or selected repo targets. |
 | `commit [TARGET ...] [--dry-run]` | Runs PROD setup, stages changes, and creates commits, or prints the commit plan. |
 | `push [TARGET ...] [--dry-run]` | Pushes `origin/master` and tags, or prints the push plan. |
 | `project list` | Lists configured projects grouped by repository. |
-| `project show TARGET ... [--json]` | Shows detailed metadata for one or more configured projects. |
-| `project deps TARGET ... [--json]` | Shows resolved dependencies for one or more configured projects. |
-| `project repo TARGET ... [--json]` | Shows repo metadata for one or more configured targets. |
+| `project show [TARGET ...] [--json]` | Shows detailed metadata for one or more configured projects. |
+| `project deps [TARGET ...] [--json]` | Shows resolved dependencies for one or more configured projects. |
+| `project repo [TARGET ...] [--json]` | Shows repo metadata for one or more configured targets. |
 | `project targets [TARGET ...] [--json]` | Shows Kotlin Multiplatform target platforms for matching configured projects. |
 | `check --list [--json]` | Lists the loaded checks with scope, auto-fix support, and summaries. |
 | `check --describe CHECK [--json]` | Shows issue IDs, config knobs, and suppression examples for one check. |
@@ -149,6 +151,12 @@ The CLI is driven by two files at the workspace root:
 
 Config-driven commands can be run from the workspace root or any nested
 subdirectory inside it. The CLI walks upward until it finds `root.clj`.
+
+Many target-oriented commands also infer a default target from the current
+directory. For example, running `python3 dev.py build` from inside a configured
+project builds that current project; running `python3 dev.py status` from
+inside a configured repo shows that current repo. Use `python3 dev.py where` to
+see the inferred workspace, project, and repo context.
 
 Common `root.clj` forms include:
 
