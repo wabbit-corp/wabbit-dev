@@ -31,6 +31,41 @@ def test_python_requirements_pinned_check_sets_structured_issue_location(tmp_pat
     assert "line_number" not in issue.data
 
 
+def test_python_requirements_pinned_check_allows_exact_and_major_pins(tmp_path: Path) -> None:
+    path = tmp_path / "requirements.txt"
+    path.write_text(
+        "requests==2.31.0\n"
+        "urllib3>=2.2.1,<3.0.0\n"
+        "demo===1.0\n",
+        encoding="utf-8",
+    )
+    ctx = FileContext(check_name="PythonRequirementsPinnedCheck", path=path)
+
+    PythonRequirementsPinnedCheck().check(ctx)
+
+    assert list(ctx.issues) == []
+
+
+def test_python_requirements_pinned_check_rejects_broad_or_non_major_ranges(tmp_path: Path) -> None:
+    path = tmp_path / "requirements.txt"
+    path.write_text(
+        "requests>=2.31.0\n"
+        "urllib3~=2.2\n"
+        "idna>=2.0,<4.0\n",
+        encoding="utf-8",
+    )
+    ctx = FileContext(check_name="PythonRequirementsPinnedCheck", path=path)
+
+    PythonRequirementsPinnedCheck().check(ctx)
+
+    assert [issue.issue_type for issue in ctx.issues.issues] == [
+        E_UNPINNED_DEPENDENCY,
+        E_UNPINNED_DEPENDENCY,
+        E_UNPINNED_DEPENDENCY,
+    ]
+    assert [list(issue.location.lines or []) for issue in ctx.issues.issues] == [[1], [2], [3]]
+
+
 def test_filename_properties_check_reports_leading_space(tmp_path: Path) -> None:
     path = tmp_path / " bad.txt"
     path.write_text("hello\n", encoding="utf-8")

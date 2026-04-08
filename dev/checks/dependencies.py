@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 from packaging.requirements import Requirement
+from packaging.version import InvalidVersion
+from packaging.version import Version as PythonVersion
 
 from dev.checks.base import FileCheck, FileContext, IssueType
 
@@ -22,6 +24,44 @@ E_UNPINNED_DEPENDENCY = IssueType(
 
 class PythonRequirementsPinnedCheck(FileCheck):
     """Ensure entries in ``requirements.txt`` are version pinned."""
+
+    def _is_exact_pin(self, req: Requirement) -> bool:
+        return len(req.specifier) == 1 and all(spec.operator in {"==", "==="} for spec in req.specifier)
+
+    def _is_major_pin(self, req: Requirement) -> bool:
+        if len(req.specifier) != 2:
+            return False
+
+        lower: str | None = None
+        upper: str | None = None
+        for spec in req.specifier:
+            if spec.operator == ">=" and lower is None:
+                lower = spec.version
+                continue
+            if spec.operator == "<" and upper is None:
+                upper = spec.version
+                continue
+            return False
+
+        if lower is None or upper is None:
+            return False
+
+        try:
+            lower_version = PythonVersion(lower)
+            upper_version = PythonVersion(upper)
+        except InvalidVersion:
+            return False
+
+        if upper_version <= lower_version:
+            return False
+        if upper_version.minor != 0 or upper_version.micro != 0:
+            return False
+        if upper_version.major != lower_version.major + 1:
+            return False
+        if upper_version.pre is not None or upper_version.post is not None or upper_version.dev is not None:
+            return False
+
+        return True
 
     def check(self, ctx: FileContext) -> None:
         if not ctx.path.is_file():
@@ -43,14 +83,10 @@ class PythonRequirementsPinnedCheck(FileCheck):
                 ctx.add_issue(E_UNPINNED_DEPENDENCY, line=ln, dep=line)
                 continue
 
-            #     # consider pinned only if there is exactly one == specifier
-            #     if len(req.specifier) != 1:
-            #         issues.append(E_UNPINNED_DEPENDENCY.make(line=line).at(path, line=ln))
-            #         continue
+            if self._is_exact_pin(req) or self._is_major_pin(req):
+                continue
 
-            #     spec = next(iter(req.specifier))
-            #     if spec.operator != "==" and spec.operator != "===":
-            #         issues.append(E_UNPINNED_DEPENDENCY.make(line=line).at(path, line=ln))
+            ctx.add_issue(E_UNPINNED_DEPENDENCY, line=ln, dep=line)
 
 
 __all__ = [

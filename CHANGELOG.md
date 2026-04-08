@@ -8,6 +8,8 @@
 - turn `dev.checks.large_files` into real file checks for oversized files and checked-in binary dependency artifacts
 - turn `dev.checks.repo_contributors` into a real repo check for invalid, generic, and prohibited git contributor identities
 - make `HardcodedInternalHostnameIpCheck` scan documentation files so the implementation matches the documented policy
+- extend `dep updates` to check exact-pinned Python project dependencies against PyPI in addition to named Maven libraries
+- relax `requirements.txt` pinning checks to allow exact pins or bounded same-major ranges such as `>=2.10.2,<3.0.0`
 
 ## Unreleased (2026-02-17)
 - Generate real `java-gradle-plugin` JVM builds for `root.clj` Gradle projects that declare `:gradlePluginId`, including inferred plugin metadata, Kotlin Gradle plugin API/TestKit dependencies, and version expansion for `*gradle-plugin.properties` resources.

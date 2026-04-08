@@ -22,6 +22,8 @@ async def test_root_help_includes_command_summaries(
     assert "Generate shell completion scripts." in output
     assert "doctor" in output
     assert "Diagnose workspace, toolchain, and credential readiness." in output
+    assert "docs" in output
+    assert "Validate project documentation quality." in output
     assert "where" in output
     assert "Show the workspace, repo, and project context inferred" in output
     assert "config" in output
@@ -53,7 +55,8 @@ async def test_parent_command_without_subcommand_prints_help(
     output = capsys.readouterr().out
     assert "Analyze the dependency metadata loaded from root.clj." in output
     assert "graph     Render an SVG graph of project dependencies." in output
-    assert "updates   Check configured libraries for newer upstream versions." in output
+    assert "updates" in output
+    assert "pinned Python deps" in output
 
 
 @pytest.mark.asyncio
@@ -71,6 +74,25 @@ async def test_release_parent_help_lists_verify(
     output = capsys.readouterr().out
     assert "verify" in output
     assert "Verify publishable Python and Gradle projects" in output
+
+
+@pytest.mark.asyncio
+async def test_docs_parent_help_lists_check(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "docs"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "check" in output
+    assert "snippets" in output
+    assert "Check project documentation links, sections, snippets" in output
+    assert "Check fenced documentation snippets" in output
 
 
 @pytest.mark.asyncio
@@ -190,6 +212,55 @@ async def test_cli_release_verify_dispatches(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result == 0
     assert called == [(["app-wabbit-dev"], True)]
+
+
+@pytest.mark.asyncio
+async def test_cli_docs_check_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import docs_check as docs_check_task
+
+    called: list[tuple[list[str], bool, bool]] = []
+
+    def fake_docs_check(targets=None, *, semantic: bool = False, json_output: bool = False) -> int:
+        called.append((targets, semantic, json_output))
+        return 0
+
+    monkeypatch.setattr(docs_check_task, "docs_check", fake_docs_check)
+    monkeypatch.setattr("sys.argv", ["dev.py", "docs", "check", "--semantic", "--json", "app-wabbit-dev"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [(["app-wabbit-dev"], True, True)]
+
+
+@pytest.mark.asyncio
+async def test_cli_docs_snippets_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import docs_check as docs_check_task
+
+    called: list[tuple[list[str], bool, bool, bool]] = []
+
+    def fake_docs_snippets(
+        targets=None,
+        *,
+        run_python_hook: bool = False,
+        gradle_build: bool = False,
+        json_output: bool = False,
+    ) -> int:
+        called.append((targets, run_python_hook, gradle_build, json_output))
+        return 0
+
+    monkeypatch.setattr(docs_check_task, "docs_snippets", fake_docs_snippets)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["dev.py", "docs", "snippets", "--python-hook", "--gradle-build", "--json", "app-wabbit-dev"],
+    )
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [(["app-wabbit-dev"], True, True, True)]
 
 
 @pytest.mark.asyncio

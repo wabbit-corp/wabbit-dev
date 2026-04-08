@@ -24,6 +24,8 @@ _CONFIG_CONTEXT_COMMANDS = {
     "where",
     "config/check",
     "doctor",
+    "docs/check",
+    "docs/snippets",
     "setup",
     "release/verify",
     "dep/graph",
@@ -159,6 +161,24 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
             tokens = ["doctor"]
             for value in args.only or []:
                 tokens.extend(["--only", value])
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "docs/check":
+            tokens = ["docs", "check"]
+            if args.semantic:
+                tokens.append("--semantic")
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "docs/snippets":
+            tokens = ["docs", "snippets"]
+            if args.python_hook:
+                tokens.append("--python-hook")
+            if args.gradle_build:
+                tokens.append("--gradle-build")
             if args.json:
                 tokens.append("--json")
             tokens.extend(args.targets or [])
@@ -357,6 +377,7 @@ def _apply_context_defaults(command_path: str, args: argparse.Namespace) -> None
     from dev.repo_resolution import inferred_project_targets, inferred_repo_targets
 
     if command_path in {
+        "docs/check",
         "setup",
         "build",
         "release/verify",
@@ -777,6 +798,125 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         )
 
     with commands(
+        "docs",
+        help="Validate project documentation quality.",
+        description=_doc(
+            """
+            Run deterministic and optional semantic documentation checks.
+
+            Use `docs check` to validate markdown links, docs section coverage,
+            docs hooks, code snippets, and optionally LLM-based semantic quality.
+            """
+        ),
+        epilog=examples("docs check", "docs check --semantic app-wabbit-dev"),
+    ) as cmd:
+        del cmd
+
+    with commands(
+        "docs",
+        "check",
+        help="Check project documentation links, sections, snippets, and optional semantic quality.",
+        description=_doc(
+            """
+            Validate docs for one or more configured projects.
+
+            The deterministic layer checks internal links, external links and
+            badges, README section coverage, docs-generation hooks, and
+            compileable or parseable code snippets. `--semantic` adds an
+            LLM-based advisory pass for issues such as weak quickstarts or
+            misleading examples.
+            """
+        ),
+        epilog=examples(
+            "docs check",
+            "docs check app-wabbit-dev",
+            "docs check --semantic app-wabbit-dev",
+            "docs check --json jeeves",
+            notes=[
+                "Targets can be project IDs, repo IDs, or paths inside configured projects or repos.",
+                "With no targets from inside a configured project or repo, docs check defaults to that current project or repo.",
+                "`--semantic` is advisory by design and requires an OpenAI key.",
+            ],
+        ),
+    ) as cmd:
+        _add_argument(
+            cmd,
+            "targets",
+            metavar="TARGET",
+            type=str,
+            nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
+            help="Project IDs, repo IDs, or paths. Omit to check the current inferred project or repo, or the full workspace from root.",
+        )
+        cmd.add_argument(
+            "--semantic",
+            action="store_true",
+            help="Add an LLM-based advisory review for semantic docs quality issues.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit a machine-readable docs report instead of human-oriented output.",
+        )
+
+    with commands(
+        "docs",
+        "snippets",
+        help="Check fenced documentation snippets with optional project-specific deeper verification.",
+        description=_doc(
+            """
+            Validate fenced code blocks extracted from README and docs markdown files.
+
+            By default this command stays fast: it syntax-checks or parses
+            supported snippet languages such as Python, shell, JSON, TOML, and
+            YAML. Optional flags enable deeper project-level verification:
+            `--python-hook` runs `pytest -q tests/test_docs_snippets.py` for
+            Python projects when that hook exists, and `--gradle-build` runs a
+            single coarse Gradle build for Gradle projects that actually contain
+            JVM-oriented snippets.
+            """
+        ),
+        epilog=examples(
+            "docs snippets",
+            "docs snippets app-wabbit-dev",
+            "docs snippets --python-hook python-lang-mu",
+            "docs snippets --gradle-build kotlin-data",
+            "docs snippets --json jeeves",
+            notes=[
+                "Targets can be project IDs, repo IDs, or paths inside configured projects or repos.",
+                "The default mode is intentionally cheap and syntax-oriented.",
+                "`--gradle-build` validates the project build as a whole, not each Kotlin snippet individually.",
+            ],
+        ),
+    ) as cmd:
+        _add_argument(
+            cmd,
+            "targets",
+            metavar="TARGET",
+            type=str,
+            nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
+            help="Project IDs, repo IDs, or paths. Omit to inspect the current inferred project or repo, or the full workspace from root.",
+        )
+        cmd.add_argument(
+            "--python-hook",
+            action="store_true",
+            help="For Python projects, run pytest -q tests/test_docs_snippets.py when that hook file exists.",
+        )
+        cmd.add_argument(
+            "--gradle-build",
+            action="store_true",
+            help="For Gradle projects with JVM-oriented snippets, run one coarse project build as an additional signal.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit a machine-readable snippet report instead of human-oriented output.",
+        )
+
+    with commands(
         "setup",
         help="Generate or refresh project files from root.clj.",
         description=_doc(
@@ -856,8 +996,10 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
 
             Python projects build wheel and sdist artifacts, run `twine check`,
             run `check-manifest`, and inspect artifact metadata and packaged
-            files. Gradle projects run publication-oriented verification tasks
-            based on their publish target.
+            files. Gradle projects first check whether cross-repo project
+            dependencies are already available from Maven Central, then run
+            publication-oriented verification tasks in PROD-style dependency
+            resolution and restore local overlays afterward when needed.
             """
         ),
         epilog=examples(
@@ -868,6 +1010,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             notes=[
                 "Targets can be project IDs, repo IDs, or paths inside configured projects or repos.",
                 "With no targets from inside a configured project or repo, release verify defaults to that current project or repo.",
+                "Gradle verification skips expensive builds when required cross-repo project dependencies are not yet available from Maven Central.",
                 "Projects that are quarantined, publish-disabled, or not yet supported by release verification are reported instead of crashing the command.",
             ],
         ),
@@ -979,18 +1122,20 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "dep",
         "updates",
-        help="Check configured libraries for newer upstream versions.",
+        help="Check configured Maven libraries and pinned Python deps for newer upstream versions.",
         description=_doc(
             """
-            Compare each named Maven library defined in root.clj against the latest
-            versions available from its configured repository and print any newer
-            candidates that were found.
+            Compare named Maven libraries defined in root.clj and exact-pinned
+            Python project dependencies against the latest versions available
+            from their upstream repositories, then print any newer candidates
+            that were found.
             """
         ),
         epilog=examples(
             "dep updates",
             notes=[
-                "Only named Maven libraries are checked. Project dependencies are not.",
+                "Only named Maven libraries and exact-pinned Python requirements are checked.",
+                "Direct URL/file dependencies and non-exact Python version ranges are skipped.",
             ],
         ),
     ) as cmd:
@@ -1829,7 +1974,7 @@ async def async_main() -> int:
     from dev.tasks.doctor import preflight_for_command
 
     selected_projects: tuple[str, ...] | None = None
-    if command_path in {"setup", "release/verify", "build", "publish", "commit", "clean", "dep/graph"} and args.targets:
+    if command_path in {"docs/check", "setup", "release/verify", "build", "publish", "commit", "clean", "dep/graph"} and args.targets:
         selected_projects = tuple(args.targets)
     elif command_path in {"project/show", "project/deps", "project/repo", "project/targets"}:
         selected_projects = tuple(args.targets)
@@ -1870,6 +2015,21 @@ async def async_main() -> int:
                 from dev.tasks.doctor import doctor
 
                 exit_code = doctor(json_output=args.json, only=args.only, targets=args.targets)
+
+            case "docs/check":
+                from dev.tasks.docs_check import docs_check
+
+                exit_code = docs_check(args.targets, semantic=args.semantic, json_output=args.json)
+
+            case "docs/snippets":
+                from dev.tasks.docs_check import docs_snippets
+
+                exit_code = docs_snippets(
+                    args.targets,
+                    run_python_hook=args.python_hook,
+                    gradle_build=args.gradle_build,
+                    json_output=args.json,
+                )
 
             case "config/check":
                 from dev.tasks.check_config import check_config
