@@ -50,6 +50,8 @@ commands from the workspace root.
 | --- | --- |
 | `completion bash` / `completion zsh` | Print shell completion scripts with dynamic command, target, and check-name completion. |
 | `doctor [TARGET ...] [--only CHECK_OR_COMMAND] [--json]` | Diagnose workspace, toolchain, and credential readiness. |
+| `docs check [TARGET ...] [--semantic] [--json]` | Validate docs links, sections, snippets, hooks, and optional semantic quality. |
+| `docs snippets [TARGET ...] [--python-hook] [--gradle-build] [--json]` | Validate fenced docs snippets with optional deeper project-specific verification. |
 | `where [--json]` | Show the workspace, repo, and project context inferred from the current directory. |
 | `config check` | Parse and validate `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...] [--json]` | Generate or refresh managed project files. |
@@ -150,6 +152,79 @@ Use `--only` to narrow the report to either:
 
 Optional targets scope project- and publish-related checks to the selected
 project closure.
+
+## Documentation
+
+### `docs check`
+
+```bash
+dev docs check [TARGET ...] [--semantic] [--json]
+```
+
+Runs documentation validation for the selected projects.
+
+Deterministic checks cover:
+
+- broken internal markdown links and anchors
+- unreachable external links and badges
+- missing project purpose, installation, quickstart, status, docs/support links, changelog links, and example-oriented README sections
+- missing docs-generation hooks for supported docs systems
+- invalid Python, shell, JSON, TOML, and YAML code snippets
+
+Use `--semantic` to add an advisory LLM-based docs review for issues such as:
+
+- a weak or unclear quickstart
+- examples that do not feel grounded in the project
+- a README that does not explain the project purpose clearly
+- docs messaging that conflicts with the configured project metadata
+
+The semantic layer is opt-in, warning-level by design, and requires an OpenAI
+key from `root.private.clj` or `OPENAI_API_KEY`.
+
+Examples:
+
+```bash
+dev docs check
+dev docs check app-wabbit-dev
+dev docs check --semantic app-wabbit-dev
+dev docs check --json jeeves
+```
+
+### `docs snippets`
+
+```bash
+dev docs snippets [TARGET ...] [--python-hook] [--gradle-build] [--json]
+```
+
+Runs snippet-focused validation for fenced code blocks extracted from README and
+docs markdown files.
+
+Default behavior stays intentionally cheap:
+
+- syntax-check Python snippets
+- parse prompt-style shell snippets with `bash -n`
+- parse JSON, TOML, and YAML snippets when supported
+- report unsupported fenced languages without turning them into blocking errors
+
+Optional deeper verification:
+
+- `--python-hook`: run `pytest -q tests/test_docs_snippets.py` for Python
+  projects when that hook exists
+- `--gradle-build`: for Gradle projects that actually contain JVM-oriented
+  snippets, run one coarse project build as an extra signal
+
+`--gradle-build` is honest by design: it validates the project build as a
+whole, not each Kotlin snippet individually.
+
+Examples:
+
+```bash
+dev docs snippets
+dev docs snippets python-lang-mu
+dev docs snippets --python-hook python-lang-mu
+dev docs snippets --gradle-build kotlin-data
+dev docs snippets --json app-wabbit-dev
+```
 
 ### `where`
 
@@ -325,6 +400,10 @@ dev setup [--dev] [--local] [--json] [TARGET ...]
 
 Generates or refreshes managed files from configuration.
 
+This includes generated project files plus repo-root metadata such as
+`.editorconfig` and the managed `.github` community templates for Wabbit-owned
+repos.
+
 Behavior:
 
 - with no targets, processes every configured project
@@ -379,10 +458,15 @@ Current backends:
   - run `twine check`
   - run `check-manifest`
   - inspect artifact metadata and packaged files
+  - rely on the generated `pyproject.toml` sdist/check-manifest policy instead
+    of a separate manual `MANIFEST.in`
 - Gradle projects:
-  - Maven Central targets run `build` and `publishToMavenLocal`
+  - first check whether cross-repo project dependencies already exist on Maven Central
+  - switch the touched Gradle root into PROD-style resolution for verification
+  - Maven Central targets then run `build` and `publishToMavenLocal`
   - JetBrains Marketplace targets run `verifyPlugin` and `buildPlugin`
   - JitPack targets currently run `build`
+  - restore the previous local overlay after verification when one was present
 
 Projects that are quarantined, publish-disabled, or not yet supported by
 release verification are reported explicitly instead of crashing the command.

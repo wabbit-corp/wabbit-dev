@@ -30,6 +30,7 @@ def test_completion_reply_lists_top_level_commands() -> None:
 
     assert "completion" in reply.candidates
     assert "doctor" in reply.candidates
+    assert "docs" in reply.candidates
     assert "release" in reply.candidates
     assert reply.allow_files is False
 
@@ -40,6 +41,15 @@ def test_completion_reply_lists_project_subcommands() -> None:
     reply = get_completion_reply(["wabbit-dev", "project", ""], 2)
 
     assert reply.candidates == ("list", "show", "deps", "repo", "targets")
+    assert reply.allow_files is False
+
+
+def test_completion_reply_lists_docs_subcommands() -> None:
+    from dev.tasks.completion import get_completion_reply
+
+    reply = get_completion_reply(["wabbit-dev", "docs", ""], 2)
+
+    assert reply.candidates == ("check", "snippets")
     assert reply.allow_files is False
 
 
