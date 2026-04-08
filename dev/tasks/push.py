@@ -1,7 +1,7 @@
 from git import Repo
 
 from dev.config import load_config
-from dev.messages import error, info, success
+from dev.messages import accent, error, info, muted, success
 from dev.repo_resolution import configured_repo_targets, resolve_repo_targets
 
 
@@ -31,7 +31,10 @@ def push(targets: str | list[str] | None = None, *, dry_run: bool = False) -> in
     if dry_run:
         info(f"Dry run: would push {len(repo_targets)} repository/repositories")
         for resolved_target in repo_targets:
-            print(f"  {resolved_target.name}: origin master + tags ({resolved_target.path})")
+            print(
+                f"  {accent(resolved_target.name)}: "
+                f"{muted('origin master + tags')} ({muted(resolved_target.path)})"
+            )
         return 0
 
     for resolved_target in repo_targets:

@@ -8,7 +8,7 @@ from typing import Literal
 from dev.build_order import toposort_projects
 from dev.config import GradleProject, Project, PythonProject, load_config
 from dev.jitpack import JitPackAPI
-from dev.messages import error, success, warning
+from dev.messages import accent, error, muted, success, warning
 from dev.repo_resolution import resolve_project_ids
 from dev.tasks.publish_common import PublishError
 from dev.tasks.publish_intellij import publish_gradle_project_to_intellij_marketplace
@@ -54,16 +54,16 @@ async def publish_main(projects: str | list[str] | None = None, *, dry_run: bool
         error("No projects to publish or cycle in dependencies.")
         return 1
 
-    success("Topological order of projects to publish:\n  " + ", ".join(order))
+    success("Topological order of projects to publish:\n  " + ", ".join(accent(name) for name in order))
     if dry_run:
         success("Dry run: planned publish actions:")
         for name in order:
             project = all_projects[name]
             target = determine_publish_target(project)
             if target == "skip":
-                print(f"  {project.name}: skip")
+                print(f"  {accent(project.name)}: {muted('skip')}")
             else:
-                print(f"  {project.name}: publish to {target}")
+                print(f"  {accent(project.name)}: publish to {accent(target, 'yellow')}")
         return 0
 
     repo_setup_context = create_repo_setup_context(config, RepoSetupMode.PROD)

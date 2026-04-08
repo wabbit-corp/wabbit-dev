@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from dev.config import find_workspace_root, load_config
+from dev.messages import accent, command_text, heading, muted
 from dev.repo_resolution import inferred_project_targets, inferred_repo_targets, resolve_workspace_context
 
 PROJECT_DEFAULT_COMMANDS: tuple[str, ...] = (
@@ -24,15 +25,6 @@ REPO_DEFAULT_COMMANDS: tuple[str, ...] = (
     "project repo",
     "status",
 )
-
-
-def _colored(text: str, color: str, *, attrs: tuple[str, ...] = ()) -> str:
-    try:
-        from termcolor import colored
-    except ImportError:
-        return text
-    return colored(text, color, attrs=list(attrs))
-
 
 def _path_string(path: Path | None) -> str | None:
     if path is None:
@@ -85,43 +77,43 @@ def where_payload() -> dict[str, object]:
 def render_where_lines() -> list[str]:
     payload = where_payload()
     lines = [
-        f"{_colored('Current directory', 'cyan', attrs=('bold',))}: {payload['cwd']}",
-        f"{_colored('Workspace root', 'cyan', attrs=('bold',))}: {payload['workspaceRoot'] or '-'}",
+        f"{heading('Current directory')}: {payload['cwd']}",
+        f"{heading('Workspace root')}: {payload['workspaceRoot'] or '-'}",
     ]
 
     config_error = payload["configError"]
     if config_error is not None:
-        lines.append(f"{_colored('Config load error', 'red', attrs=('bold',))}: {config_error}")
+        lines.append(f"{accent('Config load error', 'red')}: {config_error}")
 
     current_project = payload["currentProject"]
     if isinstance(current_project, dict):
         lines.append(
-            f"{_colored('Current project', 'cyan', attrs=('bold',))}: "
-            f"{current_project['projectId']} ({current_project['path']})"
+            f"{heading('Current project')}: "
+            f"{accent(current_project['projectId'])} ({muted(current_project['path'])})"
         )
     else:
-        lines.append(f"{_colored('Current project', 'cyan', attrs=('bold',))}: -")
+        lines.append(f"{heading('Current project')}: -")
 
     current_repo = payload["currentRepo"]
     if isinstance(current_repo, dict):
         lines.append(
-            f"{_colored('Current repo', 'cyan', attrs=('bold',))}: "
-            f"{current_repo['target']} ({current_repo['path']})"
+            f"{heading('Current repo')}: "
+            f"{accent(current_repo['target'])} ({muted(current_repo['path'])})"
         )
     else:
-        lines.append(f"{_colored('Current repo', 'cyan', attrs=('bold',))}: -")
+        lines.append(f"{heading('Current repo')}: -")
 
     project_target = payload["defaultProjectTarget"] or "-"
     repo_target = payload["defaultRepoTarget"] or "-"
-    lines.append(f"{_colored('Implicit project target', 'cyan', attrs=('bold',))}: {project_target}")
-    lines.append(f"{_colored('Implicit repo target', 'cyan', attrs=('bold',))}: {repo_target}")
+    lines.append(f"{heading('Implicit project target')}: {accent(project_target) if project_target != '-' else '-'}")
+    lines.append(f"{heading('Implicit repo target')}: {accent(repo_target) if repo_target != '-' else '-'}")
     lines.append(
-        f"{_colored('Project-default commands', 'cyan', attrs=('bold',))}: "
-        + ", ".join(payload["projectDefaultCommands"])
+        f"{heading('Project-default commands')}: "
+        + ", ".join(command_text(command) for command in payload["projectDefaultCommands"])
     )
     lines.append(
-        f"{_colored('Repo-default commands', 'cyan', attrs=('bold',))}: "
-        + ", ".join(payload["repoDefaultCommands"])
+        f"{heading('Repo-default commands')}: "
+        + ", ".join(command_text(command) for command in payload["repoDefaultCommands"])
     )
     return lines
 

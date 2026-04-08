@@ -17,6 +17,7 @@ from dev.config import (
 )
 from dev.discoverability import require_project
 from dev.jvms import resolve_project_jvm_policy
+from dev.messages import style
 from dev.repo_resolution import (
     ResolvedRepoTarget,
     contextualize_resolution_error,
@@ -28,11 +29,7 @@ from dev.repo_resolution import (
 
 
 def _colored(text: str, color: str, *, attrs: tuple[str, ...] = ()) -> str:
-    try:
-        from termcolor import colored
-    except ImportError:
-        return text
-    return colored(text, color, attrs=list(attrs))
+    return style(text, color, attrs=attrs)
 
 
 def _project_type_label(project: Project) -> str:

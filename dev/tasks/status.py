@@ -6,7 +6,7 @@ from pathlib import Path
 from git import Repo
 
 from dev.config import find_workspace_root, load_config
-from dev.messages import error, info
+from dev.messages import accent, error, heading, info, muted, success
 from dev.repo_resolution import configured_repo_targets, inferred_repo_targets, resolve_repo_targets
 
 
@@ -68,9 +68,15 @@ def status(targets: str | list[str] | None, *, json_output: bool = False) -> int
 
         if index:
             print()
-        info(f"Status for {resolved_target.name}")
-        for item_path in tracked_changes:
-            print(f"  {item_path}")
+        repo_header = f"{heading('Status for')} {accent(resolved_target.name)}"
+        repo_path = muted(Path(path).resolve())
+        if tracked_changes:
+            info(f"{repo_header} ({repo_path})")
+            for item_path in tracked_changes:
+                print(f"  {accent(item_path, 'yellow')}")
+        else:
+            success(f"{repo_header} ({repo_path})")
+            print(f"  {muted('Working tree clean.')}")
         repo.close()
 
     if json_output:

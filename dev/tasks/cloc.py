@@ -6,7 +6,7 @@ from pathlib import Path
 
 from dev.config import GradleProject, PremakeProject, PythonProject, find_workspace_root, load_config
 from dev.discoverability import did_you_mean_suffix
-from dev.messages import warning
+from dev.messages import accent, heading, muted, style, warning
 from dev.repo_resolution import inferred_project_targets, resolve_project_ids
 
 
@@ -63,6 +63,25 @@ def _target_choices(config: object | None) -> list[str]:
     if config is None:
         return []
     return list(dict.fromkeys([*config.defined_projects.keys(), *config.defined_repos.keys()]))
+
+
+def _sorted_stats(stats: defaultdict[str, ClocStats]) -> list[tuple[str, ClocStats]]:
+    return sorted(stats.items(), key=lambda item: (-item[1].code, item[0].lower()))
+
+
+def _print_stats_block(title: str, stats: defaultdict[str, ClocStats]) -> None:
+    print(heading(title))
+    if not stats:
+        print(f"  {muted('No source files counted.')}")
+        return
+    for lang, lang_stats in _sorted_stats(stats):
+        print(
+            f"  {accent(lang)}: "
+            f"files={lang_stats.files} "
+            f"blank={lang_stats.blank} "
+            f"comment={lang_stats.comment} "
+            f"code={style(lang_stats.code, 'green', attrs=('bold',))}"
+        )
 
 
 def cloc(
@@ -151,17 +170,9 @@ def cloc(
 
     # Print results
     for proj_name, stats in combined_stats.items():
-        print(f"Project: {proj_name}")
-        for lang, lang_stats in stats.items():
-            print(
-                f"  {lang}:\n"
-                f"    Files:   {lang_stats.files}\n"
-                f"    Blank:   {lang_stats.blank}\n"
-                f"    Comment: {lang_stats.comment}\n"
-                f"    Code:    {lang_stats.code}\n"
-            )
+        _print_stats_block(f"Project: {proj_name}", stats)
     if not combined_stats:
-        print("No statistics collected.")
+        warning("No statistics collected.")
 
     # Totals
     total_stats: defaultdict[str, ClocStats] = defaultdict(lambda: ClocStats(0, 0, 0, 0))
@@ -172,15 +183,7 @@ def cloc(
             total.blank += lang_stats.blank
             total.comment += lang_stats.comment
             total.code += lang_stats.code
-    print("Overall Totals:")
-    for lang, lang_stats in total_stats.items():
-        print(
-            f"  {lang}:\n"
-            f"    Files:   {lang_stats.files}\n"
-            f"    Blank:   {lang_stats.blank}\n"
-            f"    Comment: {lang_stats.comment}\n"
-            f"    Code:    {lang_stats.code}\n"
-        )
+    _print_stats_block("Overall Totals:", total_stats)
 
     # Totals for all languages
     grand_total = ClocStats(0, 0, 0, 0)
@@ -189,10 +192,10 @@ def cloc(
         grand_total.blank += lang_stats.blank
         grand_total.comment += lang_stats.comment
         grand_total.code += lang_stats.code
-    print("Grand Total:")
+    print(heading("Grand Total:"))
     print(
-        f"  Files:   {grand_total.files}\n"
-        f"  Blank:   {grand_total.blank}\n"
-        f"  Comment: {grand_total.comment}\n"
-        f"  Code:    {grand_total.code}\n"
+        f"  files={grand_total.files} "
+        f"blank={grand_total.blank} "
+        f"comment={grand_total.comment} "
+        f"code={style(grand_total.code, 'green', attrs=('bold',))}"
     )

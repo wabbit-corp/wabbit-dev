@@ -8,6 +8,7 @@ import textwrap
 from collections.abc import Callable, Sequence
 
 from dev.discoverability import did_you_mean_suffix
+from dev.messages import command_text, heading
 
 ##################################################################################################
 # Main
@@ -193,9 +194,9 @@ def _print_next_steps(command_path: str, *, prog: str, args: argparse.Namespace)
             return
 
     print()
-    print("Next useful commands:")
+    print(heading("Next useful commands:"))
     for step in steps:
-        print(f"  {step}")
+        print(f"  {command_text(step)}")
 
 
 class Commands:

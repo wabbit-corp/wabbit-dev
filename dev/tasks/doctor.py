@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from dev.config import GradleProject, IntellijPlugin, PythonProject, find_workspace_root, load_config
 from dev.discoverability import unknown_name_message
-from dev.messages import error, info, success, warning
+from dev.messages import accent, command_text, error, heading, info, success, warning
 from dev.repo_resolution import resolve_project_ids
 
 if TYPE_CHECKING:
@@ -680,15 +680,16 @@ def collect_doctor_findings(
 
 
 def _emit_finding(finding: DoctorFinding) -> None:
+    label = heading(finding.label)
     if finding.status == DoctorStatus.PASS:
-        success(f"{finding.label}: {finding.detail}")
+        success(f"{label}: {finding.detail}")
     elif finding.status == DoctorStatus.WARN:
-        warning(f"{finding.label}: {finding.detail}")
+        warning(f"{label}: {finding.detail}")
     else:
-        error(f"{finding.label}: {finding.detail}")
+        error(f"{label}: {finding.detail}")
 
     if finding.fix:
-        info(f"Fix: {finding.fix}")
+        info(f"{accent('Fix', 'yellow')}: {finding.fix}")
 
 
 def doctor_payload(
@@ -757,13 +758,19 @@ def doctor(
         _emit_finding(finding)
 
     if failures:
-        error(f"Doctor found {failures} failing check(s) and {warnings_count} warning(s).")
+        error(
+            f"{heading('Doctor summary')}: "
+            f"{accent(failures, 'red')} failing check(s), {accent(warnings_count, 'yellow')} warning(s)."
+        )
         return 1
     if warnings_count:
-        warning(f"Doctor found {warnings_count} warning(s) and no blocking failures.")
+        warning(
+            f"{heading('Doctor summary')}: "
+            f"{accent(warnings_count, 'yellow')} warning(s), no blocking failures."
+        )
         return 0
 
-    success("Doctor found no problems.")
+    success(f"{heading('Doctor summary')}: no problems found.")
     return 0
 
 
@@ -786,13 +793,13 @@ def preflight_for_command(
     if not failures:
         return True
 
-    error(f"Preflight checks failed for `{command_path}`.")
+    error(f"Preflight checks failed for `{command_text(command_path)}`.")
     for finding in failures:
         _emit_finding(finding)
     target_suffix = f" {' '.join(projects)}" if projects else ""
     info(
-        f"Run `{prog} doctor --only {command_path}{target_suffix}` for targeted diagnostics, "
-        f"or `{prog} doctor` for a full environment check."
+        f"Run `{command_text(f'{prog} doctor --only {command_path}{target_suffix}')}` for targeted diagnostics, "
+        f"or `{command_text(f'{prog} doctor')}` for a full environment check."
     )
     return False
 

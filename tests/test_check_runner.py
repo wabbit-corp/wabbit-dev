@@ -67,6 +67,14 @@ class RepoValueMatch(RepoCheck):
         return [E_TEST_VALUE_MATCH.make(literal="10.0.0.0").at(path)]
 
 
+class ProjectRecorder(check_task.ProjectCheck):
+    order = 100
+
+    def check(self, path: Path, project: object) -> list[Issue]:
+        ORDER_CALLS.append(path.as_posix())
+        return []
+
+
 class FileRecorder(FileCheck):
     order = 100
 
@@ -181,6 +189,24 @@ def test_check_main_exit_code_zero_for_warnings(tmp_path: Path, monkeypatch: pyt
     assert check_task.check_main(str(tmp_path)) == 0
 
 
+def test_check_main_renders_warning_and_error_prefixes_by_severity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _make_repo(tmp_path)
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"RepoWarning": RepoWarning(), "RepoError": RepoError()}),
+    )
+
+    assert check_task.check_main(str(tmp_path)) == 1
+    output = capsys.readouterr().out
+    assert "[?] [E_TEST_RUNNER_WARNING]" in output
+    assert "[✗] [E_TEST_RUNNER_ERROR]" in output
+
+
 def test_check_main_loads_config_from_parent_directories(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -193,6 +219,34 @@ def test_check_main_loads_config_from_parent_directories(
     monkeypatch.setattr(check_task.Module, "load_modules", staticmethod(lambda: {}))
 
     assert check_task.check_main("pkg") == 0
+
+
+def test_project_only_checks_skip_recursive_directory_walk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_config(tmp_path, '(python "pkg" :version "0.1.0")\n')
+    project_path = tmp_path / "pkg"
+    project_path.mkdir(parents=True, exist_ok=True)
+    (project_path / "nested").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"ProjectRecorder": ProjectRecorder()}),
+    )
+
+    original_iterdir = Path.iterdir
+
+    def guarded_iterdir(path: Path):
+        if path.resolve() == project_path.resolve():
+            raise AssertionError("project-only checks should not recurse into child directories")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", guarded_iterdir)
+
+    assert check_task.check_main("pkg", ["ProjectRecorder"]) == 0
+    assert ORDER_CALLS == [project_path.as_posix()]
 
 
 def test_checkignore_applies_without_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -4,7 +4,7 @@ import inspect
 import json
 import re
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
@@ -33,8 +33,8 @@ from dev.checks.base import (
 from dev.checks.root_paths import E_GITIGNORE_WITHOUT_REPO
 from dev.config import Project, find_workspace_root, load_config
 from dev.discoverability import did_you_mean_suffix, unknown_name_message
-from dev.messages import error, info, warning
-from dev.repo_resolution import inferred_project_targets, resolve_check_paths
+from dev.messages import accent, command_text, error, heading, info, style, warning
+from dev.repo_resolution import configured_repo_targets, inferred_project_targets, resolve_check_paths
 
 _ISSUE_ID_RE = re.compile(r"\b(E_[A-Z0-9_]+)\b")
 
@@ -243,6 +243,34 @@ def _check_catalog_payload(entry: CheckCatalogEntry) -> dict[str, object]:
     }
 
 
+def _kind_color(kind: str) -> str:
+    return {
+        "root": "magenta",
+        "repo": "blue",
+        "project": "cyan",
+        "directory": "yellow",
+        "file": "green",
+    }.get(kind, "white")
+
+
+def _severity_color(severity: Severity) -> str:
+    if severity == Severity.INFO:
+        return "blue"
+    if severity == Severity.WARNING:
+        return "yellow"
+    if severity == Severity.CRITICAL:
+        return "magenta"
+    return "red"
+
+
+def _severity_reporter(severity: Severity) -> Callable[..., None]:
+    if severity == Severity.INFO:
+        return info
+    if severity == Severity.WARNING:
+        return warning
+    return error
+
+
 def list_checks(*, json_output: bool = False) -> int:
     catalog = _catalog(_load_optional_config())
     if not catalog:
@@ -254,20 +282,17 @@ def list_checks(*, json_output: bool = False) -> int:
         print(json.dumps({"checks": [_check_catalog_payload(entry) for entry in entries]}, indent=2))
         return 0
 
-    name_width = max(len(entry.name) for entry in entries)
-    kind_width = max(len(entry.kind) for entry in entries)
-    fix_width = max(len(entry.fixable) for entry in entries)
-
-    print(f"Available checks ({len(entries)}):")
+    print(heading(f"Available checks ({len(entries)}):"))
     for entry in entries:
+        fix_color = "green" if entry.fixable == "yes" else "yellow" if entry.fixable == "unknown" else "white"
         print(
-            f"  {entry.name.ljust(name_width)}  "
-            f"{entry.kind.ljust(kind_width)}  "
-            f"fix:{entry.fixable.ljust(fix_width)}  "
+            f"  {accent(entry.name)}  "
+            f"[{style(entry.kind, _kind_color(entry.kind), attrs=('bold',))}]  "
+            f"fix:{style(entry.fixable, fix_color, attrs=('bold',) if entry.fixable == 'yes' else ())}  "
             f"{entry.summary}"
         )
     print()
-    print("Run `check --describe <check>` for issue IDs, config knobs, and suppression examples.")
+    print(f"Run `{command_text('check --describe <check>')}` for issue IDs, config knobs, and suppression examples.")
     return 0
 
 
@@ -293,30 +318,48 @@ def describe_check(check_name: str, *, json_output: bool = False) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(f"Check: {entry.name}")
-    print(f"Kind: {entry.kind}")
-    print(f"Summary: {entry.summary}")
-    print(f"Auto-fix support: {entry.fixable}")
+    print(f"{heading('Check')}: {accent(entry.name)}")
+    print(f"{heading('Kind')}: {style(entry.kind, _kind_color(entry.kind), attrs=('bold',))}")
+    print(f"{heading('Summary')}: {entry.summary}")
+    fix_color = "green" if entry.fixable == "yes" else "yellow" if entry.fixable == "unknown" else "white"
+    print(
+        f"{heading('Auto-fix support')}: "
+        f"{style(entry.fixable, fix_color, attrs=('bold',) if entry.fixable == 'yes' else ())}"
+    )
     if entry.config_commands:
-        print("Config commands:")
+        print(heading("Config commands:"))
         for command in entry.config_commands:
-            print(f"  - {command}")
+            print(f"  - {command_text(command)}")
     else:
-        print("Config commands: none")
+        print(f"{heading('Config commands')}: none")
 
     if entry.issue_types:
-        print("Issue types:")
+        print(heading("Issue types:"))
         for issue_type in entry.issue_types:
-            print(f"  - {issue_type.id}: {issue_type.message}")
+            print(
+                f"  - {style(issue_type.id, _severity_color(issue_type.severity), attrs=('bold',))}: "
+                f"{issue_type.message}"
+            )
     else:
-        print("Issue types: not detected automatically")
+        print(f"{heading('Issue types')}: not detected automatically")
 
-    print("Suppression examples:")
-    print(f'  - root.clj disable: (checks/disable "{issue_id}" "**/*")')
-    print(f'  - root.clj ignore finding text: (checks/ignore-finding "{issue_id}" "**/*" "needle")')
+    disable_example = f'(checks/disable "{issue_id}" "**/*")'
+    ignore_example = f'(checks/ignore-finding "{issue_id}" "**/*" "needle")'
+    print(heading("Suppression examples:"))
+    print(f"  - root.clj disable: {command_text(disable_example)}")
+    print(
+        "  - root.clj ignore finding text: "
+        + command_text(ignore_example)
+    )
     if entry.kind == "file":
-        print(f"  - inline ignore (content-based checks only): # check:ignore {issue_id}")
-        print(f"  - inline ignore specific value: # check:ignore {issue_id} value=needle")
+        print(
+            "  - inline ignore (content-based checks only): "
+            + command_text(f"# check:ignore {issue_id}")
+        )
+        print(
+            "  - inline ignore specific value: "
+            + command_text(f"# check:ignore {issue_id} value=needle")
+        )
     return 0
 
 
@@ -391,6 +434,7 @@ def check_main(
     dir_checks: list[DirectoryCheck] = sort_checks_typed(
         [v for v in all_checks.values() if isinstance(v, DirectoryCheck)]
     )
+    needs_recursive_walk = bool(file_checks or dir_checks)
 
     disabled_checks: dict[str, pathspec.PathSpec] = {}
     ignored_findings: list[tuple[str, pathspec.PathSpec, str]] = []
@@ -505,24 +549,25 @@ def check_main(
         if is_check_disabled(issue):
             return
 
-        msg = ""
-
-        msg += f"[{issue.issue_type.id}] "
-        msg += "(fixable) " if issue.fix else ""
+        parts: list[str] = []
+        parts.append(style(f"[{issue.issue_type.id}]", _severity_color(issue.issue_type.severity), attrs=("bold",)))
+        if issue.fix:
+            parts.append(style("(fixable)", "green", attrs=("bold",)))
 
         if issue.location is not None:
-            msg += str(issue.location.path)
+            location = accent(issue.location.path, "cyan")
             if issue.location.lines:
-                msg += ":"
-                msg += ",".join(
+                lines = ",".join(
                     f"{line[0]}-{line[1]}" if line[0] != line[1] else str(line[0])
                     for line in issue.location.lines.ranges
                 )
-            msg += " > "
+                location += style(f":{lines}", "magenta")
+            parts.append(location)
         else:
-            msg += "> "
+            parts.append(style("workspace", "cyan", attrs=("bold",)))
 
-        msg += issue_message(issue, report_format_error=True)
+        parts.append(style(">", "blue"))
+        parts.append(issue_message(issue, report_format_error=True))
 
         if issue.issue_type.severity not in (Severity.INFO, Severity.WARNING):
             has_errors = True
@@ -535,7 +580,7 @@ def check_main(
         # if data_str:
         #     msg += f" ({data_str})"
 
-        error(msg)
+        _severity_reporter(issue.issue_type.severity)(" ".join(parts))
 
     @dataclass(frozen=True)
     class RepoContext:
@@ -580,6 +625,14 @@ def check_main(
             current = current.parent
 
     seen_repo_roots: set[Path] = set()
+    seen_project_paths: set[Path] = set()
+
+    def is_within(path: Path, root: Path) -> bool:
+        try:
+            path.relative_to(root)
+            return True
+        except ValueError:
+            return False
 
     def maybe_run_repo_checks(repo_root: Path, project: Project | None) -> None:
         resolved = repo_root.resolve()
@@ -589,6 +642,59 @@ def check_main(
             issues = check.check(repo_root, project=project)
             report(issues)
         seen_repo_roots.add(resolved)
+
+    configured_repo_paths: list[Path] = []
+    if config is not None:
+        configured_repo_paths = sorted(
+            {resolved_target.path.resolve() for resolved_target in configured_repo_targets(config)},
+            key=lambda path: (len(path.parts), path.as_posix()),
+        )
+
+    def selected_projects_for_root(root_path: Path) -> list[Project]:
+        if config is None or not root_path.is_dir():
+            return []
+        resolved_root = root_path.resolve()
+        return sorted(
+            [
+                project
+                for project in config.defined_projects.values()
+                if is_within(project.path.resolve(), resolved_root)
+            ],
+            key=lambda project: (len(project.path.resolve().parts), project.path.as_posix()),
+        )
+
+    def selected_configured_repo_roots_for_root(root_path: Path) -> list[Path]:
+        if not root_path.is_dir():
+            return []
+        resolved_root = root_path.resolve()
+        return [
+            repo_root
+            for repo_root in configured_repo_paths
+            if is_within(repo_root, resolved_root)
+        ]
+
+    def maybe_run_project_checks(project: Project) -> None:
+        resolved_project_path = project.path.resolve()
+        if resolved_project_path in seen_project_paths:
+            return
+        for project_check in project_checks:
+            issues = project_check.check(project.path, project)
+            report(issues)
+        seen_project_paths.add(resolved_project_path)
+
+    def run_without_recursive_walk(path: Path) -> None:
+        repo_root = find_repo_root(path)
+        if repo_root is not None:
+            maybe_run_repo_checks(repo_root, projects_by_path.get(repo_root.resolve()))
+
+        if not path.is_dir():
+            return
+
+        for project in selected_projects_for_root(path):
+            maybe_run_project_checks(project)
+
+        for repo_root in selected_configured_repo_roots_for_root(path):
+            maybe_run_repo_checks(repo_root, projects_by_path.get(repo_root.resolve()))
 
     # print(f"project_paths: {projects_by_path.keys()}")
 
@@ -691,7 +797,10 @@ def check_main(
         for root_check in root_checks:
             issues = root_check.check(path, project_at_root)
             report(issues)
-        go(path)
+        if needs_recursive_walk or config is None:
+            go(path)
+        else:
+            run_without_recursive_walk(path)
 
     return 1 if has_errors else 0
 
