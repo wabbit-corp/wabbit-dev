@@ -12,6 +12,7 @@ def test_list_checks_includes_spdx_and_fixability(capsys: pytest.CaptureFixture[
     output = capsys.readouterr().out
     assert "SpdxHeaderCheck" in output
     assert "ManagedGeneratedFileIntegrityCheck" in output
+    assert "KmpTargetExpansionCheck" in output
     assert "fix:yes" in output
     assert "Run `check --describe <check>`" in output
 
@@ -40,6 +41,18 @@ def test_describe_generated_file_integrity_check_mentions_edit_issue(
     assert result == 0
     output = capsys.readouterr().out
     assert "E_MANAGED_GENERATED_FILE_EDITED" in output
+
+
+def test_describe_kmp_target_expansion_check_mentions_possible_target_issue(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev.tasks import check as check_task
+
+    result = check_task.describe_check("KmpTargetExpansionCheck")
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "E_KMP_POSSIBLE_MISSING_TARGET" in output
 
 
 def test_describe_check_unknown_name_suggests_close_match() -> None:

@@ -17,6 +17,7 @@ CHECK_MODULE_IMPORTS: tuple[str, ...] = (
     "dev.checks.file_paths",
     "dev.checks.hardcoded",
     "dev.checks.identifier_uniqueness",
+    "dev.checks.kmp_target_expansion",
     "dev.checks.large_files",
     "dev.checks.managed_generated_files",
     "dev.checks.project_files",
