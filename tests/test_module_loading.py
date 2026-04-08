@@ -16,4 +16,5 @@ def test_load_modules_does_not_require_checks_directory_iteration(monkeypatch: p
     assert "LargeFileCheck" in modules
     assert "CheckedInBinaryDependencyCheck" in modules
     assert "RepoContributorIdentityCheck" in modules
+    assert "RepoMetadataHygieneCheck" in modules
     assert "TextQualityCheck" in modules

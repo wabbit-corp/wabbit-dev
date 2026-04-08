@@ -132,10 +132,16 @@ def _make_setup_context(pyproject_template: str, codespell_words: str = "wabbit\
         repo_template=Path("."),
         licenses={},
         coc=jinja2.Template(""),
+        editorconfig_template=jinja2.Template("root = true\n"),
         gitignore_template=jinja2.Template("# base\n"),
         cla=jinja2.Template(""),
         cla_explanations=jinja2.Template(""),
         contributor_privacy_policy=jinja2.Template(""),
+        github_codeowners_template=jinja2.Template("* owner@example.com\n"),
+        github_security_template=jinja2.Template("# Security Policy\n"),
+        github_pull_request_template=jinja2.Template("## Summary\n"),
+        github_issue_bug_template=jinja2.Template("name: Bug report\n"),
+        github_issue_feature_template=jinja2.Template("name: Feature request\n"),
         settings_template=jinja2.Template(""),
         settings_local_template=jinja2.Template(""),
         subproject_settings_template=jinja2.Template(""),
@@ -878,6 +884,7 @@ def test_targeted_prod_setup_omits_cross_repo_gradle_projects_from_root_settings
     monkeypatch.setattr(setup_module, "toposort_projects", fake_toposort_projects)
     monkeypatch.setattr(setup_module, "create_repo_setup_context", fake_create_repo_setup_context)
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         setup_module,
         "_write_gradle_root_files",
@@ -949,6 +956,7 @@ def test_setup_prod_removes_stale_gradle_local_overlay_from_selected_repo_root(
     monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["kotlin-web-common"])
     monkeypatch.setattr(setup_module, "create_repo_setup_context", lambda _config, mode: SimpleNamespace(config=config, mode=mode))
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "_write_repo_root_wabbit_legal_documents", lambda *_args, **_kwargs: None)
 
@@ -1010,6 +1018,7 @@ def test_setup_treats_empty_projects_list_as_all_projects(tmp_path: Path, monkey
         "create_repo_setup_context",
         lambda _config, mode: SimpleNamespace(config=config, mode=mode),
     )
+    monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         setup_module,
         "_write_gradle_root_files",
@@ -1124,6 +1133,7 @@ def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
     )
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(setup_common_module, "write_wabbit_legal_documents", lambda _ctx, project: written_paths.append(project.path))
     monkeypatch.setattr(setup_common_module, "write_wabbit_legal_files", lambda _ctx, project: written_license_paths.append(project.path))
     monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
@@ -1216,6 +1226,7 @@ def test_setup_writes_repo_root_license_when_repo_managed_gradle_project_license
     )
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         setup_common_module,
         "write_wabbit_legal_files",
@@ -1317,6 +1328,7 @@ def test_setup_repo_root_license_keeps_shared_test_license_when_some_repo_projec
     )
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         setup_common_module,
         "write_wabbit_legal_files",
@@ -1380,6 +1392,7 @@ def test_setup_does_not_commit_or_push_changes(tmp_path: Path, monkeypatch: pyte
     )
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
 
     def fake_setup_project(
         _ctx: object,
@@ -1455,6 +1468,7 @@ def test_targeted_local_setup_does_not_write_workspace_root_files(
     )
     monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
 
     setup_module.setup(setup_module.RepoSetupMode.LOCAL, interactive=False, project="demo")
 

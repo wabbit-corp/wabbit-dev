@@ -207,6 +207,7 @@ def test_setup_writes_repo_root_agents_for_repo_managed_project(tmp_path: Path, 
     )
     monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["demo/pkg"])
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
 
     result = setup_module.setup(setup_module.RepoSetupMode.PROD, interactive=False, project="demo/pkg")
 

@@ -114,8 +114,8 @@ def test_create_repo_setup_context_loads_legal_templates_strictly(monkeypatch: p
     assert github_calls == []
     strict_paths = {path.as_posix() for path, strict in calls if strict}
     assert strict_paths == {
-        "data-repo-template/legal/cla/v1.0.0/CLA.md",
-        "data-repo-template/legal/cla/v1.0.0/CLA_EXPLANATIONS.md",
-        "data-repo-template/legal/code-of-conduct/v1.0.0/CODE_OF_CONDUCT.md",
-        "data-repo-template/legal/contributor-privacy/v1.0.0/CONTRIBUTOR_PRIVACY.md",
+        f"{config.workspace_root.as_posix()}/data-repo-template/legal/cla/v1.0.0/CLA.md",
+        f"{config.workspace_root.as_posix()}/data-repo-template/legal/cla/v1.0.0/CLA_EXPLANATIONS.md",
+        f"{config.workspace_root.as_posix()}/data-repo-template/legal/code-of-conduct/v1.0.0/CODE_OF_CONDUCT.md",
+        f"{config.workspace_root.as_posix()}/data-repo-template/legal/contributor-privacy/v1.0.0/CONTRIBUTOR_PRIVACY.md",
     }

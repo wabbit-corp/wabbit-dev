@@ -596,6 +596,12 @@ class MavenLibraryDefinition:
 
 
 @dataclass(frozen=True)
+class CodeOwner:
+    name: str
+    email: str
+
+
+@dataclass(frozen=True)
 class RepoDefinition:
     repo_id: str
     path: Path
@@ -1565,6 +1571,7 @@ class Config:
     default_company_email: str | None = None
     default_company_legal_name: str | None = None
     default_company_short_name: str | None = None
+    default_code_owners: list[CodeOwner] = dataclasses.field(default_factory=list)
     default_git_user_email: str | None = None
     default_git_user_name: str | None = None
 
@@ -2701,6 +2708,15 @@ def load_config(start: Path | None = None) -> Config:
 
         if isinstance(command, config_typed.DefaultCompanyShortNameCommand):
             config.default_company_short_name = command.name
+            return
+
+        if isinstance(command, config_typed.CodeOwnerCommand):
+            config.default_code_owners.append(
+                CodeOwner(
+                    name=command.name,
+                    email=command.email,
+                )
+            )
             return
 
         if isinstance(command, config_typed.GitUserCommand):

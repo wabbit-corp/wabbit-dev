@@ -30,6 +30,12 @@ def test_setup_json_output_reports_selected_projects(tmp_path: Path, monkeypatch
     )
     monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["demo"])
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [str(tmp_path.resolve())])
+    monkeypatch.setattr(
+        setup_module,
+        "_write_repo_agents_files",
+        lambda *_args, **_kwargs: [str((tmp_path / "demo" / "AGENTS.md").resolve())],
+    )
 
     result = setup_module.setup(
         setup_module.RepoSetupMode.PROD,
@@ -43,6 +49,7 @@ def test_setup_json_output_reports_selected_projects(tmp_path: Path, monkeypatch
     assert payload["mode"] == "prod"
     assert payload["requestedTargets"] == ["demo"]
     assert payload["selectedProjectIds"] == ["demo"]
+    assert payload["repoMetadataRootsWritten"] == [str(tmp_path.resolve())]
     assert payload["repoAgentsWritten"] == [str((tmp_path / "demo" / "AGENTS.md").resolve())]
     assert payload["summary"]["selectedProjectCount"] == 1
 

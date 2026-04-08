@@ -149,6 +149,17 @@ def test_default_company_names_are_loaded(tmp_path: Path) -> None:
     assert config.default_company_short_name == "Example Co"
 
 
+def test_code_owner_entries_are_loaded(tmp_path: Path) -> None:
+    config = _load_from_temp_root(
+        tmp_path,
+        '(code-owner "Sir Wabbit" "wabbit@wabbit.one")\n',
+    )
+
+    assert len(config.default_code_owners) == 1
+    assert config.default_code_owners[0].name == "Sir Wabbit"
+    assert config.default_code_owners[0].email == "wabbit@wabbit.one"
+
+
 def test_purescript_project_is_loaded_with_explicit_license(tmp_path: Path) -> None:
     from dev.config import PurescriptProject
 
@@ -444,8 +455,8 @@ def test_gradle_project_loads_extra_gradle_plugin_feature(tmp_path: Path) -> Non
 def test_gradle_project_accepts_local_gradle_plugin_definition(tmp_path: Path) -> None:
     from dev.config import (
         GradleProject,
-        resolve_kotlin_compiler_plugin_id,
         get_gradle_plugin_applications,
+        resolve_kotlin_compiler_plugin_id,
         resolve_kotlin_plugin_id,
         resolve_kotlin_plugin_version,
     )

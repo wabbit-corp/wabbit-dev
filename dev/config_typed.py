@@ -483,6 +483,13 @@ class DefaultCompanyShortNameCommand:
     name: str
 
 
+@tag("code-owner")
+@dataclass(frozen=True)
+class CodeOwnerCommand:
+    name: str
+    email: str
+
+
 @tag("git-user")
 @dataclass(frozen=True)
 class GitUserCommand:
@@ -931,6 +938,7 @@ BuiltinTopLevelCommand = (
     | DefaultCompanyEmailCommand
     | DefaultCompanyLegalNameCommand
     | DefaultCompanyShortNameCommand
+    | CodeOwnerCommand
     | GitUserCommand
     | GitCensorCommand
     | JvmVersionCommand
@@ -969,6 +977,7 @@ BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[object], ...] = (
     DefaultCompanyEmailCommand,
     DefaultCompanyLegalNameCommand,
     DefaultCompanyShortNameCommand,
+    CodeOwnerCommand,
     GitUserCommand,
     GitCensorCommand,
     JvmVersionCommand,
@@ -1008,6 +1017,7 @@ __all__ = [
     "BuiltinTopLevelCommand",
     "ChecksDisableCommand",
     "ChecksIgnoreFindingCommand",
+    "CodeOwnerCommand",
     "Const",
     "DataProjectCommand",
     "DefaultMavenProjectGroupCommand",

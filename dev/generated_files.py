@@ -12,6 +12,7 @@ _BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _BASE58_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]+$")
 
 _REPAIR_GUIDANCE_BY_FILENAME: Mapping[str, str] = {
+    ".editorconfig": "Update root.clj and rerun dev setup for durable editor policy changes.",
     "build.gradle.kts": (
         "Update root.clj and rerun dev setup; use build.extra.gradle.kts for durable manual Gradle logic."
     ),
@@ -28,6 +29,11 @@ _REPAIR_GUIDANCE_BY_FILENAME: Mapping[str, str] = {
     "mkdocs.yml": (
         "Update root.clj and rerun dev setup; use mkdocs.extra.yml for unmanaged extra MkDocs top-level keys."
     ),
+    "CODEOWNERS": "Update root.clj code-owner entries and rerun dev setup.",
+    "SECURITY.md": "Update root.clj or the generated repository metadata templates, then rerun dev setup.",
+    "pull_request_template.md": "Update root.clj or the generated repository metadata templates, then rerun dev setup.",
+    "bug_report.yml": "Update root.clj or the generated repository metadata templates, then rerun dev setup.",
+    "feature_request.yml": "Update root.clj or the generated repository metadata templates, then rerun dev setup.",
     "requirements.txt": "Update root.clj and rerun dev setup for durable dependency changes.",
     "requirements-dev.txt": "Update root.clj and rerun dev setup for durable dependency changes.",
 }
@@ -49,23 +55,56 @@ class ManagedIntegrityVerification:
         return self.is_managed and self.has_integrity and self.integrity_token == self.expected_token
 
 
-def render_generated_comment(comment_prefix: str, body_lines: Sequence[str]) -> str:
-    prefix = comment_prefix.rstrip()
-    lines = [f"{prefix} {SETUP_GENERATED_MARKER}", prefix]
+@dataclass(frozen=True)
+class CommentStyle:
+    prefix: str
+    suffix: str | None = None
+
+
+def _render_comment_line(style: CommentStyle, text: str = "") -> str:
+    prefix = style.prefix.rstrip()
+    suffix = style.suffix.strip() if style.suffix is not None else ""
+    if text:
+        line = f"{prefix} {text}"
+    else:
+        line = prefix
+    if suffix:
+        line = f"{line} {suffix}"
+    return line
+
+
+def render_generated_comment(
+    comment_prefix: str,
+    body_lines: Sequence[str],
+    *,
+    comment_suffix: str | None = None,
+) -> str:
+    style = CommentStyle(prefix=comment_prefix, suffix=comment_suffix)
+    lines = [_render_comment_line(style, SETUP_GENERATED_MARKER), _render_comment_line(style)]
     for line in body_lines:
         if line:
-            lines.append(f"{prefix} {line}")
+            lines.append(_render_comment_line(style, line))
         else:
-            lines.append(prefix)
+            lines.append(_render_comment_line(style))
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-def prepend_generated_comment(text: str, *, comment_prefix: str, body_lines: Sequence[str]) -> str:
-    banner = render_generated_comment(comment_prefix, body_lines)
+def prepend_generated_comment(
+    text: str,
+    *,
+    comment_prefix: str,
+    body_lines: Sequence[str],
+    comment_suffix: str | None = None,
+) -> str:
+    banner = render_generated_comment(comment_prefix, body_lines, comment_suffix=comment_suffix)
     stripped = text.lstrip("\n")
     if not stripped:
-        return stamp_managed_text(banner, comment_prefix=comment_prefix)
-    return stamp_managed_text(banner + "\n" + stripped, comment_prefix=comment_prefix)
+        return stamp_managed_text(banner, comment_prefix=comment_prefix, comment_suffix=comment_suffix)
+    return stamp_managed_text(
+        banner + "\n" + stripped,
+        comment_prefix=comment_prefix,
+        comment_suffix=comment_suffix,
+    )
 
 
 def is_setup_managed_text(text: str) -> bool:
@@ -104,12 +143,14 @@ def _base58_encode(data: bytes) -> str:
     return (_BASE58_ALPHABET[0] * zero_prefix) + "".join(encoded)
 
 
-def _comment_prefix_for_managed_text(text: str) -> str | None:
+def _comment_style_for_managed_text(text: str) -> CommentStyle | None:
     if not is_setup_managed_text(text):
         return None
     first_line = text.splitlines()[0]
-    prefix, _, _ = first_line.partition(SETUP_GENERATED_MARKER)
-    return prefix.rstrip()
+    prefix, _, suffix = first_line.partition(SETUP_GENERATED_MARKER)
+    normalized_prefix = prefix.rstrip()
+    normalized_suffix = suffix.strip() or None
+    return CommentStyle(prefix=normalized_prefix, suffix=normalized_suffix)
 
 
 def _integrity_token_from_line(line: str) -> str | None:
@@ -117,7 +158,7 @@ def _integrity_token_from_line(line: str) -> str | None:
     if SETUP_MANAGED_INTEGRITY_LABEL not in stripped:
         return None
     _, _, token = stripped.partition(SETUP_MANAGED_INTEGRITY_LABEL)
-    token = token.strip()
+    token = token.strip().split()[0] if token.strip() else ""
     if not token:
         return None
     return token
@@ -140,15 +181,22 @@ def compute_managed_integrity_token(text: str) -> str:
     return _base58_encode(digest)
 
 
-def stamp_managed_text(text: str, *, comment_prefix: str | None = None) -> str:
+def stamp_managed_text(
+    text: str,
+    *,
+    comment_prefix: str | None = None,
+    comment_suffix: str | None = None,
+) -> str:
     if not is_setup_managed_text(text):
         raise ValueError("Cannot add a managed integrity stamp to text without the generated-file marker")
 
     canonical = strip_managed_integrity_lines(text)
-    effective_prefix = (
-        comment_prefix.rstrip() if comment_prefix is not None else _comment_prefix_for_managed_text(canonical)
+    effective_style = (
+        CommentStyle(prefix=comment_prefix, suffix=comment_suffix)
+        if comment_prefix is not None
+        else _comment_style_for_managed_text(canonical)
     )
-    if effective_prefix is None:
+    if effective_style is None:
         raise ValueError("Could not infer comment prefix for managed file")
 
     lines = canonical.splitlines()
@@ -156,7 +204,7 @@ def stamp_managed_text(text: str, *, comment_prefix: str | None = None) -> str:
         raise ValueError("Managed file text must not be empty")
 
     token = compute_managed_integrity_token(canonical)
-    lines.insert(1, f"{effective_prefix} {SETUP_MANAGED_INTEGRITY_LABEL} {token}")
+    lines.insert(1, _render_comment_line(effective_style, f"{SETUP_MANAGED_INTEGRITY_LABEL} {token}"))
     stamped = "\n".join(lines)
     if canonical.endswith("\n"):
         stamped += "\n"
