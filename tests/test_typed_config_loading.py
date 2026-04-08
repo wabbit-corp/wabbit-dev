@@ -969,7 +969,7 @@ def test_repo_command_loads_nested_projects_and_repo_metadata(tmp_path: Path) ->
 
     repo_definition = config.defined_repos["jeeves"]
     assert repo_definition.repo_id == "jeeves"
-    assert repo_definition.path == Path("./jeeves")
+    assert repo_definition.path == (tmp_path / "jeeves").resolve()
     assert repo_definition.github_repo == "wabbit-corp/jeeves"
     assert repo_definition.gradle_root_project_name == "one.wabbit"
     assert repo_definition.jvm_policy == "jvm-21"
@@ -979,8 +979,8 @@ def test_repo_command_loads_nested_projects_and_repo_metadata(tmp_path: Path) ->
     assert isinstance(api_project, GradleProject)
     assert api_project.project_id == "jeeves/api"
     assert api_project.repo_id == "jeeves"
-    assert api_project.repo_root == Path("./jeeves")
-    assert api_project.path == Path("./jeeves/api")
+    assert api_project.repo_root == (tmp_path / "jeeves").resolve()
+    assert api_project.path == (tmp_path / "jeeves" / "api").resolve()
     assert api_project.managed_by_setup is False
     assert api_project.effective_gradle_project_name == "jeeves-api"
     assert api_project.github_repo == "wabbit-corp/jeeves"
@@ -988,8 +988,8 @@ def test_repo_command_loads_nested_projects_and_repo_metadata(tmp_path: Path) ->
     audio_project = config.defined_projects["jeeves/audio-backend"]
     assert isinstance(audio_project, PythonProject)
     assert audio_project.repo_id == "jeeves"
-    assert audio_project.repo_root == Path("./jeeves")
-    assert audio_project.path == Path("./jeeves/audio-backend")
+    assert audio_project.repo_root == (tmp_path / "jeeves").resolve()
+    assert audio_project.path == (tmp_path / "jeeves" / "audio-backend").resolve()
     assert audio_project.managed_by_setup is False
     assert audio_project.github_repo == "wabbit-corp/jeeves"
 
@@ -1055,6 +1055,39 @@ def test_load_config_supports_preserve_spans_parser_signature(tmp_path: Path, mo
         os.chdir(cwd)
 
     assert "pkg" in config.defined_projects
+
+
+def test_load_config_walks_up_to_workspace_root_and_anchors_paths(tmp_path: Path) -> None:
+    from dev.config import load_config
+
+    workspace_root = tmp_path / "workspace"
+    nested_cwd = workspace_root / "apps" / "demo" / "src"
+    nested_cwd.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "root.clj").write_text(
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                '(repo "jeeves" :projects [(python "audio-backend" :version "0.1.0")])',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (workspace_root / "root.private.clj").write_text("", encoding="utf-8")
+
+    cwd = os.getcwd()
+    os.chdir(nested_cwd)
+    try:
+        config = load_config()
+    finally:
+        os.chdir(cwd)
+
+    repo_definition = config.defined_repos["jeeves"]
+    project = config.defined_projects["jeeves/audio-backend"]
+    assert config.workspace_root == workspace_root.resolve()
+    assert repo_definition.path == (workspace_root / "jeeves").resolve()
+    assert project.repo_root == (workspace_root / "jeeves").resolve()
+    assert project.path == (workspace_root / "jeeves" / "audio-backend").resolve()
 
 
 def test_intellij_plugin_metadata_and_private_publish_tokens_are_loaded(tmp_path: Path) -> None:

@@ -64,8 +64,9 @@ python3 dev.py --help
 
 ## Workspace Expectations
 
-Most commands expect to run from the workspace root, because that is where the
-configuration files live:
+Config-driven commands can run from the workspace root or any nested
+subdirectory inside it. The CLI walks upward until it finds the workspace
+configuration files:
 
 - `root.clj`
 - `root.private.clj`

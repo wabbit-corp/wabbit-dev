@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from dev.config import GradleProject, PremakeProject, PythonProject, load_config
+from dev.config import GradleProject, PremakeProject, PythonProject, find_workspace_root, load_config
 from dev.discoverability import did_you_mean_suffix
 from dev.messages import warning
 from dev.repo_resolution import resolve_project_ids
@@ -68,8 +68,7 @@ def _target_choices(config: object | None) -> list[str]:
 def cloc(
     targets: str | list[str] | None = None,
 ) -> None:
-    config_path = Path("./root.clj").absolute()
-    config = load_config() if config_path.exists() else None
+    config = load_config() if find_workspace_root() is not None else None
     if config is None:
         warning("No config file found. Some checks may not have sufficient context to run.")
 

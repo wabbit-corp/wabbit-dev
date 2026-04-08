@@ -179,6 +179,20 @@ def test_check_main_exit_code_zero_for_warnings(tmp_path: Path, monkeypatch: pyt
     assert check_task.check_main(str(tmp_path)) == 0
 
 
+def test_check_main_loads_config_from_parent_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_config(tmp_path, '(python "pkg" :version "0.1.0")\n')
+    (tmp_path / "pkg").mkdir(parents=True)
+    nested = tmp_path / "pkg" / "src"
+    nested.mkdir()
+    monkeypatch.chdir(nested)
+    monkeypatch.setattr(check_task.Module, "load_modules", staticmethod(lambda: {}))
+
+    assert check_task.check_main("pkg") == 0
+
+
 def test_checkignore_applies_without_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".checkignore").write_text("skip.txt\n", encoding="utf-8")
     (tmp_path / "skip.txt").write_text("skip\n", encoding="utf-8")

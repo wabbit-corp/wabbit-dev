@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from dev.config import Config, Project, load_config, project_repo_root
+from dev.config import Config, Project, find_workspace_root, load_config, project_repo_root
 from dev.discoverability import did_you_mean_suffix, unknown_name_message
 
 
@@ -183,7 +183,7 @@ def _resolved_repo_target_from_repo(config: Config, repo_id: str) -> ResolvedRep
 
 
 def _load_config_if_available() -> Config | None:
-    if not Path("./root.clj").exists():
+    if find_workspace_root() is None:
         return None
     try:
         return load_config()

@@ -60,7 +60,7 @@ def test_find_kmp_target_expansion_suggests_missing_target_when_dependency_is_a_
 
     config = _load_kmp_target_gap_config(tmp_path)
     consumer = config.defined_projects["consumer"]
-    (tmp_path / consumer.path).mkdir(parents=True, exist_ok=True)
+    consumer.path.mkdir(parents=True, exist_ok=True)
     monkeypatch.chdir(tmp_path)
 
     suggestions = find_kmp_target_expansion_suggestions(consumer, config)
@@ -79,7 +79,7 @@ def test_find_kmp_target_expansion_skips_target_with_new_platform_sources(
 
     config = _load_kmp_target_gap_config(tmp_path)
     consumer = config.defined_projects["consumer"]
-    source_dir = tmp_path / consumer.path / "src" / "linuxX64Main" / "kotlin"
+    source_dir = consumer.path / "src" / "linuxX64Main" / "kotlin"
     source_dir.mkdir(parents=True, exist_ok=True)
     (source_dir / "Consumer.kt").write_text("class Consumer\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)

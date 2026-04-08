@@ -24,13 +24,28 @@ def test_commit_openai_finding_requires_configured_key(tmp_path, monkeypatch: py
     (tmp_path / "root.clj").write_text("()", encoding="utf-8")
     (tmp_path / "root.private.clj").write_text("()", encoding="utf-8")
 
-    monkeypatch.setattr(doctor_task, "load_config", lambda: SimpleNamespace(openai_key=None, defined_projects={}))
+    monkeypatch.setattr(doctor_task, "load_config", lambda start=None: SimpleNamespace(openai_key=None, defined_projects={}))
 
     findings = collect_doctor_findings(check_ids=("commit-openai",), ctx=DoctorContext(cwd=tmp_path))
 
     assert len(findings) == 1
     assert findings[0].status == DoctorStatus.FAIL
     assert "OpenAI key" in findings[0].detail
+
+
+def test_workspace_root_finding_passes_for_nested_subdirectory(tmp_path) -> None:
+    from dev.tasks.doctor import DoctorContext, DoctorStatus, collect_doctor_findings
+
+    workspace_root = tmp_path / "workspace"
+    nested = workspace_root / "apps" / "demo"
+    nested.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "root.clj").write_text("()", encoding="utf-8")
+
+    findings = collect_doctor_findings(check_ids=("workspace-root",), ctx=DoctorContext(cwd=nested))
+
+    assert len(findings) == 1
+    assert findings[0].status == DoctorStatus.PASS
+    assert str(workspace_root) in findings[0].detail
 
 
 def test_preflight_for_command_prints_doctor_hint(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -73,7 +88,7 @@ def test_resolve_doctor_check_ids_expands_command_groups() -> None:
 
 def test_doctor_json_output_includes_summary(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     import dev.tasks.doctor as doctor_task
-    from dev.tasks.doctor import DoctorContext, DoctorFinding, DoctorStatus
+    from dev.tasks.doctor import DoctorFinding, DoctorStatus
 
     monkeypatch.setattr(
         doctor_task,

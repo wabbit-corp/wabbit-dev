@@ -7,8 +7,8 @@ wabbit-dev <command> [options]
 python3 dev.py <command> [options]
 ```
 
-The command set is configuration-driven. Most commands expect to run from the
-workspace root so `root.clj` and `root.private.clj` can be loaded.
+The command set is configuration-driven. Commands walk upward from the current
+directory until `root.clj` and `root.private.clj` can be loaded.
 
 The CLI suggests close matches for mistyped commands, project IDs, checks, and
 path-or-project targets when it can infer what you meant.

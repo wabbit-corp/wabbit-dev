@@ -29,7 +29,7 @@ from dev.checks.base import (
     Severity,
     known_issue_types,
 )
-from dev.config import Project, load_config
+from dev.config import Project, find_workspace_root, load_config
 from dev.discoverability import did_you_mean_suffix, unknown_name_message
 from dev.messages import error, info, warning
 from dev.repo_resolution import resolve_check_paths
@@ -52,14 +52,15 @@ class CheckCatalogEntry:
     config_commands: tuple[str, ...]
 
 
-def _load_optional_config() -> object | None:
-    config_path = Path("./root.clj").absolute()
-    return load_config() if config_path.exists() else None
+def _load_optional_config(start: str | Path = ".") -> object | None:
+    if find_workspace_root(Path(start)) is None:
+        return None
+    return load_config(Path(start))
 
 
 def _load_check_modules(config: object | None) -> dict[str, Module]:
     if config is not None and hasattr(config, "modules"):
-        return getattr(config, "modules")
+        return config.modules
 
     try:
         return Module.load_modules()
@@ -336,10 +337,15 @@ def check_main(
     Main function to run checks on the project.
     """
 
-    config_path = Path("./root.clj").absolute()
-    config = _load_optional_config()
+    config = _load_optional_config(project_or_dir_or_file)
     if config is None:
         warning("No config file found. Some checks may not have sufficient context to run.")
+
+    config_root = (
+        config.workspace_root
+        if config is not None and hasattr(config, "workspace_root") and config.workspace_root is not None
+        else Path.cwd().resolve()
+    )
 
     projects_by_path: dict[Path, Project] = {}
     if config is not None:
@@ -437,7 +443,7 @@ def check_main(
     def issue_relative_path(path: Path) -> str:
         abs_path = path.absolute()
         try:
-            rel_path = abs_path.relative_to(config_path.parent)
+            rel_path = abs_path.relative_to(config_root)
         except ValueError:
             rel_path = abs_path
         return str(rel_path)

@@ -1101,6 +1101,18 @@ CONFIG_FILE = "root.clj"
 CONFIG_PRIVATE_FILE = "root.private.clj"
 
 
+def find_workspace_root(start: Path | None = None) -> Path | None:
+    current = Path.cwd() if start is None else start
+    if current.is_file():
+        current = current.parent
+    current = current.resolve()
+
+    for candidate in (current, *current.parents):
+        if (candidate / CONFIG_FILE).is_file():
+            return candidate
+    return None
+
+
 @dataclass
 class PythonDefaults:
     requires_python: str | None = None
@@ -1535,6 +1547,7 @@ def _source_set_is_allowed_for_platforms(source_set: str, platforms: list[str]) 
 @dataclass
 class Config:
     raw: Document
+    workspace_root: Path | None = None
 
     openai_key: str | None = None
     github_token: str | None = None
@@ -1611,7 +1624,7 @@ def project_repo_root(project: Project | object) -> Path:
     raise TypeError(f"Unsupported project object without path/repo_root: {project!r}")
 
 
-def load_config() -> Config:
+def load_config(start: Path | None = None) -> Config:
     parse_params = signature(parse).parameters
 
     def parse_document(text: str) -> Document:
@@ -1619,12 +1632,21 @@ def load_config() -> Config:
             return parse(text, no_spans=False)
         return parse(text)
 
-    with open(CONFIG_FILE, encoding="utf-8") as f:
+    workspace_root = find_workspace_root(start)
+    if workspace_root is None:
+        start_path = Path.cwd() if start is None else start
+        raise FileNotFoundError(f"Could not find {CONFIG_FILE} in {start_path} or any parent directory")
+
+    workspace_root = workspace_root.resolve()
+    root_path = workspace_root / CONFIG_FILE
+    root_private_path = workspace_root / CONFIG_PRIVATE_FILE
+
+    with open(root_path, encoding="utf-8") as f:
         root = parse_document(f.read())
-    with open(CONFIG_PRIVATE_FILE, encoding="utf-8") as f:
+    with open(root_private_path, encoding="utf-8") as f:
         root_private = parse_document(f.read())
 
-    config = Config(raw=root)
+    config = Config(raw=root, workspace_root=workspace_root)
 
     modules = Module.load_modules()
     config.modules = modules
@@ -2116,7 +2138,7 @@ def load_config() -> Config:
 
     def _project_path_for(dir_name: str, repo_root_path: Path | None) -> Path:
         if repo_root_path is None:
-            return Path(f"./{dir_name}")
+            return workspace_root / dir_name
         return repo_root_path / dir_name
 
     def _project_name_for(dir_name: str, configured_name: str | None, repo_id: str | None) -> str:
@@ -2799,7 +2821,7 @@ def load_config() -> Config:
             repo_id = command.dir_name
             if repo_id in config.defined_repos:
                 raise ValueError(f"Repo {repo_id} already exists")
-            repo_root_path = Path(f"./{command.dir_name}")
+            repo_root_path = workspace_root / command.dir_name
             nested_project_ids: list[str] = []
             for nested_project in command.projects or []:
                 nested_project_id = _apply_project_command(

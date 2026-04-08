@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import os
 import re
 from dataclasses import dataclass
-from pathlib import Path
 
 from dev.cli import build_parser
 from dev.config import Config, load_config
@@ -32,23 +30,6 @@ def _dedupe(values: list[str]) -> tuple[str, ...]:
 
 
 def _safe_load_config() -> Config | None:
-    current = Path.cwd()
-    candidates = [current, *current.parents]
-
-    for candidate in candidates:
-        if not (candidate / "root.clj").exists():
-            continue
-        if not (candidate / "root.private.clj").exists():
-            continue
-        previous_cwd = Path.cwd()
-        try:
-            os.chdir(candidate)
-            return load_config()
-        except Exception:
-            continue
-        finally:
-            os.chdir(previous_cwd)
-
     try:
         return load_config()
     except Exception:

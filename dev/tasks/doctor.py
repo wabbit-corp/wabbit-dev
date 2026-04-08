@@ -10,7 +10,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from dev.config import GradleProject, IntellijPlugin, PythonProject, load_config
+from dev.config import GradleProject, IntellijPlugin, PythonProject, find_workspace_root, load_config
 from dev.discoverability import unknown_name_message
 from dev.messages import error, info, success, warning
 from dev.repo_resolution import resolve_project_ids
@@ -40,6 +40,7 @@ class DoctorFinding:
 class DoctorContext:
     cwd: Path = field(default_factory=Path.cwd)
     selected_targets: tuple[str, ...] | None = None
+    workspace_root: Path | None = field(init=False)
     root_clj: Path = field(init=False)
     root_private_clj: Path = field(init=False)
     _config_loaded: bool = field(default=False, init=False)
@@ -47,8 +48,10 @@ class DoctorContext:
     _config_error: str | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
-        self.root_clj = self.cwd / "root.clj"
-        self.root_private_clj = self.cwd / "root.private.clj"
+        self.workspace_root = find_workspace_root(self.cwd)
+        config_root = self.workspace_root if self.workspace_root is not None else self.cwd.resolve()
+        self.root_clj = config_root / "root.clj"
+        self.root_private_clj = config_root / "root.private.clj"
 
     def load_config(self) -> Config | None:
         if self._config_loaded:
@@ -56,18 +59,11 @@ class DoctorContext:
 
         self._config_loaded = True
         try:
-            self._config = load_config()
+            self._config = load_config(self.cwd)
         except Exception as ex:  # pragma: no cover - kept broad for doctor resilience
             self._config_error = f"{type(ex).__name__}: {ex}"
             self._config = None
         return self._config
-
-
-def _find_upward(start: Path, filename: str) -> Path | None:
-    for candidate in (start, *start.parents):
-        if (candidate / filename).exists():
-            return candidate
-    return None
 
 
 def _first_present(*values: str | None) -> str | None:
@@ -109,7 +105,16 @@ def _selected_projects(config: Config, ctx: DoctorContext) -> list[Project]:
 
 
 def _workspace_root_finding(ctx: DoctorContext) -> DoctorFinding:
-    if ctx.root_clj.is_file():
+    if ctx.workspace_root is None:
+        return DoctorFinding(
+            key="workspace-root",
+            label="Workspace root",
+            status=DoctorStatus.FAIL,
+            detail=f"No root.clj was found in {ctx.cwd} or any parent directory.",
+            fix="Run the command from a workspace directory that contains root.clj somewhere above it.",
+        )
+
+    if ctx.workspace_root.resolve() == ctx.cwd.resolve():
         return DoctorFinding(
             key="workspace-root",
             label="Workspace root",
@@ -117,22 +122,11 @@ def _workspace_root_finding(ctx: DoctorContext) -> DoctorFinding:
             detail=f"Current directory is the workspace root: {ctx.cwd}",
         )
 
-    ancestor = _find_upward(ctx.cwd, "root.clj")
-    if ancestor is not None:
-        return DoctorFinding(
-            key="workspace-root",
-            label="Workspace root",
-            status=DoctorStatus.FAIL,
-            detail=f"Current directory {ctx.cwd} is not the workspace root.",
-            fix=f"Run `cd {ancestor}` before using config-driven commands.",
-        )
-
     return DoctorFinding(
         key="workspace-root",
         label="Workspace root",
-        status=DoctorStatus.FAIL,
-        detail=f"No root.clj was found in {ctx.cwd} or any parent directory.",
-        fix="Run the command from the workspace root that contains root.clj.",
+        status=DoctorStatus.PASS,
+        detail=f"Resolved workspace root {ctx.workspace_root} from current directory {ctx.cwd}.",
     )
 
 

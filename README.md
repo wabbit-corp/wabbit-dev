@@ -147,6 +147,9 @@ The CLI is driven by two files at the workspace root:
 - `root.private.clj`: private credentials and local secrets such as API tokens,
   publish credentials, and default git identity
 
+Config-driven commands can be run from the workspace root or any nested
+subdirectory inside it. The CLI walks upward until it finds `root.clj`.
+
 Common `root.clj` forms include:
 
 ```clojure

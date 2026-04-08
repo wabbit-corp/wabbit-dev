@@ -258,7 +258,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         ],
         notes=[
             "Install the package and run `wabbit-dev`, or run it from the repo with `python3 dev.py`.",
-            "Most commands expect to run from the workspace root so root.clj can be found.",
+            "Config-driven commands walk upward from the current directory to find root.clj and root.private.clj.",
         ],
     )
     commands = Commands(parser)
