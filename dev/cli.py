@@ -818,12 +818,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
 
     with commands(
         "llmcopy",
-        help="Copy file contents to the clipboard in an LLM-friendly envelope.",
+        help="Copy file contents to the clipboard in an LLM-friendly envelope and report GPT-5.4 token totals.",
         description=_doc(
             """
             Read one or more files, directories, or glob patterns and copy their
             contents to the clipboard using a `<contents path="...">` wrapper that
-            is convenient to paste into external tools or prompts.
+            is convenient to paste into external tools or prompts. After copying,
+            report the total token count using GPT-5.4 tokenization.
             """
         ),
         epilog=examples(
@@ -832,6 +833,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             notes=[
                 "Directories are traversed recursively.",
                 "The command skips `.git`, `.idea`, and `__pycache__` directories by default.",
+                "The success summary includes the total GPT-5.4 token count for the copied payload.",
             ],
         ),
     ) as cmd:

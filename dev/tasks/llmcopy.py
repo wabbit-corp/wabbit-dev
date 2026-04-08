@@ -4,6 +4,7 @@ from pathlib import Path
 import pyperclip
 
 from dev.messages import info, success
+from dev.tokens import count_text_tokens_for_gpt_5_4
 
 IGNORE_FILES: set[str] = set(
     [
@@ -53,6 +54,11 @@ def llmcopy(paths: list[str]) -> None:
             for p in Path(".").rglob(path):
                 go(p)
 
-    # copy to clipboard
-    pyperclip.copy(buf.getvalue())
-    success("Copied to clipboard")
+    copied_text = buf.getvalue()
+    token_count = count_text_tokens_for_gpt_5_4(copied_text)
+
+    pyperclip.copy(copied_text)
+
+    file_count = len(added_paths)
+    file_label = "file" if file_count == 1 else "files"
+    success(f"Copied to clipboard: {file_count:,} {file_label}, {token_count.total_tokens:,} GPT-5.4 tokens")

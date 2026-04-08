@@ -110,7 +110,7 @@ Every command is documented here and in the MkDocs reference under
 | `where [--json]` | Shows the workspace, repo, and project context inferred from the current directory. |
 | `config check` | Parses and validates `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...] [--json]` | Generates or refreshes managed project files from configuration. |
-| `llmcopy PATH ...` | Copies file contents to the clipboard in an LLM-friendly wrapper. |
+| `llmcopy PATH ...` | Copies file contents to the clipboard in an LLM-friendly wrapper and reports GPT-5.4 token totals. |
 | `dep graph [TARGET ...]` | Renders an SVG dependency graph for the workspace or selected configured targets. |
 | `dep updates` | Checks configured Maven libraries for newer upstream versions. |
 | `publish [TARGET ...] [--dry-run]` | Publishes configured projects in dependency order or prints the publish plan. |

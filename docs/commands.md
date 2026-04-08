@@ -53,7 +53,7 @@ commands from the workspace root.
 | `where [--json]` | Show the workspace, repo, and project context inferred from the current directory. |
 | `config check` | Parse and validate `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...] [--json]` | Generate or refresh managed project files. |
-| `llmcopy PATH ...` | Copy file contents to the clipboard in an LLM-friendly wrapper. |
+| `llmcopy PATH ...` | Copy file contents to the clipboard in an LLM-friendly wrapper and report GPT-5.4 token totals. |
 | `dep graph [TARGET ...]` | Render an SVG dependency graph. |
 | `dep updates` | Check configured Maven libraries for newer versions. |
 | `publish [TARGET ...] [--dry-run]` | Publish configured projects in dependency order or print the publish plan. |
@@ -433,6 +433,7 @@ clipboard using a wrapper like:
 ```
 
 This is intended for prompt construction and other copy/paste workflows.
+After copying, it reports the total token count using GPT-5.4 tokenization.
 
 Ignored by default:
 
