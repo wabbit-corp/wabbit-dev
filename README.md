@@ -332,6 +332,11 @@ Managed generated config files also carry a short integrity stamp. `check` uses
 that stamp to distinguish hand-edited managed files from files that are merely
 stale and need regeneration.
 
+`setup` can also manage a very small facts block in a repo-root `AGENTS.md`.
+If `AGENTS.md` is missing, setup may create a short starter file. If it already
+exists, setup updates only the block between the managed markers and leaves the
+rest of the file alone. Keep any human-authored instructions outside that block.
+
 ## Licensing
 
 This project is licensed under the [AGPL](LICENSE.md) for open source use.

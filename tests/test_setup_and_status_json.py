@@ -23,7 +23,11 @@ def test_setup_json_output_reports_selected_projects(tmp_path: Path, monkeypatch
     config.defined_projects["demo"] = project
 
     monkeypatch.setattr(setup_module, "load_config", lambda: config)
-    monkeypatch.setattr(setup_module, "create_repo_setup_context", lambda _config, _mode: object())
+    monkeypatch.setattr(
+        setup_module,
+        "create_repo_setup_context",
+        lambda _config, _mode: SimpleNamespace(config=config, mode=_mode),
+    )
     monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["demo"])
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
 
@@ -39,6 +43,7 @@ def test_setup_json_output_reports_selected_projects(tmp_path: Path, monkeypatch
     assert payload["mode"] == "prod"
     assert payload["requestedTargets"] == ["demo"]
     assert payload["selectedProjectIds"] == ["demo"]
+    assert payload["repoAgentsWritten"] == [str((tmp_path / "demo" / "AGENTS.md").resolve())]
     assert payload["summary"]["selectedProjectCount"] == 1
 
 

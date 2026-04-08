@@ -10,6 +10,7 @@ from pathlib import Path
 import jinja2
 from git import Repo
 
+import dev.agents_md
 import dev.io
 from dev.ai import ensure_semver_impact_line, suggest_commit_name
 from dev.base import Scope
@@ -359,6 +360,28 @@ def _write_repo_root_wabbit_legal_documents(
     setup_common.write_wabbit_legal_documents(ctx, repo_root_project)
     dev.io.delete_if_exists(repo_root_path / "LICENSE.md")
     dev.io.delete_if_exists(repo_root_path / "LICENSES")
+
+
+def _write_repo_agents_files(ctx: RepoSetupContext, projects: list[Project]) -> list[str]:
+    repo_roots = {project_repo_root(project).resolve() for project in projects}
+    written_paths: list[str] = []
+    for repo_root in sorted(repo_roots):
+        repo_projects = sorted(
+            [
+                defined_project
+                for defined_project in ctx.config.defined_projects.values()
+                if project_repo_root(defined_project).resolve() == repo_root
+            ],
+            key=lambda project: (
+                project.project_id or "",
+                project.path.as_posix(),
+            ),
+        )
+        if not repo_projects:
+            continue
+        if dev.agents_md.write_repo_agents_file(ctx.config, repo_root, repo_projects):
+            written_paths.append(str((repo_root / "AGENTS.md").resolve()))
+    return written_paths
 
 
 def _write_banner(ctx: setup_common.CommonSetupContext, project: Project) -> None:
@@ -1249,6 +1272,7 @@ def setup(
         "inferredTargets": [],
         "selectedProjectIds": [],
         "projects": [],
+        "repoAgentsWritten": [],
         "workspaceGradleRootWritten": False,
         "repoGradleRootsWritten": [],
         "localOverlayRootsWritten": [],
@@ -1345,6 +1369,7 @@ def setup(
                 commit_changes=False,
                 allow_push=False,
             )
+        payload["repoAgentsWritten"] = _write_repo_agents_files(ctx, selected_projects)
 
         if mode == RepoSetupMode.LOCAL:
             local_overlay_roots_written: list[str] = []

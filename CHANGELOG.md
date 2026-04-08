@@ -2,6 +2,7 @@
 
 ## Unreleased
 - derive generated Paper Gradle plugin and `paperDevBundle` versions from config instead of hardcoded template defaults, and update the paperweight fallback to `2.0.0-beta.17`
+- let `dev setup` create or refresh a minimal repo-root `AGENTS.md` facts block without overwriting existing human-authored agent guidance
 
 ## Unreleased (2026-02-17)
 - Generate real `java-gradle-plugin` JVM builds for `root.clj` Gradle projects that declare `:gradlePluginId`, including inferred plugin metadata, Kotlin Gradle plugin API/TestKit dependencies, and version expansion for `*gradle-plugin.properties` resources.

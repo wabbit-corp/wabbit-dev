@@ -64,6 +64,16 @@ Managed generated config files also carry a short embedded integrity stamp.
 That lets `check` detect manual edits to setup-owned files separately from
 future staleness checks that compare against regenerated output.
 
+`setup` can also maintain a small facts block in a repo-root `AGENTS.md`. The
+behavior is intentionally conservative:
+
+- if `AGENTS.md` is missing, setup may create a short starter file
+- if `AGENTS.md` already exists with the managed markers, setup refreshes only
+  that generated block
+- if `AGENTS.md` exists without the markers, setup leaves it untouched
+
+Keep human-authored repo guidance outside the generated markers.
+
 ## Top-Level Command Families
 
 | Family | Purpose |
