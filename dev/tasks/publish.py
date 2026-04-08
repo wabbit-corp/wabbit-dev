@@ -7,9 +7,9 @@ from typing import Literal
 
 from dev.build_order import toposort_projects
 from dev.config import GradleProject, Project, PythonProject, load_config
-from dev.discoverability import unknown_name_message
 from dev.jitpack import JitPackAPI
 from dev.messages import error, success, warning
+from dev.repo_resolution import resolve_project_ids
 from dev.tasks.publish_common import PublishError
 from dev.tasks.publish_intellij import publish_gradle_project_to_intellij_marketplace
 from dev.tasks.publish_jetpack import publish_gradle_project_to_jetpack
@@ -36,16 +36,21 @@ def determine_publish_target(project: Project) -> PublishTarget:
     return "skip"
 
 
-async def publish_main(project_name: str | None = None) -> None:
+async def publish_main(projects: str | list[str] | None = None) -> None:
     config = load_config()
     repo_setup_context = create_repo_setup_context(config, RepoSetupMode.PROD)
 
     all_projects = {name: p for name, p in config.defined_projects.items()}
-    if project_name and project_name not in all_projects:
-        error(unknown_name_message("project", project_name, all_projects, prefix="No such"))
-        return
+    requested_projects = [projects] if isinstance(projects, str) else projects
+    selected_project_names: list[str] | None = None
+    if requested_projects:
+        try:
+            selected_project_names = resolve_project_ids(config, requested_projects)
+        except ValueError as ex:
+            error(str(ex))
+            return
 
-    order = toposort_projects(all_projects, target_project=project_name)
+    order = toposort_projects(all_projects, target_project=selected_project_names)
     if not order:
         error("No projects to publish or cycle in dependencies.")
         return

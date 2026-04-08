@@ -80,6 +80,7 @@ Run checks:
 
 ```bash
 python3 dev.py check :root
+python3 dev.py check app-wabbit-dev
 python3 dev.py spdx headers . --fix
 ```
 
@@ -98,24 +99,26 @@ Every command is documented here and in the MkDocs reference under
 | --- | --- |
 | `doctor` | Diagnoses workspace, toolchain, and credential readiness. |
 | `config check` | Parses and validates `root.clj` and `root.private.clj`. |
-| `setup [PROJECT ...]` | Generates or refreshes managed project files from configuration. |
+| `setup [TARGET ...]` | Generates or refreshes managed project files from configuration. |
 | `llmcopy PATH ...` | Copies file contents to the clipboard in an LLM-friendly wrapper. |
-| `dep graph [PROJECT]` | Renders an SVG dependency graph for all projects or one project. |
+| `dep graph [TARGET ...]` | Renders an SVG dependency graph for the workspace or selected configured targets. |
 | `dep updates` | Checks configured Maven libraries for newer upstream versions. |
-| `publish [PROJECT]` | Publishes configured projects in dependency order. |
-| `build [PROJECT ...]` | Builds configured Gradle projects or syntax-checks Python projects. |
+| `publish [TARGET ...]` | Publishes configured projects in dependency order. |
+| `build [TARGET ...]` | Builds configured Gradle projects or syntax-checks Python projects. |
 | `duplicates FOLDER ...` | Finds duplicate files and duplicate directory trees. |
 | `jitpack info GROUP ARTIFACT [VERSION]` | Shows refs, commits, versions, and build info for a JitPack artifact. |
-| `clean [PROJECT]` | Deletes generated build and cache directories for configured projects. |
-| `cloc [TARGET]` | Runs `cloc` for a configured project or an arbitrary filesystem path. |
-| `status TARGET` | Shows tracked working-tree changes for a configured project or git path. |
-| `commit [PROJECT]` | Runs PROD setup, stages changes, and creates commits with AI-generated messages. |
-| `push [TARGET]` | Pushes `origin/master` and tags for one repo or all configured repos. |
+| `clean [TARGET ...]` | Deletes generated build and cache directories for configured projects. |
+| `cloc [TARGET ...]` | Runs `cloc` for configured targets or arbitrary filesystem paths. |
+| `status TARGET ...` | Shows tracked working-tree changes for configured or direct repo targets. |
+| `commit [TARGET ...]` | Runs PROD setup, stages changes, and creates commits with AI-generated messages. |
+| `push [TARGET ...]` | Pushes `origin/master` and tags for one repo or all configured repos. |
 | `project list` | Lists configured projects grouped by repository. |
-| `project show PROJECT` | Shows detailed metadata for one configured project. |
+| `project show TARGET ...` | Shows detailed metadata for one or more configured projects. |
+| `project deps TARGET ...` | Shows resolved dependencies for one or more configured projects. |
+| `project repo TARGET ...` | Shows repo metadata for one or more configured targets. |
 | `check --list` | Lists the loaded checks with scope, auto-fix support, and summaries. |
 | `check --describe CHECK` | Shows issue IDs, config knobs, and suppression examples for one check. |
-| `check [TARGET] [CHECK ...]` | Runs the loaded check suite against a project, path, or file. |
+| `check [TARGET] [CHECK ...]` | Runs the loaded check suite against a project, repo, path, or file. |
 | `spdx headers [TARGET] [--fix]` | Runs only the SPDX header check. |
 | `secrets scan [TARGET]` | Runs the internal high-entropy-string secret scan. |
 | `contributors audit` | Audits contributor identity mismatches across configured repos. |
@@ -196,6 +199,8 @@ The main target forms are:
 - `python3 dev.py check --describe SpdxHeaderCheck`
 - `python3 dev.py check .`
 - `python3 dev.py check path/to/file.py`
+- `python3 dev.py check app-wabbit-dev`
+- `python3 dev.py check jeeves`
 - `python3 dev.py check :app-wabbit-dev`
 - `python3 dev.py check :root`
 - `python3 dev.py secrets scan .`
@@ -204,6 +209,8 @@ Inventory commands:
 
 - `python3 dev.py project list`
 - `python3 dev.py project show app-wabbit-dev`
+- `python3 dev.py project deps jeeves`
+- `python3 dev.py project repo jeeves`
 - `python3 dev.py contributors audit`
 
 ## Documentation

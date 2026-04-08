@@ -264,21 +264,24 @@ async def async_main() -> int:
         epilog=examples(
             "setup",
             "setup app-wabbit-dev",
+            "setup jeeves",
+            "setup ./jeeves/client",
             "setup --local app-datatron",
             "setup --dev kotlin-web-openai",
             notes=[
-                "With no project arguments, setup processes every configured project.",
+                "Targets can be project IDs, repo IDs, or paths inside configured projects or repos.",
+                "With no targets, setup processes every configured project.",
                 "`--local` writes local composite-build overlays for multi-repo development.",
                 "`--dev` switches to the DEV setup mode; the default is PROD.",
             ],
         ),
     ) as cmd:
         cmd.add_argument(
-            "projects",
-            metavar="PROJECT",
+            "targets",
+            metavar="TARGET",
             type=str,
             nargs="*",
-            help="Project IDs from root.clj. Omit to process every configured project.",
+            help="Project IDs, repo IDs, or paths. Omit to process every configured project.",
         )
         cmd.add_argument(
             "--dev",
@@ -348,16 +351,16 @@ async def async_main() -> int:
         epilog=examples(
             "dep graph",
             "dep graph app-datatron",
+            "dep graph jeeves",
             "dep graph --artifacts kotlin-web-openai",
         ),
     ) as cmd:
         cmd.add_argument(
-            "project",
-            metavar="PROJECT",
+            "targets",
+            metavar="TARGET",
             type=str,
-            nargs="?",
-            default=".",
-            help="Optional project ID from root.clj. Omit to graph the full workspace.",
+            nargs="*",
+            help="Project IDs, repo IDs, or paths. Omit to graph the full workspace.",
         )
         cmd.add_argument(
             "--artifacts",
@@ -400,6 +403,7 @@ async def async_main() -> int:
         epilog=examples(
             "publish",
             "publish app-wabbit-dev",
+            "publish jeeves",
             notes=[
                 "Credentials are loaded from root.private.clj and, for some publish flows, environment variables.",
                 "Projects with no publish target are skipped rather than treated as errors.",
@@ -407,11 +411,11 @@ async def async_main() -> int:
         ),
     ) as cmd:
         cmd.add_argument(
-            "project",
-            metavar="PROJECT",
+            "targets",
+            metavar="TARGET",
             type=str,
-            nargs="?",
-            help="Optional project ID from root.clj. Omit to publish every publishable project.",
+            nargs="*",
+            help="Project IDs, repo IDs, or paths. Omit to publish every publishable configured project.",
         )
 
     with commands(
@@ -429,6 +433,8 @@ async def async_main() -> int:
         epilog=examples(
             "build",
             "build app-datatron",
+            "build jeeves",
+            "build ./jeeves/client",
             "build kotlin-web-openai app-wabbit-dev",
             notes=[
                 "Only Gradle and Python projects are buildable through this command.",
@@ -436,11 +442,11 @@ async def async_main() -> int:
         ),
     ) as cmd:
         cmd.add_argument(
-            "projects",
-            metavar="PROJECT",
+            "targets",
+            metavar="TARGET",
             type=str,
             nargs="*",
-            help="Project IDs from root.clj. Omit to build every buildable configured project.",
+            help="Project IDs, repo IDs, or paths. Omit to build every buildable configured project.",
         )
 
     with commands(
@@ -577,66 +583,70 @@ async def async_main() -> int:
         epilog=examples(
             "clean",
             "clean app-wabbit-dev",
+            "clean jeeves",
             notes=[
-                "When a project is supplied it must be a project ID from root.clj.",
+                "Targets can be project IDs, repo IDs, or paths inside configured projects or repos.",
             ],
         ),
     ) as cmd:
         cmd.add_argument(
-            "project",
-            metavar="PROJECT",
+            "targets",
+            metavar="TARGET",
             type=str,
-            nargs="?",
-            help="Optional project ID from root.clj. Omit to clean every configured project.",
+            nargs="*",
+            help="Project IDs, repo IDs, or paths. Omit to clean every configured project.",
         )
 
     with commands(
         "cloc",
-        help="Summarize lines of code for a configured project or path.",
+        help="Summarize lines of code for configured targets or paths.",
         description=_doc(
             """
             Run `cloc` and print language totals.
 
-            For configured projects, the command focuses on source directories that
-            matter for that project type. When given an arbitrary path, it runs
+            For configured targets, the command focuses on source directories that
+            matter for each project type. When given an arbitrary path, it runs
             `cloc` directly on that path.
             """
         ),
-        epilog=examples("cloc", "cloc app-wabbit-dev", "cloc app-wabbit-dev/dev"),
+        epilog=examples("cloc", "cloc app-wabbit-dev", "cloc jeeves", "cloc app-wabbit-dev/dev"),
     ) as cmd:
         cmd.add_argument(
-            "project_or_dir_or_file",
+            "targets",
             metavar="TARGET",
             type=str,
-            nargs="?",
-            help="Optional configured project ID or filesystem path.",
+            nargs="*",
+            help="Project IDs, repo IDs, or filesystem paths. Omit to analyze every configured project.",
         )
 
     with commands(
         "status",
-        help="Show tracked working-tree changes for a project or git path.",
+        help="Show tracked working-tree changes for repo targets.",
         description=_doc(
             """
             Print the tracked files that differ between the git index and working
             tree.
 
-            This is closest to the unstaged portion of `git status` for a single
-            repository path.
+            This is closest to the unstaged portion of `git status` for one or
+            more resolved repository targets.
             """
         ),
         epilog=examples(
             "status app-wabbit-dev",
+            "status jeeves",
             "status ./app-wabbit-dev",
+            "status app-wabbit-dev jeeves/client",
             notes=[
                 "The command reports tracked working-tree changes. Untracked files are not shown.",
             ],
         ),
     ) as cmd:
         cmd.add_argument(
-            "target",
+            "targets",
             metavar="TARGET",
             type=str,
-            help="A configured project ID from root.clj, or any path inside a git repository.",
+            nargs="+",
+            help="Repo IDs, project IDs, or paths inside git repositories.",
         )
 
     with commands(
@@ -652,6 +662,7 @@ async def async_main() -> int:
         epilog=examples(
             "commit",
             "commit app-wabbit-dev",
+            "commit jeeves",
             notes=[
                 "This command requires an OpenAI key in root.private.clj.",
                 "The commit message policy is repository-specific and enforced by the commit workflow.",
@@ -659,41 +670,43 @@ async def async_main() -> int:
         ),
     ) as cmd:
         cmd.add_argument(
-            "project",
-            metavar="PROJECT",
+            "targets",
+            metavar="TARGET",
             type=str,
-            nargs="?",
-            help="Optional project ID from root.clj. Omit to process every configured project.",
+            nargs="*",
+            help="Project IDs, repo IDs, or paths. Omit to process every configured project.",
         )
 
     with commands(
         "push",
-        help="Push origin/master and tags for one repo or all configured repos.",
+        help="Push origin/master and tags for selected repos or all configured repos.",
         description=_doc(
             """
             Push tags plus the `master` branch to `origin`.
 
-            With `.` the command walks every configured project repo and pushes
-            each distinct repository once. With any other value it pushes the repo
-            resolved from that configured project ID or path.
+            With no targets or `.` the command walks every configured project repo
+            and pushes each distinct repository once. With explicit targets it
+            pushes the repos resolved from those repo IDs, project IDs, or paths.
             """
         ),
         epilog=examples(
+            "push",
             "push .",
             "push app-wabbit-dev",
+            "push jeeves",
             "push ./app-wabbit-dev",
             notes=[
                 "The branch target is currently hard-coded to `master`.",
+                "With no targets, `push` behaves like `push .` and pushes every configured repo once.",
             ],
         ),
     ) as cmd:
         cmd.add_argument(
-            "project",
+            "targets",
             metavar="TARGET",
             type=str,
-            nargs="?",
-            default=".",
-            help="Use `.` for all configured repos, or provide a configured project ID or path.",
+            nargs="*",
+            help="Use `.` for all configured repos, or provide repo IDs, project IDs, or paths.",
         )
 
     with commands(
@@ -705,7 +718,7 @@ async def async_main() -> int:
             are grouped under their parent repositories.
             """
         ),
-        epilog=examples("project list", "project show app-wabbit-dev"),
+        epilog=examples("project list", "project show app-wabbit-dev", "project deps jeeves", "project repo jeeves"),
     ) as cmd:
         del cmd
 
@@ -725,23 +738,67 @@ async def async_main() -> int:
 
     with commands(
         "project/show",
-        help="Show detailed metadata for one configured project.",
+        help="Show detailed metadata for one or more configured projects.",
         description=_doc(
             """
-            Print the resolved metadata for a single project.
+            Print the resolved metadata for one or more projects.
 
             This includes the project type, path, repo root, resolved
             dependencies, publish target, docs system, JVM policy, and the main
             generated files that `setup` is expected to manage.
             """
         ),
-        epilog=examples("project show app-wabbit-dev", "project show jeeves/client"),
+        epilog=examples("project show app-wabbit-dev", "project show jeeves", "project show ./jeeves/client"),
     ) as cmd:
         cmd.add_argument(
-            "project",
-            metavar="PROJECT",
+            "targets",
+            metavar="TARGET",
             type=str,
-            help="Configured project ID from root.clj.",
+            nargs="+",
+            help="Project IDs, repo IDs, or paths inside configured projects or repos.",
+        )
+
+    with commands(
+        "project/deps",
+        help="Show resolved dependencies for one or more configured projects.",
+        description=_doc(
+            """
+            Print the resolved dependency list for one or more projects.
+
+            Targets can be individual projects, whole configured repos, or paths
+            inside configured projects or repos.
+            """
+        ),
+        epilog=examples("project deps app-wabbit-dev", "project deps jeeves", "project deps ./jeeves/client"),
+    ) as cmd:
+        cmd.add_argument(
+            "targets",
+            metavar="TARGET",
+            type=str,
+            nargs="+",
+            help="Project IDs, repo IDs, or paths inside configured projects or repos.",
+        )
+
+    with commands(
+        "project/repo",
+        help="Show repository metadata for one or more configured targets.",
+        description=_doc(
+            """
+            Print the repo-level metadata associated with one or more configured
+            projects or repos.
+
+            Targets can be project IDs, repo IDs, or paths inside configured
+            projects or repos. Repositories are de-duplicated in the output.
+            """
+        ),
+        epilog=examples("project repo app-wabbit-dev", "project repo jeeves", "project repo ./jeeves/client"),
+    ) as cmd:
+        cmd.add_argument(
+            "targets",
+            metavar="TARGET",
+            type=str,
+            nargs="+",
+            help="Project IDs, repo IDs, or paths inside configured projects or repos.",
         )
 
     with commands(
@@ -754,7 +811,8 @@ async def async_main() -> int:
             Targets can be:
 
             - a filesystem path
-            - a project ID prefixed with `:`
+            - a bare project ID or repo ID
+            - a project or repo ID prefixed with `:`
             - `:root` to check every configured project path
             """
         ),
@@ -763,7 +821,9 @@ async def async_main() -> int:
             "check --describe SpdxHeaderCheck",
             "check",
             "check app-wabbit-dev/dev/cli.py",
+            "check app-wabbit-dev",
             "check :app-wabbit-dev",
+            "check jeeves",
             "check :root --fix",
             "check . SpdxHeaderCheck",
             notes=[
@@ -789,7 +849,7 @@ async def async_main() -> int:
             type=str,
             nargs="?",
             default=".",
-            help="Filesystem path, `:project-id`, or `:root`. Defaults to the current directory.",
+            help="Filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`.",
         )
         cmd.add_argument(
             "checks",
@@ -829,6 +889,7 @@ async def async_main() -> int:
         epilog=examples(
             "spdx headers .",
             "spdx headers app-wabbit-dev --fix",
+            "spdx headers jeeves",
         ),
     ) as cmd:
         cmd.add_argument(
@@ -837,7 +898,7 @@ async def async_main() -> int:
             type=str,
             nargs="?",
             default=".",
-            help="Configured project ID or filesystem path to inspect.",
+            help="Filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`.",
         )
         cmd.add_argument(
             "--fix",
@@ -874,8 +935,9 @@ async def async_main() -> int:
         epilog=examples(
             "secrets scan .",
             "secrets scan app-wabbit-dev",
+            "secrets scan jeeves",
             notes=[
-                "Targets can be a filesystem path, `:project-id`, or `:root`.",
+                "Targets can be a filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`.",
             ],
         ),
     ) as cmd:
@@ -885,7 +947,7 @@ async def async_main() -> int:
             type=str,
             nargs="?",
             default=".",
-            help="Filesystem path, `:project-id`, or `:root`. Defaults to the current directory.",
+            help="Filesystem path, bare project/repo ID, `:project-id`, `:repo-id`, or `:root`.",
         )
 
     with commands(
@@ -932,14 +994,10 @@ async def async_main() -> int:
     from dev.tasks.doctor import preflight_for_command
 
     selected_projects: tuple[str, ...] | None = None
-    if command_path == "setup" and args.projects:
-        selected_projects = tuple(args.projects)
-    elif command_path == "build" and args.projects:
-        selected_projects = tuple(args.projects)
-    elif command_path in {"publish", "commit", "clean", "project/show"} and args.project:
-        selected_projects = (args.project,)
-    elif command_path == "dep/graph" and args.project != ".":
-        selected_projects = (args.project,)
+    if command_path in {"setup", "build", "publish", "commit", "clean", "dep/graph"} and args.targets:
+        selected_projects = tuple(args.targets)
+    elif command_path in {"project/show", "project/deps", "project/repo"}:
+        selected_projects = tuple(args.targets)
 
     if not preflight_for_command(command_path, prog=prog, projects=selected_projects):
         return 2
@@ -965,7 +1023,7 @@ async def async_main() -> int:
                     mode = RepoSetupMode.DEV
                 else:
                     mode = RepoSetupMode.PROD
-                setup(mode, projects=args.projects)
+                setup(mode, projects=args.targets)
 
             case "llmcopy":
                 from dev.tasks.llmcopy import llmcopy
@@ -986,19 +1044,19 @@ async def async_main() -> int:
                 from dev.tasks.dep_graph import get_project_dependencies
 
                 get_project_dependencies(
-                    focus_project_name=args.project if args.project != "." else None,
+                    focus_project_names=args.targets or None,
                     include_artifacts=args.artifacts,
                 )
 
             case "publish":
                 from dev.tasks.publish import publish_main
 
-                await publish_main(args.project)
+                await publish_main(args.targets)
 
             case "build":
                 from dev.tasks.build import build
 
-                build(args.projects)
+                build(args.targets)
 
             case "duplicates":
                 from dev.tasks.duplicates import check_for_duplicates
@@ -1016,29 +1074,27 @@ async def async_main() -> int:
             case "cloc":
                 from dev.tasks.cloc import cloc
 
-                cloc(args.project_or_dir_or_file)
+                cloc(args.targets)
 
             case "clean":
                 from dev.tasks.clean import clean
 
-                clean(args.project)
+                clean(args.targets)
 
             case "status":
                 from dev.tasks.status import status
 
-                status(args.target)
+                status(args.targets)
 
             case "commit":
                 from dev.tasks.commit import commit
 
-                project_name = args.project
-                assert project_name is None or isinstance(project_name, str), f"Expected str|None, got {type(project_name)}"
-                commit(project_name)
+                commit(args.targets)
 
             case "push":
                 from dev.tasks.push import push
 
-                push(args.project)
+                push(args.targets)
 
             case "project/list":
                 from dev.tasks.project_list import list_projects
@@ -1046,9 +1102,19 @@ async def async_main() -> int:
                 list_projects()
 
             case "project/show":
-                from dev.tasks.project_list import show_project
+                from dev.tasks.project_list import show_projects
 
-                show_project(args.project)
+                show_projects(args.targets)
+
+            case "project/deps":
+                from dev.tasks.project_list import show_project_dependencies
+
+                show_project_dependencies(args.targets)
+
+            case "project/repo":
+                from dev.tasks.project_list import show_project_repos
+
+                show_project_repos(args.targets)
 
             case "check":
                 from dev.tasks.check import check_main, describe_check, list_checks

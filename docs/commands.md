@@ -13,27 +13,52 @@ workspace root so `root.clj` and `root.private.clj` can be loaded.
 The CLI suggests close matches for mistyped commands, project IDs, checks, and
 path-or-project targets when it can infer what you meant.
 
+## Target Model
+
+Many commands now share the same target conventions.
+
+- Project-oriented commands such as `setup`, `build`, `publish`, `clean`,
+  `commit`, `dep graph`, `project show`, and `project deps` accept:
+  - a configured project ID
+  - a configured repo ID
+  - a path inside a configured project or configured repo
+- Repo-oriented commands such as `status`, `push`, and `project repo` accept:
+  - a configured repo ID
+  - a configured project ID
+  - a path inside a git repository
+- Check-oriented commands such as `check`, `spdx headers`, and `secrets scan`
+  accept:
+  - a filesystem path
+  - a bare project ID or repo ID
+  - a project or repo ID prefixed with `:`
+  - `:root` when you want every configured project path
+
+When a repo target is supplied to a project-oriented command, it expands to the
+configured projects that belong to that repo.
+
 ## Command Index
 
 | Command | Summary |
 | --- | --- |
 | `doctor` | Diagnose workspace, toolchain, and credential readiness. |
 | `config check` | Parse and validate `root.clj` and `root.private.clj`. |
-| `setup [PROJECT ...]` | Generate or refresh managed project files. |
+| `setup [TARGET ...]` | Generate or refresh managed project files. |
 | `llmcopy PATH ...` | Copy file contents to the clipboard in an LLM-friendly wrapper. |
-| `dep graph [PROJECT]` | Render an SVG dependency graph. |
+| `dep graph [TARGET ...]` | Render an SVG dependency graph. |
 | `dep updates` | Check configured Maven libraries for newer versions. |
-| `publish [PROJECT]` | Publish configured projects in dependency order. |
-| `build [PROJECT ...]` | Build Gradle projects or syntax-check Python projects. |
+| `publish [TARGET ...]` | Publish configured projects in dependency order. |
+| `build [TARGET ...]` | Build Gradle projects or syntax-check Python projects. |
 | `duplicates FOLDER ...` | Find duplicate files and duplicate directory trees. |
 | `jitpack info GROUP ARTIFACT [VERSION]` | Show refs, commits, versions, and build info from JitPack. |
-| `clean [PROJECT]` | Remove generated build and cache directories. |
-| `cloc [TARGET]` | Run `cloc` for a configured project or direct path. |
-| `status TARGET` | Show tracked working-tree changes for a project or git path. |
-| `commit [PROJECT]` | Run PROD setup, stage changes, and create commits. |
-| `push [TARGET]` | Push `origin/master` and tags. |
+| `clean [TARGET ...]` | Remove generated build and cache directories. |
+| `cloc [TARGET ...]` | Run `cloc` for configured targets or direct paths. |
+| `status TARGET ...` | Show tracked working-tree changes for repo targets. |
+| `commit [TARGET ...]` | Run PROD setup, stage changes, and create commits. |
+| `push [TARGET ...]` | Push `origin/master` and tags. |
 | `project list` | List configured projects grouped by repository. |
-| `project show PROJECT` | Show detailed metadata for one configured project. |
+| `project show TARGET ...` | Show detailed metadata for one or more configured projects. |
+| `project deps TARGET ...` | Show resolved dependencies for one or more configured projects. |
+| `project repo TARGET ...` | Show repo metadata for one or more configured targets. |
 | `check --list` | List the loaded checks and what they do. |
 | `check --describe CHECK` | Show issue IDs, config knobs, and suppression examples for one check. |
 | `check [TARGET] [CHECK ...]` | Run the configured check suite. |
@@ -95,10 +120,10 @@ detected project type such as `python`, `kotlin/jvm`, or `kotlin/kmp`.
 ### `project show`
 
 ```bash
-wabbit-dev project show PROJECT
+wabbit-dev project show TARGET ...
 ```
 
-Prints the resolved metadata for one configured project, including:
+Prints the resolved metadata for one or more configured projects, including:
 
 - project type
 - path and repo root
@@ -112,6 +137,50 @@ Example:
 
 ```bash
 wabbit-dev project show app-wabbit-dev
+wabbit-dev project show jeeves
+```
+
+### `project deps`
+
+```bash
+wabbit-dev project deps TARGET ...
+```
+
+Prints just the resolved dependency list for one or more configured projects.
+This is useful when `project show` is too verbose and you only want the
+post-resolution dependency view.
+
+Examples:
+
+```bash
+wabbit-dev project deps app-wabbit-dev
+wabbit-dev project deps jeeves
+```
+
+### `project repo`
+
+```bash
+wabbit-dev project repo TARGET ...
+```
+
+Prints repo-level metadata for the repos associated with one or more configured
+targets. The output is de-duplicated by repo, so multiple project targets inside
+the same repo only print that repo once.
+
+The output includes:
+
+- repo path
+- repo ID
+- GitHub repo
+- Gradle root project name when configured
+- docs project when configured
+- the configured projects that belong to that repo
+
+Examples:
+
+```bash
+wabbit-dev project repo app-wabbit-dev
+wabbit-dev project repo jeeves
 ```
 
 ## Generation, Build, and Maintenance
@@ -119,14 +188,16 @@ wabbit-dev project show app-wabbit-dev
 ### `setup`
 
 ```bash
-wabbit-dev setup [--dev] [--local] [PROJECT ...]
+wabbit-dev setup [--dev] [--local] [TARGET ...]
 ```
 
 Generates or refreshes managed files from configuration.
 
 Behavior:
 
-- with no project arguments, processes every configured project
+- with no targets, processes every configured project
+- each target can be a configured project ID, repo ID, or path inside a
+  configured project or repo
 - in default mode, runs PROD setup
 - with `--dev`, switches to DEV mode
 - with `--local`, switches to LOCAL mode and writes local dependency overlays
@@ -136,13 +207,14 @@ Typical uses:
 ```bash
 wabbit-dev setup
 wabbit-dev setup app-wabbit-dev
+wabbit-dev setup jeeves
 wabbit-dev setup --local app-datatron
 ```
 
 ### `build`
 
 ```bash
-wabbit-dev build [PROJECT ...]
+wabbit-dev build [TARGET ...]
 ```
 
 Builds configured projects in topological dependency order.
@@ -157,7 +229,7 @@ Only Gradle and Python projects are buildable through this command.
 ### `clean`
 
 ```bash
-wabbit-dev clean [PROJECT]
+wabbit-dev clean [TARGET ...]
 ```
 
 Removes generated build and cache directories such as:
@@ -169,12 +241,13 @@ Removes generated build and cache directories such as:
 - `.mypy_cache`
 - Python `__pycache__`
 
-When a project is supplied it must be a configured project ID from `root.clj`.
+Targets can be configured project IDs, repo IDs, or paths inside configured
+projects or repos.
 
 ### `cloc`
 
 ```bash
-wabbit-dev cloc [TARGET]
+wabbit-dev cloc [TARGET ...]
 ```
 
 Runs `cloc` and prints per-language totals.
@@ -182,8 +255,9 @@ Runs `cloc` and prints per-language totals.
 Target behavior:
 
 - no target: all configured projects
-- configured project ID: project-specific source roots
-- filesystem path: run directly on that path
+- configured project or repo ID: project-specific source roots
+- path inside a configured project or repo: resolve to the matching configured target
+- filesystem path outside the config model: run directly on that path
 
 Project-specific scope:
 
@@ -237,13 +311,13 @@ Ignored by default:
 ### `dep graph`
 
 ```bash
-wabbit-dev dep graph [PROJECT] [--artifacts]
+wabbit-dev dep graph [TARGET ...] [--artifacts]
 ```
 
 Generates an SVG dependency graph.
 
-- no project: graph the whole workspace
-- `PROJECT`: focus on one configured project
+- no target: graph the whole workspace
+- `TARGET ...`: focus on one or more configured projects, repos, or matching paths
 - `--artifacts`: include external artifacts as nodes instead of only project edges
 
 Output is written as `dependency_graph.svg`.
@@ -277,7 +351,7 @@ Prints JitPack metadata for an artifact, including:
 ### `publish`
 
 ```bash
-wabbit-dev publish [PROJECT]
+wabbit-dev publish [TARGET ...]
 ```
 
 Publishes configured projects in dependency order.
@@ -308,7 +382,8 @@ wabbit-dev check [TARGET] [CHECK ...] [--fix]
 Runs the loaded check suite against:
 
 - a filesystem path
-- a configured project ID prefixed with `:`
+- a bare configured project or repo ID
+- a configured project or repo ID prefixed with `:`
 - `:root` to walk every configured project path
 
 Discovery helpers:
@@ -320,6 +395,8 @@ Examples:
 
 ```bash
 wabbit-dev check .
+wabbit-dev check app-wabbit-dev
+wabbit-dev check jeeves
 wabbit-dev check app-wabbit-dev/dev/cli.py
 wabbit-dev check :app-wabbit-dev
 wabbit-dev check :root --fix
@@ -364,7 +441,8 @@ wabbit-dev secrets scan :root
 Targets can be:
 
 - a filesystem path
-- a configured project ID prefixed with `:`
+- a bare configured project or repo ID
+- a configured project or repo ID prefixed with `:`
 - `:root` to walk every configured project path
 
 ### `contributors audit`
@@ -384,11 +462,12 @@ loaded workspace config.
 ### `status`
 
 ```bash
-wabbit-dev status TARGET
+wabbit-dev status TARGET ...
 ```
 
 Shows tracked working-tree changes for:
 
+- a configured repo ID
 - a configured project ID from `root.clj`
 - any path inside a git repository
 
@@ -398,7 +477,7 @@ tree. It does not list untracked files.
 ### `commit`
 
 ```bash
-wabbit-dev commit [PROJECT]
+wabbit-dev commit [TARGET ...]
 ```
 
 Runs PROD setup for the selected projects, groups them by repository, stages
@@ -412,14 +491,15 @@ Requirements:
 ### `push`
 
 ```bash
-wabbit-dev push [TARGET]
+wabbit-dev push [TARGET ...]
 ```
 
 Pushes `origin/master` and tags.
 
 Target behavior:
 
-- `.`: push every distinct configured repository once
+- no target or `.`: push every distinct configured repository once
+- configured repo ID: push that repo
 - configured project ID: resolve the repo for that project
 - filesystem path: resolve the repo containing that path
 

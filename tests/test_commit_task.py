@@ -37,8 +37,8 @@ def test_commit_runs_prod_setup_and_commits_once_per_repo(tmp_path: Path, monkey
     def fake_load_config() -> object:
         return config
 
-    def fake_toposort_projects(_projects: object, target_project: str | None = None) -> list[str]:
-        assert target_project == "alpha"
+    def fake_toposort_projects(_projects: object, target_project: object = None) -> list[str]:
+        assert target_project == ["alpha"]
         return ["alpha", "beta"]
 
     def fake_create_repo_setup_context(_config: object, mode: RepoSetupMode) -> object:
@@ -123,7 +123,7 @@ def test_commit_without_project_runs_all_projects(tmp_path: Path, monkeypatch: p
 
     setup_calls: list[tuple[str, bool, bool, bool]] = []
     commit_calls: list[tuple[str, bool, bool, str | None, str]] = []
-    captured_targets: list[str | None] = []
+    captured_targets: list[object] = []
     captured_modes: list[RepoSetupMode] = []
 
     class FakeRepo:
@@ -137,7 +137,7 @@ def test_commit_without_project_runs_all_projects(tmp_path: Path, monkeypatch: p
     def fake_load_config() -> object:
         return config
 
-    def fake_toposort_projects(_projects: object, target_project: str | None = None) -> list[str]:
+    def fake_toposort_projects(_projects: object, target_project: object = None) -> list[str]:
         captured_targets.append(target_project)
         return ["alpha", "beta"]
 

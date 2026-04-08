@@ -31,6 +31,7 @@ from dev.checks.base import (
 from dev.config import Project, load_config
 from dev.discoverability import did_you_mean_suffix, unknown_name_message
 from dev.messages import error, info, warning
+from dev.repo_resolution import resolve_check_paths
 
 E_GITIGNORE_WITHOUT_REPO = IssueType(
     "E_GITIGNORE_WITHOUT_REPO",
@@ -208,6 +209,12 @@ def _catalog(config: object | None = None) -> dict[str, CheckCatalogEntry]:
     }
 
 
+def _config_target_choices(config: object | None) -> list[str]:
+    if config is None or not hasattr(config, "defined_projects") or not hasattr(config, "defined_repos"):
+        return []
+    return list(dict.fromkeys([*config.defined_projects.keys(), *config.defined_repos.keys()]))
+
+
 def list_checks() -> int:
     catalog = _catalog(_load_optional_config())
     if not catalog:
@@ -292,27 +299,11 @@ def check_main(
         for project in config.defined_projects.values():
             projects_by_path[project.path.resolve()] = project
 
-    root_paths: list[Path] = []
-    if project_or_dir_or_file.startswith(":"):  # Definitely a project
-        if config is None:
-            raise ValueError("No config file found. Cannot resolve project paths.")
-
-        project_name = project_or_dir_or_file[1:]
-        if project_name == "root":
-            for project in config.defined_projects.values():
-                root_paths.append(project.path)
-        else:
-            if project_name not in config.defined_projects:
-                raise ValueError(unknown_name_message("project", project_name, config.defined_projects))
-            project = config.defined_projects[project_name]
-            root_paths.append(project.path)
-
-    else:  # Could be a project or a path
-        root_paths.append(Path(project_or_dir_or_file))
+    root_paths = resolve_check_paths(project_or_dir_or_file, config=config)
 
     for path in root_paths:
         if not path.exists():
-            suggestion = did_you_mean_suffix(project_or_dir_or_file, config.defined_projects) if config is not None else ""
+            suggestion = did_you_mean_suffix(project_or_dir_or_file, _config_target_choices(config))
             raise ValueError(f"Path does not exist: {path}.{suggestion}")
 
     all_checks = _load_all_checks(config)

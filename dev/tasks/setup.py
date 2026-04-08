@@ -1177,11 +1177,20 @@ def setup(
     ctx = create_repo_setup_context(config, mode)
 
     selected_projects_input = projects if projects is not None else ([project] if project is not None else None)
+    if selected_projects_input == []:
+        selected_projects_input = None
 
     if selected_projects_input is None:
         selected_project_names = list(config.defined_projects.keys())
     else:
-        selected_project_names = toposort_projects(config.defined_projects, target_project=selected_projects_input)
+        from dev.repo_resolution import resolve_project_ids
+
+        try:
+            resolved_project_ids = resolve_project_ids(config, selected_projects_input)
+        except ValueError as ex:
+            error(str(ex))
+            return
+        selected_project_names = toposort_projects(config.defined_projects, target_project=resolved_project_ids)
 
     selected_projects = [config.defined_projects[name] for name in selected_project_names]
 

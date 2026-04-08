@@ -51,6 +51,25 @@ async def test_parent_command_without_subcommand_prints_help(
 
 
 @pytest.mark.asyncio
+async def test_project_parent_help_lists_new_subcommands(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "project"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "list" in output
+    assert "show" in output
+    assert "deps" in output
+    assert "repo" in output
+
+
+@pytest.mark.asyncio
 async def test_cli_config_check_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev import cli
     from dev.tasks import check_config as check_config_task

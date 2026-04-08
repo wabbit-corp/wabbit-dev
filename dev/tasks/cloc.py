@@ -7,6 +7,7 @@ from pathlib import Path
 from dev.config import GradleProject, PremakeProject, PythonProject, load_config
 from dev.discoverability import did_you_mean_suffix
 from dev.messages import warning
+from dev.repo_resolution import resolve_project_ids
 
 
 @dataclass
@@ -58,40 +59,59 @@ def _run_cloc(path: Path) -> defaultdict[str, ClocStats]:
     return stats_by_lang
 
 
+def _target_choices(config: object | None) -> list[str]:
+    if config is None:
+        return []
+    return list(dict.fromkeys([*config.defined_projects.keys(), *config.defined_repos.keys()]))
+
+
 def cloc(
-    project_or_dir_or_file: str | None = None,
+    targets: str | list[str] | None = None,
 ) -> None:
     config_path = Path("./root.clj").absolute()
     config = load_config() if config_path.exists() else None
     if config is None:
         warning("No config file found. Some checks may not have sufficient context to run.")
 
-    # print(f"Running cloc for: {project_or_dir_or_file or 'all projects'}")
-    # print(f"All projects: {list(config.defined_projects.keys()) if config else 'N/A'}")
-
+    requested_targets = [targets] if isinstance(targets, str) else targets
     project_names: list[str] = []
-    direct_path: Path | None = None
-    if project_or_dir_or_file is None:
+    direct_paths: list[Path] = []
+    if not requested_targets:
         if config is not None:
             project_names = list(config.defined_projects.keys())
         else:
             warning("No project specified and no config found. Nothing to do.")
             return
     else:
-        if config is not None and project_or_dir_or_file in config.defined_projects:
-            project_names = [project_or_dir_or_file]
-        else:
-            direct_path = Path(project_or_dir_or_file).absolute()
+        seen_project_names: set[str] = set()
+        seen_direct_paths: set[Path] = set()
+        for target in requested_targets:
+            if config is not None:
+                try:
+                    for project_name in resolve_project_ids(config, [target]):
+                        if project_name in seen_project_names:
+                            continue
+                        seen_project_names.add(project_name)
+                        project_names.append(project_name)
+                    continue
+                except ValueError:
+                    pass
+
+            direct_path = Path(target).absolute()
             if not direct_path.exists():
-                suggestion = did_you_mean_suffix(project_or_dir_or_file, config.defined_projects) if config is not None else ""
-                warning(f"Path '{direct_path}' does not exist.{suggestion} Nothing to do.")
-                return
+                suggestion = did_you_mean_suffix(target, _target_choices(config))
+                warning(f"Path '{direct_path}' does not exist.{suggestion} Skipping.")
+                continue
+            if direct_path in seen_direct_paths:
+                continue
+            seen_direct_paths.add(direct_path)
+            direct_paths.append(direct_path)
 
     combined_stats: defaultdict[str, defaultdict[str, ClocStats]] = defaultdict(
         lambda: defaultdict(lambda: ClocStats(0, 0, 0, 0))
     )
 
-    if direct_path is not None:
+    for direct_path in direct_paths:
         combined_stats[direct_path.as_posix()] = _run_cloc(direct_path)
 
     for project in project_names:

@@ -8,8 +8,8 @@ from git.exc import InvalidGitRepositoryError, NoSuchPathError
 from dev.base import Scope
 from dev.build_order import toposort_projects
 from dev.config import Project, load_config, project_repo_root
-from dev.discoverability import unknown_name_message
 from dev.messages import error, info
+from dev.repo_resolution import resolve_project_ids
 from dev.tasks.setup import (
     RepoSetupMode,
     commit_repo_changes,
@@ -30,23 +30,28 @@ def _repo_key(repo: Repo) -> str | None:
     return str(repo.working_tree_dir)
 
 
-def commit(project_name: str | None = None) -> None:
+def commit(projects: str | list[str] | None = None) -> None:
     with Scope() as scope:
         config = load_config()
-        if project_name is not None and project_name not in config.defined_projects:
-            error(unknown_name_message("project", project_name, config.defined_projects))
-            return
+        requested_projects = [projects] if isinstance(projects, str) else projects
+        selected_project_names: list[str] | None = None
+        if requested_projects:
+            try:
+                selected_project_names = resolve_project_ids(config, requested_projects)
+            except ValueError as ex:
+                error(str(ex))
+                return
 
         if config.openai_key is None:
             error("OpenAI key is required to generate commit messages.")
             return
 
-        order = toposort_projects(config.defined_projects, target_project=project_name)
+        order = toposort_projects(config.defined_projects, target_project=selected_project_names)
         if not order:
-            if project_name is None:
+            if selected_project_names is None:
                 error("No projects found for commit")
             else:
-                error(f"No projects found for commit target {project_name}")
+                error("No projects found for commit target(s): " + ", ".join(selected_project_names))
             return
 
         setup_context = create_repo_setup_context(config, RepoSetupMode.PROD)

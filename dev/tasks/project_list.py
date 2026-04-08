@@ -16,6 +16,7 @@ from dev.config import (
 )
 from dev.discoverability import require_project
 from dev.jvms import resolve_project_jvm_policy
+from dev.repo_resolution import ResolvedRepoTarget, resolve_project_ids
 
 
 def _colored(text: str, color: str, *, attrs: tuple[str, ...] = ()) -> str:
@@ -207,6 +208,69 @@ def render_project_show_lines(project_id: str, config: Config, *, colorize: bool
     return lines
 
 
+def render_project_dependency_lines(project_id: str, config: Config) -> list[str]:
+    project = require_project(config, project_id)
+    lines = [f"Project: {project.project_id or project.path.as_posix()}"]
+    if project.resolved_dependencies:
+        lines.append(f"Resolved dependencies ({len(project.resolved_dependencies)}):")
+        lines.extend(f"  - {_dependency_summary(dep)}" for dep in project.resolved_dependencies)
+    else:
+        lines.append("Resolved dependencies: none")
+    return lines
+
+
+def _repo_target_from_project(project: Project, config: Config) -> ResolvedRepoTarget:
+    if project.repo_id is not None and project.repo_id in config.defined_repos:
+        repo_definition = config.defined_repos[project.repo_id]
+        return ResolvedRepoTarget(
+            name=project.repo_id,
+            path=repo_definition.path,
+            repo_id=project.repo_id,
+            project_ids=tuple(repo_definition.project_ids),
+        )
+    project_id = project.project_id or project.path.as_posix()
+    return ResolvedRepoTarget(
+        name=project_id,
+        path=project.effective_repo_root,
+        repo_id=project.repo_id,
+        project_ids=(project_id,),
+    )
+
+
+def render_project_repo_lines(repo_target: ResolvedRepoTarget, config: Config) -> list[str]:
+    repo_definition = config.defined_repos.get(repo_target.repo_id) if repo_target.repo_id is not None else None
+    if repo_definition is not None:
+        repo_label = repo_definition.repo_id
+        repo_path = repo_definition.path
+        github_repo = repo_definition.github_repo
+        gradle_root_project = repo_definition.gradle_root_project_name
+        docs_project = repo_definition.docs_project_id
+        project_ids = list(repo_definition.project_ids)
+    else:
+        project_ids = list(repo_target.project_ids)
+        representative_project = require_project(config, project_ids[0]) if project_ids else None
+        repo_label = repo_target.name
+        repo_path = repo_target.path
+        github_repo = representative_project.github_repo if representative_project is not None else None
+        gradle_root_project = None
+        docs_project = None
+
+    lines = [
+        f"Repo: {repo_label}",
+        f"Path: {_display_path(repo_path)}",
+        f"Repo ID: {repo_target.repo_id or '-'}",
+        f"GitHub repo: {github_repo or '-'}",
+        f"Gradle root project: {gradle_root_project or '-'}",
+        f"Docs project: {docs_project or '-'}",
+    ]
+    if project_ids:
+        lines.append(f"Projects ({len(project_ids)}):")
+        lines.extend(f"  - {project_id}" for project_id in project_ids)
+    else:
+        lines.append("Projects: none")
+    return lines
+
+
 def render_project_list_lines(config: Config, *, colorize: bool = True) -> list[str]:
     display_rows: list[tuple[str, str]] = []
     for project in config.defined_projects.values():
@@ -245,7 +309,42 @@ def list_projects(config: Config | None = None) -> None:
         print(line)
 
 
-def show_project(project_id: str, config: Config | None = None) -> None:
+def show_projects(project_targets: list[str], config: Config | None = None) -> None:
     active_config = load_config() if config is None else config
-    for line in render_project_show_lines(project_id, active_config):
-        print(line)
+    project_ids = resolve_project_ids(active_config, project_targets)
+    for index, project_id in enumerate(project_ids):
+        if index:
+            print()
+        for line in render_project_show_lines(project_id, active_config):
+            print(line)
+
+
+def show_project(project_id: str, config: Config | None = None) -> None:
+    show_projects([project_id], config)
+
+
+def show_project_dependencies(project_targets: list[str], config: Config | None = None) -> None:
+    active_config = load_config() if config is None else config
+    project_ids = resolve_project_ids(active_config, project_targets)
+    for index, project_id in enumerate(project_ids):
+        if index:
+            print()
+        for line in render_project_dependency_lines(project_id, active_config):
+            print(line)
+
+
+def show_project_repos(project_targets: list[str], config: Config | None = None) -> None:
+    active_config = load_config() if config is None else config
+    project_ids = resolve_project_ids(active_config, project_targets)
+    seen_repo_keys: set[Path] = set()
+    for project_id in project_ids:
+        project = require_project(active_config, project_id)
+        repo_target = _repo_target_from_project(project, active_config)
+        repo_key = repo_target.path.resolve()
+        if repo_key in seen_repo_keys:
+            continue
+        if seen_repo_keys:
+            print()
+        seen_repo_keys.add(repo_key)
+        for line in render_project_repo_lines(repo_target, active_config):
+            print(line)

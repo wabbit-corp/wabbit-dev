@@ -15,8 +15,8 @@ from dev.config import (
     load_config,
     resolve_kotlin_plugin_compiler_plugin_project,
 )
-from dev.discoverability import did_you_mean_suffix
 from dev.messages import error, info, success, warning
+from dev.repo_resolution import resolve_project_ids
 
 
 def _python_source_files(root: Path) -> Iterator[Path]:
@@ -134,35 +134,34 @@ def _publish_local_compiler_plugins(
     return True
 
 
-def build(projects: list[str] | None = None) -> None:
+def build(projects: str | list[str] | None = None) -> None:
     config = load_config()
-    if projects:
-        missing_projects = [project_name for project_name in projects if project_name not in config.defined_projects]
-        if missing_projects:
-            messages = [
-                f"{project_name}{did_you_mean_suffix(project_name, config.defined_projects)}"
-                for project_name in missing_projects
-            ]
-            error("No such project(s): " + ", ".join(messages))
+    requested_projects = [projects] if isinstance(projects, str) else projects
+    selected_project_names: list[str] | None = None
+    if requested_projects:
+        try:
+            selected_project_names = resolve_project_ids(config, requested_projects)
+        except ValueError as ex:
+            error(str(ex))
             return
 
-    order = toposort_projects(config.defined_projects, target_project=projects or None)
+    order = toposort_projects(config.defined_projects, target_project=selected_project_names)
     if not order:
-        if projects is None or not projects:
+        if selected_project_names is None:
             error("No projects found to build or cycle in dependencies.")
             return
-        error(f"No projects found for build target(s): {', '.join(projects)}")
+        error(f"No projects found for build target(s): {', '.join(selected_project_names)}")
         return
 
-    target_project = config.defined_projects[projects[0]] if projects else None
+    target_project = config.defined_projects[selected_project_names[0]] if selected_project_names else None
     if target_project is not None and not isinstance(target_project, (GradleProject, PythonProject)):
-        error(f"Project {projects[0]} is not buildable in this command.")
+        error(f"Project {selected_project_names[0]} is not buildable in this command.")
         return
 
-    if projects is not None and len(projects) > 1:
+    if selected_project_names is not None and len(selected_project_names) > 1:
         unsupported_targets = [
             project_name
-            for project_name in projects
+            for project_name in selected_project_names
             if not isinstance(config.defined_projects[project_name], (GradleProject, PythonProject))
         ]
         if unsupported_targets:
@@ -205,7 +204,10 @@ def build(projects: list[str] | None = None) -> None:
             return
 
     if executed_count == 0:
-        warning(f"No build command executed for {', '.join(projects) if projects else 'requested projects'}.")
+        warning(
+            "No build command executed for "
+            f"{', '.join(selected_project_names) if selected_project_names else 'requested projects'}."
+        )
     else:
         success("Build completed successfully in topological order.")
 

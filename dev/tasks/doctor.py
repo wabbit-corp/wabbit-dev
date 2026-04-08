@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from dev.config import GradleProject, IntellijPlugin, PythonProject, load_config
 from dev.messages import error, info, success, warning
+from dev.repo_resolution import resolve_project_ids
 
 if TYPE_CHECKING:
     from dev.config import Config, Project
@@ -36,7 +37,7 @@ class DoctorFinding:
 @dataclass
 class DoctorContext:
     cwd: Path = field(default_factory=Path.cwd)
-    selected_project_ids: tuple[str, ...] | None = None
+    selected_targets: tuple[str, ...] | None = None
     root_clj: Path = field(init=False)
     root_private_clj: Path = field(init=False)
     _config_loaded: bool = field(default=False, init=False)
@@ -95,15 +96,14 @@ def _determine_publish_target(project: Project) -> str:
 
 
 def _selected_projects(config: Config, ctx: DoctorContext) -> list[Project]:
-    if not ctx.selected_project_ids:
+    if not ctx.selected_targets:
         return list(config.defined_projects.values())
 
-    selected: list[Project] = []
-    for project_id in ctx.selected_project_ids:
-        project = config.defined_projects.get(project_id)
-        if project is not None:
-            selected.append(project)
-    return selected
+    try:
+        project_ids = resolve_project_ids(config, ctx.selected_targets)
+    except ValueError:
+        return list(config.defined_projects.values())
+    return [config.defined_projects[project_id] for project_id in project_ids]
 
 
 def _workspace_root_finding(ctx: DoctorContext) -> DoctorFinding:
@@ -605,6 +605,8 @@ PREFLIGHT_CHECKS: dict[str, tuple[str, ...]] = {
     "clean": ("workspace-root", "root-clj", "root-private-clj", "config"),
     "project/list": ("workspace-root", "root-clj", "root-private-clj", "config"),
     "project/show": ("workspace-root", "root-clj", "root-private-clj", "config"),
+    "project/deps": ("workspace-root", "root-clj", "root-private-clj", "config"),
+    "project/repo": ("workspace-root", "root-clj", "root-private-clj", "config"),
     "dep/graph": ("workspace-root", "root-clj", "root-private-clj", "config"),
     "dep/updates": ("workspace-root", "root-clj", "root-private-clj", "config"),
     "contributors/audit": (
@@ -665,7 +667,7 @@ def preflight_for_command(command_path: str, *, prog: str, projects: tuple[str, 
 
     findings = collect_doctor_findings(
         check_ids=check_ids,
-        ctx=DoctorContext(selected_project_ids=projects),
+        ctx=DoctorContext(selected_targets=projects),
     )
     failures = [finding for finding in findings if finding.status == DoctorStatus.FAIL]
     if not failures:

@@ -1,32 +1,37 @@
 # pyright: reportUnknownMemberType=false
 
 from dataclasses import dataclass
+from typing import Sequence
 
 from graphviz import Digraph
 
 from dev.config import load_config
-from dev.discoverability import unknown_name_message
 from dev.messages import error, info
+from dev.repo_resolution import resolve_project_ids
 
 
 def get_project_dependencies(
     *,
-    focus_project_name: str | None = None,
+    focus_project_names: Sequence[str] | None = None,
     include_artifacts: bool = False,
     output_filename: str = "dependency_graph",
     graph_title: str | None = None,
 ) -> None:
     config = load_config()
 
-    if focus_project_name and focus_project_name not in config.defined_projects:
-        error(unknown_name_message("project", focus_project_name, config.defined_projects))
-        return
+    resolved_focus_projects: list[str] | None = None
+    if focus_project_names:
+        try:
+            resolved_focus_projects = resolve_project_ids(config, list(focus_project_names))
+        except ValueError as ex:
+            error(str(ex))
+            return
 
     # Determine the graph title
     effective_graph_title = graph_title
     if not effective_graph_title:
-        if focus_project_name:
-            effective_graph_title = f"Dependencies for {focus_project_name}"
+        if resolved_focus_projects:
+            effective_graph_title = f"Dependencies for {', '.join(resolved_focus_projects)}"
             if include_artifacts:
                 effective_graph_title += " (including artifacts)"
         else:
@@ -70,11 +75,12 @@ def get_project_dependencies(
             elif include_artifacts:
                 nodes[dep.name] = Node(id=sanitize_id(dep.name), label=dep.name, type="artifact")
 
-    if focus_project_name is None:
+    if resolved_focus_projects is None:
         for project_name, _project in config.defined_projects.items():
             add_dependencies(project_name)
     else:
-        add_dependencies(focus_project_name)
+        for focus_project_name in resolved_focus_projects:
+            add_dependencies(focus_project_name)
 
     # Generate dependency graph if requested
     dot = Digraph(comment=effective_graph_title)

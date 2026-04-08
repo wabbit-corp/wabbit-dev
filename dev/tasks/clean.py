@@ -10,7 +10,8 @@ from pathlib import Path
 
 import dev.io
 from dev.config import GradleProject, PythonProject, load_config
-from dev.discoverability import unknown_name_message
+from dev.messages import error
+from dev.repo_resolution import resolve_project_ids
 
 DRY_RUN = False
 PathLikeStr = str | os.PathLike[str]
@@ -217,11 +218,16 @@ if __name__ == "__main__":
         print(f"Usage: {sys.argv[0]} <folder> [<folder>...]")
 
 
-def clean(project_name: str | None) -> None:
+def clean(projects: str | list[str] | None) -> None:
     config = load_config()
-    if project_name is not None and project_name not in config.defined_projects:
-        print(unknown_name_message("project", project_name, config.defined_projects))
-        return
+    requested_projects = [projects] if isinstance(projects, str) else projects
+    selected_project_names: list[str] | None = None
+    if requested_projects:
+        try:
+            selected_project_names = resolve_project_ids(config, requested_projects)
+        except ValueError as ex:
+            error(str(ex))
+            return
 
     dev.io.delete_if_exists(Path("__pycache__"))
     dev.io.delete_if_exists(Path(".gradle"))
@@ -231,7 +237,7 @@ def clean(project_name: str | None) -> None:
     dev.io.delete_if_exists(Path("build"))
 
     for name, project in config.defined_projects.items():
-        if project_name is not None and name != project_name:
+        if selected_project_names is not None and name not in selected_project_names:
             continue
 
         if isinstance(project, GradleProject):

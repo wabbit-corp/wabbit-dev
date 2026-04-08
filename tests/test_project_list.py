@@ -12,9 +12,15 @@ from dev.config import (
     OwnershipType,
     ProjectDependencyTarget,
     PythonProject,
+    RepoDefinition,
     Version,
 )
-from dev.tasks.project_list import render_project_list_lines, render_project_show_lines
+from dev.tasks.project_list import (
+    render_project_dependency_lines,
+    render_project_list_lines,
+    render_project_repo_lines,
+    render_project_show_lines,
+)
 
 
 def _empty_config() -> Config:
@@ -176,6 +182,72 @@ def test_render_project_show_lines_includes_resolved_metadata() -> None:
     assert any("settings.local.gradle.kts" in line for line in lines)
 
 
+def test_render_project_dependency_lines_show_resolved_dependencies() -> None:
+    config = _empty_config()
+    project = _python_project(Path("./app-wabbit-dev"), project_id="app-wabbit-dev")
+    project.resolved_dependencies = [
+        Dependency(scope="implementation", target=ProjectDependencyTarget("kotlin-base58")),
+    ]
+    config.defined_projects = OrderedDict([("app-wabbit-dev", project)])
+
+    lines = render_project_dependency_lines("app-wabbit-dev", config)
+
+    assert lines == [
+        "Project: app-wabbit-dev",
+        "Resolved dependencies (1):",
+        "  - implementation: kotlin-base58",
+    ]
+
+
+def test_render_project_repo_lines_show_repo_metadata() -> None:
+    config = _empty_config()
+    repo_root = Path("./jeeves")
+    config.defined_repos["jeeves"] = RepoDefinition(
+        repo_id="jeeves",
+        path=repo_root,
+        github_repo="wabbit-corp/jeeves",
+        gradle_root_project_name="jeeves",
+        jvm_policy="jvm-21",
+        docs_project_id="jeeves/api",
+        project_ids=["jeeves/api", "jeeves/client"],
+    )
+    config.defined_projects = OrderedDict(
+        [
+            (
+                "jeeves/api",
+                _gradle_project(repo_root / "api", project_id="jeeves/api", build_model="kmp", repo_id="jeeves", repo_root=repo_root),
+            ),
+            (
+                "jeeves/client",
+                _gradle_project(
+                    repo_root / "client",
+                    project_id="jeeves/client",
+                    build_model="kmp",
+                    repo_id="jeeves",
+                    repo_root=repo_root,
+                ),
+            ),
+        ]
+    )
+
+    from dev.repo_resolution import ResolvedRepoTarget
+
+    lines = render_project_repo_lines(
+        ResolvedRepoTarget(name="jeeves", path=repo_root, repo_id="jeeves", project_ids=("jeeves/api", "jeeves/client")),
+        config,
+    )
+
+    assert "Repo: jeeves" in lines
+    assert "Path: jeeves" in lines
+    assert "Repo ID: jeeves" in lines
+    assert "GitHub repo: wabbit-corp/jeeves" in lines
+    assert "Gradle root project: jeeves" in lines
+    assert "Docs project: jeeves/api" in lines
+    assert "Projects (2):" in lines
+    assert "  - jeeves/api" in lines
+    assert "  - jeeves/client" in lines
+
+
 @pytest.mark.asyncio
 async def test_cli_project_list_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev import cli
@@ -204,20 +276,64 @@ async def test_cli_project_show_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
     from dev.tasks import doctor as doctor_task
     from dev.tasks import project_list
 
-    called: list[str] = []
+    called: list[list[str]] = []
 
     monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None: True)
 
-    def fake_show_project(project_id: str) -> None:
-        called.append(project_id)
+    def fake_show_projects(project_ids: list[str]) -> None:
+        called.append(project_ids)
 
-    monkeypatch.setattr(project_list, "show_project", fake_show_project)
+    monkeypatch.setattr(project_list, "show_projects", fake_show_projects)
     monkeypatch.setattr("sys.argv", ["dev.py", "project", "show", "app-wabbit-dev"])
 
     result = await cli.async_main()
 
     assert result == 0
-    assert called == ["app-wabbit-dev"]
+    assert called == [["app-wabbit-dev"]]
+
+
+@pytest.mark.asyncio
+async def test_cli_project_deps_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import doctor as doctor_task
+    from dev.tasks import project_list
+
+    called: list[list[str]] = []
+
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None: True)
+
+    def fake_show_project_dependencies(project_ids: list[str]) -> None:
+        called.append(project_ids)
+
+    monkeypatch.setattr(project_list, "show_project_dependencies", fake_show_project_dependencies)
+    monkeypatch.setattr("sys.argv", ["dev.py", "project", "deps", "jeeves"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [["jeeves"]]
+
+
+@pytest.mark.asyncio
+async def test_cli_project_repo_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import doctor as doctor_task
+    from dev.tasks import project_list
+
+    called: list[list[str]] = []
+
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None: True)
+
+    def fake_show_project_repos(project_ids: list[str]) -> None:
+        called.append(project_ids)
+
+    monkeypatch.setattr(project_list, "show_project_repos", fake_show_project_repos)
+    monkeypatch.setattr("sys.argv", ["dev.py", "project", "repo", "jeeves"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [["jeeves"]]
 
 
 @pytest.mark.asyncio
@@ -247,5 +363,5 @@ async def test_cli_project_show_suggests_close_project_id(
 
     assert result == 2
     err = capsys.readouterr().err
-    assert "Unknown project: 'app-wabbit-de'" in err
+    assert "Unknown project or repo: 'app-wabbit-de'" in err
     assert "Did you mean 'app-wabbit-dev'?" in err
