@@ -583,6 +583,12 @@ class KotlinSerializationCommand:
     pass
 
 
+@tag("kotlin-compose-plugin")
+@dataclass(frozen=True)
+class KotlinComposePluginCommand:
+    pass
+
+
 @tag("gradle-plugin")
 @dataclass(frozen=True)
 class GradlePluginCommand:
@@ -694,6 +700,7 @@ FeatureCommand = (
     | JvmKotlinAgentCommand
     | IntellijPluginCommand
     | KotlinSerializationCommand
+    | KotlinComposePluginCommand
     | GradlePluginCommand
     | KotlinCompilerPluginCommand
     | KotlinCompilerGradlePluginCommand
@@ -870,6 +877,7 @@ class GradleProjectCommand:
         dict[str, GradleSourceSetCommand] | None,
         DecodeWith(_decode_gradle_source_sets),
     ] = None
+    buildInlineFile: str | None = None
     kotlinFreeCompilerArgs: list[str] | None = None
     dokkaSuppressSourceSets: list[str] | None = None
     features: list[FeatureCommand] | None = None

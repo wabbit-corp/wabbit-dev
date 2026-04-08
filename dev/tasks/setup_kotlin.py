@@ -38,6 +38,7 @@ from dev.config import (
     resolve_kotlin_plugin_id,
     resolve_kotlin_plugin_version,
 )
+from dev.generated_files import stamp_managed_text
 from dev.licenses import canonicalize_license_key, license_display_name, license_spdx_url
 from dev.messages import error, warning
 from dev.tasks.setup_common import RepoSetupMode, clean_text, render_template, write_banner, write_wabbit_legal_files
@@ -69,6 +70,7 @@ COMPOSE_ACCESSOR_PREFIXES: tuple[tuple[str, str], ...] = (
 BUILTIN_GRADLE_PLUGIN_IDS_BY_FEATURE: dict[str, tuple[str, ...]] = {
     "kotlin": ("org.jetbrains.kotlin.jvm",),
     "kotlin-serialization": ("org.jetbrains.kotlin.plugin.serialization",),
+    "kotlin-compose-plugin": ("org.jetbrains.kotlin.plugin.compose",),
     "kmp-compose": ("org.jetbrains.compose", "org.jetbrains.kotlin.plugin.compose"),
     "shadow-jar": ("com.gradleup.shadow",),
     "intellij-plugin": ("org.jetbrains.intellij", "org.jetbrains.intellij.platform"),
@@ -655,8 +657,30 @@ def _is_nested_gradle_project(project: GradleProject) -> bool:
     return project.effective_gradle_root != project.path
 
 
+_GOOGLE_REPOSITORY_ARTIFACT_PREFIXES = (
+    "androidx.",
+    "org.jetbrains.compose.",
+    "com.varabyte.kobweb:",
+)
+
+_GOOGLE_REPOSITORY_FEATURES = frozenset({"kmp-compose", "kotlin-compose-plugin"})
+
+
 def _needs_google_repository(project: GradleProject) -> bool:
-    return any(target.kind.startswith("android-") for target in _effective_targets(project))
+    if any(target.kind.startswith("android-") for target in _effective_targets(project)):
+        return True
+
+    if any(feature_name in project.resolved_features for feature_name in _GOOGLE_REPOSITORY_FEATURES):
+        return True
+
+    for dependency in project.resolved_dependencies:
+        target = dependency.target
+        if not isinstance(target, MavenDependencyTarget) or target.artifact is None:
+            continue
+        if target.artifact.startswith(_GOOGLE_REPOSITORY_ARTIFACT_PREFIXES):
+            return True
+
+    return False
 
 
 def _has_apple_targets(project: GradleProject) -> bool:
@@ -1493,10 +1517,19 @@ class InlineGradleBuildScript:
     body: str
 
 
-def read_optional_inline_gradle_build_script(root_path: Path) -> InlineGradleBuildScript:
-    inline_script_path = root_path / "build.inline.gradle.kts"
-    if not inline_script_path.exists():
-        return InlineGradleBuildScript(imports=[], body="")
+def read_optional_inline_gradle_build_script(
+    root_path: Path,
+    *,
+    inline_file: str | None = None,
+) -> InlineGradleBuildScript:
+    if inline_file is None:
+        inline_script_path = root_path / "build.inline.gradle.kts"
+        if not inline_script_path.exists():
+            return InlineGradleBuildScript(imports=[], body="")
+    else:
+        inline_script_path = root_path / inline_file
+        if not inline_script_path.exists():
+            raise FileNotFoundError(f"Configured inline Gradle build script not found: {inline_script_path}")
 
     lines = dev.io.read_text_file(inline_script_path).splitlines()
     imports: list[str] = []
@@ -1695,7 +1728,10 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
         android_application_target = _android_application_target(project)
         android_kmp_library_target = _android_kmp_library_target(project)
 
-        inline_extra_build = read_optional_inline_gradle_build_script(project.path)
+        inline_extra_build = read_optional_inline_gradle_build_script(
+            project.path,
+            inline_file=project.build_inline_file,
+        )
         result = render_template(
             ctx.subproject_build_kmp_template,
             project_name=project.name,
@@ -1747,7 +1783,10 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
         company_legal_name = _company_legal_name(ctx)
         project_dependencies, other_dependencies = _make_dependency_strings(ctx, project)
         gradle_plugin_project_context = _gradle_plugin_project_context(project) or {}
-        inline_extra_build = read_optional_inline_gradle_build_script(project.path)
+        inline_extra_build = read_optional_inline_gradle_build_script(
+            project.path,
+            inline_file=project.build_inline_file,
+        )
         result = render_template(
             ctx.subproject_build_template,
             project_name=project.name,
@@ -1785,7 +1824,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             **gradle_plugin_project_context,
         )
     result = clean_gradle_build_text(result)
-    dev.io.write_text_file(project.path / "build.gradle.kts", result)
+    dev.io.write_text_file(project.path / "build.gradle.kts", stamp_managed_text(result))
 
     if nested_gradle_project:
         _cleanup_nested_gradle_project_files(project)
@@ -1795,17 +1834,19 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
     else:
         dev.io.write_text_file(
             project.path / "settings.gradle.kts",
-            clean_gradle_build_text(
-                render_template(
-                    ctx.subproject_settings_template,
-                    **settings_plugin_context(ctx, [project], root_path=project.path),
-                    local_plugin_included_builds=local_plugin_included_builds(
-                        ctx,
-                        root_path=project.path,
-                        projects=[project],
-                    ),
-                    project_name=project.effective_gradle_project_name,
-                    features=project.resolved_features,
+            stamp_managed_text(
+                clean_gradle_build_text(
+                    render_template(
+                        ctx.subproject_settings_template,
+                        **settings_plugin_context(ctx, [project], root_path=project.path),
+                        local_plugin_included_builds=local_plugin_included_builds(
+                            ctx,
+                            root_path=project.path,
+                            projects=[project],
+                        ),
+                        project_name=project.effective_gradle_project_name,
+                        features=project.resolved_features,
+                    )
                 )
             ),
         )
@@ -1819,12 +1860,14 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
         )
         dev.io.write_text_file(
             project.path / "gradle.properties",
-            clean_text(
-                render_template(
-                    ctx.gradle_properties_template,
-                    repo_project_version=None,
-                    repo_default_kotlin_version=None,
-                    repo_supported_kotlin_versions=[],
+            stamp_managed_text(
+                clean_text(
+                    render_template(
+                        ctx.gradle_properties_template,
+                        repo_project_version=None,
+                        repo_default_kotlin_version=None,
+                        repo_supported_kotlin_versions=[],
+                    )
                 )
             ),
         )

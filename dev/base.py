@@ -18,6 +18,7 @@ CHECK_MODULE_IMPORTS: tuple[str, ...] = (
     "dev.checks.hardcoded",
     "dev.checks.identifier_uniqueness",
     "dev.checks.large_files",
+    "dev.checks.managed_generated_files",
     "dev.checks.project_files",
     "dev.checks.python_bandit",
     "dev.checks.python_black",

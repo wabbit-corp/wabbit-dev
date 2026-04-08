@@ -279,6 +279,53 @@ def test_gradle_kmp_allows_default_hierarchy_without_explicit_source_sets(tmp_pa
     assert project.source_set_dependencies == {}
 
 
+def test_gradle_build_inline_file_is_loaded(tmp_path: Path) -> None:
+    from dev.config import GradleProject
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'gradle "demo-kmp" '
+                ':version "0.1.0" '
+                ':targets [{"kind": "jvm"} {"kind": "iosArm64"}] '
+                ':buildInlineFile "build.inline.gradle.kts")',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo-kmp"]
+    assert isinstance(project, GradleProject)
+    assert project.build_inline_file == "build.inline.gradle.kts"
+
+
+def test_gradle_kmp_supports_kotlin_compose_plugin_feature(tmp_path: Path) -> None:
+    from dev.config import GradleProject
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'gradle "demo-kmp" '
+                ':version "0.1.0" '
+                ':buildModel "kmp" '
+                ':targets [{"kind": "js" "browser": true}] '
+                ':features [(kotlin-compose-plugin)])',
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo-kmp"]
+    assert isinstance(project, GradleProject)
+    assert "kotlin-compose-plugin" in project.resolved_features
+
+
 def test_gradle_kmp_supports_desktop_native_targets(tmp_path: Path) -> None:
     from dev.config import GradleProject
 

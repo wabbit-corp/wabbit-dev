@@ -31,6 +31,7 @@ from dev.config import (
     resolve_kotlin_plugin_compiler_plugin_project,
     resolve_kotlin_plugin_project,
 )
+from dev.generated_files import stamp_managed_text
 from dev.git_changes import ChangeType, FileDiff, FileType, compute_repo_diffs
 from dev.licenses import canonicalize_license_key, load_license_texts
 from dev.messages import ask, error, info, warning
@@ -636,7 +637,7 @@ def _write_gradle_local_overlay(
         plugin_included_builds=plugin_included_builds,
         included_builds=included_builds,
     )
-    dev.io.write_text_file(overlay_path, setup_kotlin.clean_gradle_build_text(overlay_text))
+    dev.io.write_text_file(overlay_path, stamp_managed_text(setup_kotlin.clean_gradle_build_text(overlay_text)))
 
 
 def _delete_gradle_local_overlay(*, root_path: Path) -> None:
@@ -681,7 +682,10 @@ def _write_gradle_root_files(
             inline_extra_build_imports=inline_extra_build.imports,
             inline_extra_build_script=inline_extra_build.body,
         )
-        dev.io.write_text_file(root_path / "build.gradle.kts", setup_kotlin.clean_gradle_build_text(build_text))
+        dev.io.write_text_file(
+            root_path / "build.gradle.kts",
+            stamp_managed_text(setup_kotlin.clean_gradle_build_text(build_text)),
+        )
 
     settings_text = render_template(
         ctx.settings_template,
@@ -701,21 +705,26 @@ def _write_gradle_root_files(
             if included_project.path.resolve() != root_path.resolve()
         ],
     )
-    dev.io.write_text_file(root_path / "settings.gradle.kts", setup_kotlin.clean_gradle_build_text(settings_text))
+    dev.io.write_text_file(
+        root_path / "settings.gradle.kts",
+        stamp_managed_text(setup_kotlin.clean_gradle_build_text(settings_text)),
+    )
 
     if write_wrapper:
         dev.io.write_text_file(
             root_path / "gradle.properties",
-            setup_common.clean_text(
-                render_template(
-                    ctx.gradle_properties_template,
-                    repo_project_version=repo_definition.project_version if repo_definition is not None else None,
-                    repo_default_kotlin_version=(
-                        repo_definition.default_kotlin_version if repo_definition is not None else None
-                    ),
-                    repo_supported_kotlin_versions=(
-                        repo_definition.supported_kotlin_versions if repo_definition is not None else []
-                    ),
+            stamp_managed_text(
+                setup_common.clean_text(
+                    render_template(
+                        ctx.gradle_properties_template,
+                        repo_project_version=repo_definition.project_version if repo_definition is not None else None,
+                        repo_default_kotlin_version=(
+                            repo_definition.default_kotlin_version if repo_definition is not None else None
+                        ),
+                        repo_supported_kotlin_versions=(
+                            repo_definition.supported_kotlin_versions if repo_definition is not None else []
+                        ),
+                    )
                 )
             ),
         )

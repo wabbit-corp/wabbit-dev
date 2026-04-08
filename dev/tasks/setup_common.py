@@ -9,8 +9,23 @@ import jinja2
 
 import dev.io
 from dev.banner import create_banner
-from dev.config import Config, DataProject, GradleProject, OwnershipType, PremakeProject, Project, PurescriptProject, PythonProject
-from dev.licenses import canonicalize_license_key, cla_primary_license_reference, license_display_name, render_project_license
+from dev.config import (
+    Config,
+    DataProject,
+    GradleProject,
+    OwnershipType,
+    PremakeProject,
+    Project,
+    PurescriptProject,
+    PythonProject,
+)
+from dev.generated_files import prepend_generated_comment
+from dev.licenses import (
+    canonicalize_license_key,
+    cla_primary_license_reference,
+    license_display_name,
+    render_project_license,
+)
 from dev.messages import error, warning
 
 
@@ -65,7 +80,17 @@ def write_requirements_file(path: Path, deps: list[str], *, interactive: bool, p
             warning(f"No dependencies configured for {project_name}; leaving {path} untouched")
         return
 
-    dev.io.write_text_file(path, clean_text("\n".join(deps) + "\n"))
+    requirements_text = prepend_generated_comment(
+        "\n".join(deps) + "\n",
+        comment_prefix="#",
+        body_lines=[
+            "This file is generated from workspace configuration in root.clj.",
+            "To change it, update root.clj and regenerate with the dev command, for example:",
+            "  ./dev setup <project-or-repo>",
+            "Direct edits to this file will be overwritten the next time setup runs.",
+        ],
+    )
+    dev.io.write_text_file(path, clean_text(requirements_text))
 
 
 def _legal_contact_email(ctx: CommonSetupContext) -> str:

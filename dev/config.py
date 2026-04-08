@@ -294,6 +294,14 @@ class KotlinSerialization(Feature):
         return [Kotlin()]
 
 
+@dataclass
+class KotlinComposePlugin(Feature):
+    __feature_name__ = "kotlin-compose-plugin"
+
+    def implied(self) -> list[Feature]:
+        return [Kotlin()]
+
+
 @dataclass(frozen=True)
 class GradlePluginApplication:
     name: str
@@ -1016,6 +1024,7 @@ class GradleProject(Project):
     build_model: str | None = None
     targets: list["GradleTargetSpec"] = dataclasses.field(default_factory=list)
     source_sets: dict[str, "GradleSourceSet"] = dataclasses.field(default_factory=dict)
+    build_inline_file: str | None = None
     kotlin_free_compiler_args: list[str] = dataclasses.field(default_factory=list)
     dokka_suppress_source_sets: list[str] = dataclasses.field(default_factory=list)
     jvm_policy: str | None = None
@@ -1727,6 +1736,8 @@ def load_config() -> Config:
             )
         if isinstance(command, config_typed.KotlinSerializationCommand):
             return KotlinSerialization()
+        if isinstance(command, config_typed.KotlinComposePluginCommand):
+            return KotlinComposePlugin()
         if isinstance(command, config_typed.GradlePluginCommand):
             return GradlePlugins(
                 entries=[
@@ -2512,6 +2523,11 @@ def load_config() -> Config:
                 gradle_project_name=gradle_project_name,
                 repo_id=repo_id,
             )
+            build_inline_file = command.buildInlineFile.strip() if command.buildInlineFile is not None else None
+            if build_inline_file == "":
+                raise ValueError(f"Gradle project {display_name}.buildInlineFile must not be empty")
+            if build_inline_file is not None and Path(build_inline_file).is_absolute():
+                raise ValueError(f"Gradle project {display_name}.buildInlineFile must be a relative path")
 
             default_publish_target: str | None
             if not command.publish:
@@ -2574,6 +2590,7 @@ def load_config() -> Config:
                 build_model=build_model,
                 targets=normalized_targets,
                 source_sets=source_sets,
+                build_inline_file=build_inline_file,
                 kotlin_free_compiler_args=list(command.kotlinFreeCompilerArgs or []),
                 dokka_suppress_source_sets=list(command.dokkaSuppressSourceSets or []),
                 jvm_policy=command.jvmPolicy or repo_jvm_policy,

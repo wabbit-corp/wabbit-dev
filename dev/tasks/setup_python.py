@@ -18,6 +18,7 @@ from packaging.version import Version as PythonVersion
 
 import dev.io
 from dev.config import Config, PythonProject
+from dev.generated_files import is_setup_managed_file, prepend_generated_comment, stamp_managed_text
 from dev.licenses import canonicalize_license_key, python_spdx_for_license
 from dev.messages import warning
 from dev.tasks.setup_common import (
@@ -30,6 +31,7 @@ from dev.tasks.setup_common import (
 
 _GITHUB_URL_SCHEME = "https"
 _GITHUB_URL_HOST = "github.com"
+_YAML_TOP_LEVEL_KEY_RE = re.compile(r"^([A-Za-z0-9_-]+)\s*:")
 
 
 class PythonSetupContext(Protocol):
@@ -696,6 +698,22 @@ def render_python_pyproject(ctx: PythonSetupContext, project: PythonProject) -> 
     return render_template(ctx.python_pyproject_template, **context)
 
 
+def _render_managed_pyproject_text(ctx: PythonSetupContext, project: PythonProject) -> str:
+    base_text = prepend_generated_comment(
+        render_python_pyproject(ctx, project),
+        comment_prefix="#",
+        body_lines=[
+            "This file is generated from workspace configuration in root.clj.",
+            "To change it, update root.clj and regenerate with the dev command, for example:",
+            "  ./dev setup <project-or-repo>",
+            "For unmanaged additional TOML sections, create pyproject.extra.toml beside this file.",
+            "Do not redefine tables or keys already generated here.",
+            "Direct edits to this file will be overwritten the next time setup runs.",
+        ],
+    )
+    return stamp_managed_text(_append_pyproject_extra_toml(project.path, clean_text(base_text)), comment_prefix="#")
+
+
 def render_python_pyrightconfig(ctx: PythonSetupContext, project: PythonProject) -> str:
     defaults = ctx.config.python_defaults
     requires_python = project.requires_python or defaults.requires_python or ">=3.10"
@@ -753,6 +771,105 @@ def _python_repository_name(project: PythonProject) -> str:
     return ""
 
 
+def _append_pyproject_extra_toml(project_path: Path, base_text: str) -> str:
+    extra_path = project_path / "pyproject.extra.toml"
+    if not extra_path.is_file():
+        return base_text
+
+    extra_text = clean_text(extra_path.read_text(encoding="utf-8"))
+    if not extra_text.strip():
+        return base_text
+
+    combined = clean_text(
+        base_text.rstrip("\n")
+        + "\n\n"
+        + "# Additional unmanaged sections from pyproject.extra.toml\n"
+        + "# Do not redefine tables or keys already generated above.\n\n"
+        + extra_text
+    )
+
+    try:
+        import tomllib
+
+        tomllib.loads(combined)
+    except Exception as ex:
+        raise ValueError(
+            f"{extra_path} must append only valid, non-conflicting TOML sections: {ex}"
+        ) from ex
+
+    return combined
+
+
+def _yaml_top_level_keys(text: str) -> set[str]:
+    keys: set[str] = set()
+    for line in text.splitlines():
+        if not line or line[0].isspace() or line.startswith("-"):
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped in {"---", "..."}:
+            continue
+        match = _YAML_TOP_LEVEL_KEY_RE.match(line)
+        if match is not None:
+            keys.add(match.group(1))
+    return keys
+
+
+def _render_managed_mkdocs_text(
+    *,
+    site_name: str,
+    site_description: str,
+    site_url: str,
+    repo_url: str,
+    repo_name: str,
+    template: jinja2.Template,
+    project_path: Path,
+) -> str:
+    base_text = prepend_generated_comment(
+        render_template(
+            template,
+            site_name=site_name,
+            site_description=site_description,
+            site_url=site_url,
+            repo_url=repo_url,
+            repo_name=repo_name,
+        ),
+        comment_prefix="#",
+        body_lines=[
+            "This file is generated from workspace configuration in root.clj.",
+            "To change it, update root.clj and regenerate with the dev command, for example:",
+            "  ./dev setup <project-or-repo>",
+            "For unmanaged additional MkDocs top-level keys, create mkdocs.extra.yml beside this file.",
+            "Do not redefine keys already generated here.",
+            "Direct edits to this file will be overwritten the next time setup runs.",
+        ],
+    )
+    return stamp_managed_text(_append_mkdocs_extra_yaml(project_path, clean_text(base_text)), comment_prefix="#")
+
+
+def _append_mkdocs_extra_yaml(project_path: Path, base_text: str) -> str:
+    extra_path = project_path / "mkdocs.extra.yml"
+    if not extra_path.is_file():
+        return base_text
+
+    extra_text = clean_text(extra_path.read_text(encoding="utf-8"))
+    if not extra_text.strip():
+        return base_text
+
+    conflicts = sorted(_yaml_top_level_keys(base_text) & _yaml_top_level_keys(extra_text))
+    if conflicts:
+        conflict_list = ", ".join(conflicts)
+        raise ValueError(
+            f"{extra_path} redefines generated MkDocs top-level keys: {conflict_list}"
+        )
+
+    return clean_text(
+        base_text.rstrip("\n")
+        + "\n\n"
+        + "# Additional unmanaged top-level keys from mkdocs.extra.yml\n\n"
+        + extra_text
+    )
+
+
 def _write_python_docs_files(ctx: PythonSetupContext, project: PythonProject) -> None:
     repository_url = _python_repository_url(project)
     repository_name = _python_repository_name(project)
@@ -766,19 +883,22 @@ def _write_python_docs_files(ctx: PythonSetupContext, project: PythonProject) ->
         "has_docs_snippets_test": (project.path / "tests" / "test_docs_snippets.py").is_file(),
     }
 
-    dev.io.write_text_file_if_missing(
-        project.path / "mkdocs.yml",
-        clean_text(
-            render_template(
-                ctx.python_mkdocs_template,
-                site_name=site_name,
-                site_description=site_description,
-                site_url=site_url,
-                repo_url=repository_url,
-                repo_name=repository_name,
-            )
-        ),
+    managed_mkdocs_text = _render_managed_mkdocs_text(
+        site_name=site_name,
+        site_description=site_description,
+        site_url=site_url,
+        repo_url=repository_url,
+        repo_name=repository_name,
+        template=ctx.python_mkdocs_template,
+        project_path=project.path,
     )
+    mkdocs_path = project.path / "mkdocs.yml"
+    if not mkdocs_path.exists() or is_setup_managed_file(mkdocs_path):
+        dev.io.write_text_file(mkdocs_path, managed_mkdocs_text)
+    elif (project.path / "mkdocs.extra.yml").is_file():
+        warning(
+            f"{mkdocs_path} is not managed by setup; mkdocs.extra.yml will be ignored until mkdocs.yml is regenerated"
+        )
     dev.io.write_text_file_if_missing(
         project.path / "docs" / "index.md",
         clean_text(
@@ -881,8 +1001,8 @@ def setup_python_project(ctx: PythonSetupContext, project: PythonProject, intera
     )
 
     pyproject_path = project.path / "pyproject.toml"
-    pyproject_text = render_python_pyproject(ctx, project)
-    dev.io.write_text_file(pyproject_path, clean_text(pyproject_text))
+    pyproject_text = _render_managed_pyproject_text(ctx, project)
+    dev.io.write_text_file(pyproject_path, pyproject_text)
 
     dev.io.write_text_file_if_missing(
         project.path / "pyrightconfig.json",
