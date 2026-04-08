@@ -156,6 +156,10 @@ E_PROBLEMATIC_FILENAME_CHARS = IssueType(
 )
 E_NON_ASCII_FILENAME = IssueType("E_NON_ASCII_FILENAME", "Filename contains non-ASCII characters.")
 E_RESERVED_FILENAME = IssueType("E_RESERVED_FILENAME", "Filename is a reserved name on Windows.")
+E_LEADING_TRAILING_SPACES_OR_DOTS = IssueType(
+    "E_LEADING_TRAILING_SPACES_OR_DOTS",
+    "Filename has leading or trailing spaces or dots.",
+)
 
 
 class FilenamePropertiesCheck(FileCheck):
@@ -209,6 +213,10 @@ class FilenamePropertiesCheck(FileCheck):
         if self.reserved_pattern and self.reserved_pattern.match(filename):
             ctx.add_issue(E_RESERVED_FILENAME)
 
+        # 4. Check for leading/trailing spaces or dots
+        if self.check_leading_trailing and filename != filename.strip(" ."):
+            ctx.add_issue(E_LEADING_TRAILING_SPACES_OR_DOTS)
+
 
 DEFAULT_CONVENTIONS: dict[str, dict[str, Pattern[str] | str]] = {
     ".py": {"pattern": re.compile(r"^[a-z_]+$"), "description": "snake_case"},
@@ -242,7 +250,7 @@ class NamingConventionCheck(FileCheck):
                              '.java': {'pattern': re.compile(r'^[A-Z][a-zA-Z0-9]*$'), 'description': 'PascalCase'}
                          }
         """
-        self.conventions = conventions if conventions else {}
+        self.conventions = conventions if conventions is not None else DEFAULT_CONVENTIONS
 
     def check(self, ctx: FileContext) -> None:
         filename_stem = ctx.path.stem  # Filename without extension
@@ -271,6 +279,10 @@ E_SYMLINK_BROKEN = IssueType(
     "E_SYMLINK_BROKEN",
     "Symbolic link '{link_name}' points to a non-existent target '{target}'.",
 )
+E_SYMLINK_ESCAPES_REPO = IssueType(
+    "E_SYMLINK_ESCAPES_REPO",
+    "Symbolic link '{link_name}' points outside the repository to '{target}'.",
+)
 E_SYMLINK = IssueType(
     "E_SYMLINK",
     "Symbolic links are not allowed in repositories due to Windows issues.",
@@ -284,10 +296,18 @@ class SymlinkTargetCheck(FileCheck):
         self.check_absolute = check_absolute
         self.check_broken = check_broken
 
+    def _find_repo_root(self, path: Path) -> Path | None:
+        current = path.resolve().parent if path.is_symlink() else path.resolve()
+        for candidate in (current, *current.parents):
+            if (candidate / ".git").exists():
+                return candidate
+        return None
+
     def check(self, ctx: FileContext) -> None:
         if not ctx.path.is_symlink():
             return
 
+        ctx.add_issue(E_SYMLINK)
         target_path_str = os.readlink(str(ctx.path))  # Read link target as string
         target_path = Path(target_path_str)  # Convert to Path
 
@@ -298,6 +318,14 @@ class SymlinkTargetCheck(FileCheck):
                 link_name=ctx.path.name,
                 target=target_path_str,
             )
+
+        repo_root = self._find_repo_root(ctx.path)
+        if repo_root is not None:
+            resolved_target = (ctx.path.parent / target_path).resolve(strict=False)
+            try:
+                resolved_target.relative_to(repo_root.resolve())
+            except ValueError:
+                ctx.add_issue(E_SYMLINK_ESCAPES_REPO, link_name=ctx.path.name, target=target_path_str)
 
         # 2. Check if target exists (relative to the link's location)
         # Note: resolve() can fail if the link is broken deeper in the chain
@@ -367,12 +395,14 @@ __all__ = [
     "E_PROBLEMATIC_FILENAME_CHARS",
     "E_NON_ASCII_FILENAME",
     "E_RESERVED_FILENAME",
+    "E_LEADING_TRAILING_SPACES_OR_DOTS",
     "FilenamePropertiesCheck",
     "DEFAULT_CONVENTIONS",
     "E_FILE_NAMING_CONVENTION",
     "NamingConventionCheck",
     "E_SYMLINK_POINTS_ABSOLUTE",
     "E_SYMLINK_BROKEN",
+    "E_SYMLINK_ESCAPES_REPO",
     "E_SYMLINK",
     "SymlinkTargetCheck",
     "E_CASE_CONFLICTING_FILENAME",

@@ -538,18 +538,8 @@ def answer_about_file(
     return content or ""
 
 
-def agent_call(
-    root: Path,
-    task: str,
-    /,
-    api_key: str | None = None,
-    client: openai.Client | None = None,
-) -> str:
-    if client is None:
-        assert api_key is not None, "API key is required"
-        client = openai.Client(api_key=api_key)
-
-    tools: list[ChatCompletionToolParam] = [
+def _agent_tools() -> list[ChatCompletionToolParam]:
+    return [
         {
             "type": "function",
             "function": {
@@ -568,7 +558,7 @@ def agent_call(
                             "description": "What has to be done. Has to be extremely detailed: provide ALL the context you have.",
                         },
                     },
-                    "required": ["paths", "question"],
+                    "required": ["paths", "task_or_question"],
                 },
             },
         },
@@ -590,6 +580,51 @@ def agent_call(
             },
         },
     ]
+
+
+def _summarize_agent_tool_arguments(tool_name: str, tool_arguments: object) -> str:
+    tool_arguments_obj = as_dict(tool_arguments)
+    if tool_arguments_obj is None:
+        return "invalid-arguments"
+
+    if tool_name == "request_to_developer":
+        raw_paths = tool_arguments_obj.get("paths")
+        paths = raw_paths if isinstance(raw_paths, list) else []
+        task_or_question = tool_arguments_obj.get("task_or_question")
+        task_length = len(task_or_question) if isinstance(task_or_question, str) else 0
+        return f"paths_count={len(paths)} task_chars={task_length}"
+
+    if tool_name == "answer":
+        result = tool_arguments_obj.get("result")
+        result_length = len(result) if isinstance(result, str) else 0
+        return f"result_chars={result_length}"
+
+    return f"keys={','.join(sorted(tool_arguments_obj))}"
+
+
+def _summarize_agent_tool_result(result: object) -> str:
+    if isinstance(result, str):
+        return f"string chars={len(result)}"
+
+    result_obj = as_dict(result)
+    if result_obj is not None:
+        return f"dict keys={','.join(sorted(result_obj))}"
+
+    return f"type={type(result).__name__}"
+
+
+def agent_call(
+    root: Path,
+    task: str,
+    /,
+    api_key: str | None = None,
+    client: openai.Client | None = None,
+) -> str:
+    if client is None:
+        assert api_key is not None, "API key is required"
+        client = openai.Client(api_key=api_key)
+
+    tools = _agent_tools()
 
     def list_files(root: Path) -> list[str]:
         if not root.is_dir():
@@ -639,7 +674,7 @@ def agent_call(
     initial_prompt += "ask as many questions as you need to clarify everything.\n\n"
     initial_prompt += f"<task>{task}</task>\n\n"
 
-    logging.info(f"Initial prompt: {initial_prompt}")
+    logging.info("Starting agent_call with file_count=%d task_chars=%d", len(known_files), len(task))
 
     messages: list[ChatCompletionMessageParam] = [
         {
@@ -674,7 +709,11 @@ def agent_call(
                 tool_name = tool_function.name
                 tool_arguments = json.loads(tool_function.arguments)
 
-                logging.info(f"Calling tool {tool_name} with arguments {tool_arguments}")
+                logging.info(
+                    "Calling tool %s with %s",
+                    tool_name,
+                    _summarize_agent_tool_arguments(tool_name, tool_arguments),
+                )
 
                 if tool_name == "request_to_developer":
                     paths = tool_arguments["paths"]
@@ -682,7 +721,7 @@ def agent_call(
 
                     result = answer(paths, question)
 
-                    logging.info(f"Answered question: {result}")
+                    logging.info("Tool %s returned %s", tool_name, _summarize_agent_tool_result(result))
 
                     msg: ChatCompletionToolMessageParam = {
                         "tool_call_id": tool_id,

@@ -216,19 +216,21 @@ def create_banner(
     space_between_img_text_factor: float = 0.5,  # Factor of padding for space
 ) -> None:
     """
-    Create a banner that places an image on the left (or right) side
-    and text(s) next to it. By default, the banner background is black,
-    and we download & use an Open Sans TTF font from Google Fonts.
+    Create a banner that places an image on the left and text next to it.
+    The banner uses the caller-provided ``font_path`` to render the text.
 
     :param image_path: Path to the input PNG.
     :param main_text: The main heading text to display.
     :param subtitle_text: An optional subtitle below the main text.
     :param background_color: The background color (e.g. 'black').
-    :param font_url: Where to download the font from, if needed.
+    :param font_path: Path to the font file used for rendering text.
     :param output_path: Output filename for the banner.
+    :param icon_target_size: Maximum dimension for the icon.
     :param font_size: Font size for main text.
     :param subtitle_font_size: Font size for subtitle.
+    :param text_color: Text color for the main text and subtitle.
     :param padding: Horizontal/vertical padding around texts.
+    :param space_between_img_text_factor: Spacing factor between the icon and text block.
     """
     banner = _render_banner(
         image_path=image_path,
@@ -252,6 +254,7 @@ def create_banner(
         _save_banner_png(banner, output)
     except Exception as e:
         _LOGGER.exception("Error saving banner to %s: %s", output, e)
+        raise
 
 
 if __name__ == "__main__":

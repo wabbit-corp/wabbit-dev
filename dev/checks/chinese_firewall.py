@@ -73,7 +73,7 @@ class CensoredKeywords(FileCheck):
         if not ctx.expected_properties.is_text:
             return None
 
-        for line_number, line in enumerate(ctx.read_text(E_CENSORED_KEYWORD).splitlines()):
+        for line_number, line in enumerate(ctx.read_text(E_CENSORED_KEYWORD).splitlines(), start=1):
             for match in self.error_on_regex.finditer(line):
                 keyword_found = match.group(0)
                 ctx.add_issue(E_CENSORED_KEYWORD, line=line_number, keyword=keyword_found)

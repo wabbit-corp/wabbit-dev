@@ -9,8 +9,10 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import time
 from dataclasses import dataclass
-from datetime import datetime
+from pathlib import Path
 
 from mu.typed import tag
 
@@ -56,12 +58,79 @@ class StaleCodeCheck(FileCheck):
             )
         ]
 
+    def _find_repo_root(self, path: Path) -> Path | None:
+        current = path.resolve().parent if path.is_file() else path.resolve()
+        for candidate in (current, *current.parents):
+            if (candidate / ".git").exists():
+                return candidate
+        return None
+
+    def _line_age_days_by_git_blame(
+        self,
+        path: Path,
+        *,
+        now_timestamp: float | None = None,
+    ) -> dict[int, float] | None:
+        repo_root = self._find_repo_root(path)
+        if repo_root is None:
+            return None
+
+        resolved_repo_root = repo_root.resolve()
+        resolved_path = path.resolve()
+        try:
+            relative_path = resolved_path.relative_to(resolved_repo_root)
+        except ValueError:
+            return None
+
+        try:
+            result = subprocess.run(
+                ["git", "blame", "--line-porcelain", "--", relative_path.as_posix()],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            return None
+
+        if result.returncode != 0:
+            return None
+
+        effective_now = time.time() if now_timestamp is None else now_timestamp
+        ages_by_line: dict[int, float] = {}
+        current_line_number: int | None = None
+        current_author_time: int | None = None
+
+        for raw_line in result.stdout.splitlines():
+            if raw_line.startswith("\t"):
+                if current_line_number is not None and current_author_time is not None:
+                    ages_by_line[current_line_number] = (effective_now - current_author_time) / 86400.0
+                current_line_number = None
+                current_author_time = None
+                continue
+
+            if raw_line.startswith("author-time "):
+                value = raw_line.removeprefix("author-time ").strip()
+                try:
+                    current_author_time = int(value)
+                except ValueError:
+                    current_author_time = None
+                continue
+
+            header_match = re.match(r"^[0-9a-f^]{4,}\s+\d+\s+(\d+)(?:\s+\d+)?$", raw_line)
+            if header_match is not None:
+                current_line_number = int(header_match.group(1))
+                current_author_time = None
+
+        return ages_by_line
+
     def check(self, ctx: FileContext) -> None:
         if not ctx.path.is_file():
             return
         if not ctx.expected_properties.is_text:
             return
 
+        line_ages_by_blame = self._line_age_days_by_git_blame(ctx.path)
         try:
             mtime = ctx.path.stat().st_mtime
         except OSError:
@@ -71,11 +140,13 @@ class StaleCodeCheck(FileCheck):
 
         for ln, line in enumerate(text.splitlines(), 1):
             if self.todo_re.search(line):
-                if mtime is not None:
-                    age_days = (datetime.now().timestamp() - mtime) / 86400.0
-                    if age_days >= self.todo_age_days:
-                        ctx.add_issue(E_STALE_TODO, line=ln)
-                else:
+                age_days = line_ages_by_blame.get(ln) if line_ages_by_blame is not None else None
+                if age_days is None and mtime is not None:
+                    age_days = (time.time() - mtime) / 86400.0
+
+                if age_days is None:
+                    ctx.add_issue(E_STALE_TODO, line=ln)
+                elif age_days >= self.todo_age_days:
                     ctx.add_issue(E_STALE_TODO, line=ln)
 
 

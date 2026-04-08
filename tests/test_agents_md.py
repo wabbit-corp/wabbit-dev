@@ -139,6 +139,45 @@ def test_write_repo_agents_file_updates_only_managed_block(tmp_path: Path) -> No
     assert "`SPECIFICATION.md`" in agents_text
 
 
+def test_write_repo_agents_file_reports_multiple_managed_blocks_with_file_path(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import dev.agents_md as agents_md
+    from dev.config import Config
+
+    repo_root = tmp_path / "demo"
+    repo_root.mkdir()
+
+    project = _make_python_project(repo_root, project_id="demo")
+    config = Config(raw=parse("()"))
+    config.defined_projects["demo"] = project
+
+    agents_path = repo_root / "AGENTS.md"
+    original_text = "\n".join(
+        [
+            "# AGENTS",
+            "",
+            agents_md.AGENTS_MANAGED_FACTS_BEGIN,
+            "first block",
+            agents_md.AGENTS_MANAGED_FACTS_END,
+            "",
+            agents_md.AGENTS_MANAGED_FACTS_BEGIN,
+            "second block",
+            agents_md.AGENTS_MANAGED_FACTS_END,
+            "",
+        ]
+    )
+    agents_path.write_text(original_text, encoding="utf-8")
+
+    warnings: list[str] = []
+    monkeypatch.setattr(agents_md, "warning", warnings.append)
+
+    assert agents_md.write_repo_agents_file(config, repo_root, [project]) is False
+    assert agents_path.read_text(encoding="utf-8") == original_text
+    assert warnings == [f"Skipping malformed AGENTS.md managed block in {agents_path}: found 2 managed blocks"]
+
+
 def test_setup_writes_repo_root_agents_for_repo_managed_project(tmp_path: Path, monkeypatch) -> None:
     import dev.tasks.setup as setup_module
     from dev.config import Config, RepoDefinition

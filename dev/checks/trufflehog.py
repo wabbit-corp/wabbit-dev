@@ -134,7 +134,7 @@ class HighEntropyStringCheck(FileCheck):
 
         text = ctx.read_text(E_HIGH_ENTROPY_STRING)
 
-        for line_number, line in enumerate(text.splitlines()):
+        for line_number, line in enumerate(text.splitlines(), start=1):
             # 1. Find all URL spans in the current line
             url_spans = [(m.start(), m.end()) for m in self.url_regex.finditer(line)]
 

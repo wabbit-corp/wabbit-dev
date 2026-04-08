@@ -14,6 +14,18 @@ from dev.messages import error
 E_KTLINT_MISSING = IssueType("E_KTLINT_MISSING", "The 'ktlint' formatter is not installed.")
 E_KTFMT_MISSING = IssueType("E_KTFMT_MISSING", "The 'ktfmt' formatter is not installed.")
 E_KOTLIN_NOT_FORMATTED = IssueType("E_KOTLIN_NOT_FORMATTED", "Kotlin file is not formatted with ktfmt.")
+E_KTFMT_FAILED = IssueType("E_KTFMT_FAILED", "The 'ktfmt' formatter failed: {reason}.")
+
+
+def _formatter_output(result: subprocess.CompletedProcess[str]) -> str:
+    return "\n".join(part.strip() for part in (result.stdout, result.stderr) if part and part.strip())
+
+
+def _default_failure_reason(result: subprocess.CompletedProcess[str]) -> str:
+    output = _formatter_output(result)
+    if output:
+        return output
+    return f"Exited with status {result.returncode}"
 
 
 class KotlinFormattingCheck(FileCheck):
@@ -48,8 +60,15 @@ class KotlinFormattingCheck(FileCheck):
                 except Exception as e:
                     error(f"Failed to format {ctx.path}: {e}")
 
-            if result.returncode != 0:
+            output = _formatter_output(result)
+            if result.returncode == 0:
+                return
+            if "Unable to access jarfile" in output:
+                ctx.add_issue(E_KTFMT_MISSING)
+            elif result.returncode == 1:
                 ctx.add_issue(E_KOTLIN_NOT_FORMATTED, fix=fix)
+            else:
+                ctx.add_issue(E_KTFMT_FAILED, reason=_default_failure_reason(result))
 
         except FileNotFoundError:
             ctx.add_issue(E_KTFMT_MISSING)
@@ -112,6 +131,7 @@ class KotlinFormattingCheck(FileCheck):
 
 E_CLANG_FORMAT_MISSING = IssueType("E_CLANG_FORMAT_MISSING", "The 'clang-format' formatter is not installed.")
 E_CPP_NOT_FORMATTED = IssueType("E_CPP_NOT_FORMATTED", "C/C++ file is not formatted with clang-format.")
+E_CLANG_FORMAT_FAILED = IssueType("E_CLANG_FORMAT_FAILED", "The 'clang-format' formatter failed: {reason}.")
 
 
 class CppFormattingCheck(FileCheck):
@@ -139,14 +159,17 @@ class CppFormattingCheck(FileCheck):
                 except Exception as e:
                     error(f"Failed to format {ctx.path}: {e}")
 
-            if result.returncode != 0:
+            if result.returncode == 1:
                 ctx.add_issue(E_CPP_NOT_FORMATTED, fix=fix)
+            elif result.returncode != 0:
+                ctx.add_issue(E_CLANG_FORMAT_FAILED, reason=_default_failure_reason(result))
         except FileNotFoundError:
             ctx.add_issue(E_CLANG_FORMAT_MISSING)
 
 
 E_PURSTIDY_MISSING = IssueType("E_PURSTIDY_MISSING", "The 'purs-tidy' formatter is not installed.")
 E_PURESCRIPT_NOT_FORMATTED = IssueType("E_PURESCRIPT_NOT_FORMATTED", "Purescript file is not formatted with purs-tidy.")
+E_PURSTIDY_FAILED = IssueType("E_PURSTIDY_FAILED", "The 'purs-tidy' formatter failed: {reason}.")
 
 
 class PurescriptFormattingCheck(FileCheck):
@@ -175,14 +198,29 @@ class PurescriptFormattingCheck(FileCheck):
                 except Exception as e:
                     error(f"Failed to format {ctx.path}: {e}")
 
-            if result.returncode != 0:
+            if result.returncode == 1:
                 ctx.add_issue(E_PURESCRIPT_NOT_FORMATTED, fix=fix)
+            elif result.returncode != 0:
+                ctx.add_issue(E_PURSTIDY_FAILED, reason=_default_failure_reason(result))
         except FileNotFoundError:
             ctx.add_issue(E_PURSTIDY_MISSING)
 
 
 E_CSHARPIER_MISSING = IssueType("E_CSHARPIER_MISSING", "The 'csharpier' formatter is not installed.")
 E_CS_NOT_FORMATTED = IssueType("E_CS_NOT_FORMATTED", "C# file is not formatted with csharpier.")
+E_CSHARPIER_FAILED = IssueType("E_CSHARPIER_FAILED", "The 'csharpier' formatter failed: {reason}.")
+
+
+def _looks_like_dotnet_csharpier_missing(result: subprocess.CompletedProcess[str]) -> bool:
+    output = _formatter_output(result).lower()
+    missing_markers = (
+        "dotnet-csharpier does not exist",
+        "could not execute because the specified command or file was not found",
+        "you intended to execute a .net program",
+        "dotnet csharpier",
+        "was not found",
+    )
+    return any(marker in output for marker in missing_markers)
 
 
 class CSharpFormattingCheck(FileCheck):
@@ -219,8 +257,9 @@ class CSharpFormattingCheck(FileCheck):
                         selected = "legacy"
                         result = result_legacy
                 except FileNotFoundError:
-                    # ignore here; handled below if needed
-                    pass
+                    if _looks_like_dotnet_csharpier_missing(result):
+                        ctx.add_issue(E_CSHARPIER_MISSING)
+                        return
 
             def fix() -> None:
                 try:
@@ -241,8 +280,13 @@ class CSharpFormattingCheck(FileCheck):
                 except Exception as e:
                     error(f"Failed to format {ctx.path}: {e}")
 
-            if result.returncode != 0:
+            if result.returncode == 1:
                 ctx.add_issue(E_CS_NOT_FORMATTED, fix=fix)
+            elif result.returncode != 0:
+                if selected == "dotnet" and _looks_like_dotnet_csharpier_missing(result):
+                    ctx.add_issue(E_CSHARPIER_MISSING)
+                else:
+                    ctx.add_issue(E_CSHARPIER_FAILED, reason=_default_failure_reason(result))
 
         except FileNotFoundError:
             # Neither `dotnet` nor legacy `csharpier` found
@@ -253,14 +297,18 @@ __all__ = [
     "E_KTLINT_MISSING",
     "E_KTFMT_MISSING",
     "E_KOTLIN_NOT_FORMATTED",
+    "E_KTFMT_FAILED",
     "KotlinFormattingCheck",
     "E_CLANG_FORMAT_MISSING",
     "E_CPP_NOT_FORMATTED",
+    "E_CLANG_FORMAT_FAILED",
     "CppFormattingCheck",
     "E_PURSTIDY_MISSING",
     "E_PURESCRIPT_NOT_FORMATTED",
+    "E_PURSTIDY_FAILED",
     "PurescriptFormattingCheck",
     "E_CSHARPIER_MISSING",
     "E_CS_NOT_FORMATTED",
+    "E_CSHARPIER_FAILED",
     "CSharpFormattingCheck",
 ]

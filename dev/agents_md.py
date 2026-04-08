@@ -180,10 +180,11 @@ def _replace_managed_facts_block(existing_text: str, generated_block: str, *, pa
         re.escape(AGENTS_MANAGED_FACTS_BEGIN) + r".*?" + re.escape(AGENTS_MANAGED_FACTS_END),
         re.DOTALL,
     )
-    updated_text, replaced_count = pattern.subn(generated_block.rstrip("\n"), existing_text, count=1)
-    if replaced_count != 1:
-        warning(f"Skipping malformed AGENTS.md managed block in {path}")
+    matches = list(pattern.finditer(existing_text))
+    if len(matches) != 1:
+        warning(f"Skipping malformed AGENTS.md managed block in {path}: found {len(matches)} managed blocks")
         return None
+    updated_text = pattern.sub(generated_block.rstrip("\n"), existing_text, count=1)
     return _normalize_markdown(updated_text)
 
 

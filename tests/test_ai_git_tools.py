@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import json
+import logging
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
-from dev.ai import _render_readme_prompt_template, is_allowed_git_tool_command, run_safe_git_tool_command
+from dev.ai import (
+    _agent_tools,
+    _render_readme_prompt_template,
+    agent_call,
+    is_allowed_git_tool_command,
+    run_safe_git_tool_command,
+)
 
 
 def test_is_allowed_git_tool_command_accepts_read_only_patterns() -> None:
@@ -67,3 +76,87 @@ def test_render_readme_prompt_template_renders_company_contact_values(tmp_path: 
     assert "legal@example.com" in rendered
     assert "{{project-name}}" in rendered
     assert "demo-lib" in rendered
+
+
+def test_agent_tools_require_task_or_question() -> None:
+    tools = _agent_tools()
+    request_tool = next(tool for tool in tools if tool["function"]["name"] == "request_to_developer")
+
+    required = request_tool["function"]["parameters"]["required"]
+
+    assert required == ["paths", "task_or_question"]
+
+
+def test_agent_call_logs_only_metadata_for_prompt_and_tool_results(
+    tmp_path: Path,
+    monkeypatch,
+    caplog,
+) -> None:
+    (tmp_path / "README.md").write_text("TOP SECRET FILE CONTENT\n", encoding="utf-8")
+
+    def fake_answer_about_file(*_args: object, **_kwargs: object) -> str:
+        return "SUBORDINATE SECRET RESPONSE"
+
+    monkeypatch.setattr("dev.ai.answer_about_file", fake_answer_about_file)
+
+    def make_tool_call(call_id: str, name: str, arguments: dict[str, object]) -> SimpleNamespace:
+        return SimpleNamespace(
+            type="function",
+            id=call_id,
+            function=SimpleNamespace(name=name, arguments=json.dumps(arguments)),
+        )
+
+    first_message = SimpleNamespace(
+        content=None,
+        tool_calls=[
+            make_tool_call(
+                "call-1",
+                "request_to_developer",
+                {
+                    "paths": ["README.md"],
+                    "task_or_question": "USER SECRET TASK",
+                },
+            )
+        ],
+    )
+    second_message = SimpleNamespace(
+        content=None,
+        tool_calls=[
+            make_tool_call(
+                "call-2",
+                "answer",
+                {
+                    "result": "FINAL SECRET RESULT",
+                },
+            )
+        ],
+    )
+
+    responses = [
+        SimpleNamespace(choices=[SimpleNamespace(message=first_message, finish_reason="tool_calls")]),
+        SimpleNamespace(choices=[SimpleNamespace(message=second_message, finish_reason="tool_calls")]),
+    ]
+
+    class FakeCompletions:
+        def __init__(self, queued_responses: list[SimpleNamespace]) -> None:
+            self._queued_responses = queued_responses
+
+        def create(self, **_kwargs: object) -> SimpleNamespace:
+            assert self._queued_responses
+            return self._queued_responses.pop(0)
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions(responses)))
+
+    caplog.set_level(logging.INFO)
+
+    result = agent_call(tmp_path, "USER SECRET TASK", client=client)
+
+    assert result == "FINAL SECRET RESULT"
+    assert "USER SECRET TASK" not in caplog.text
+    assert "SUBORDINATE SECRET RESPONSE" not in caplog.text
+    assert "FINAL SECRET RESULT" not in caplog.text
+    assert "TOP SECRET FILE CONTENT" not in caplog.text
+    assert "README.md" not in caplog.text
+    assert "Starting agent_call with file_count=1" in caplog.text
+    assert "Calling tool request_to_developer with paths_count=1" in caplog.text
+    assert "Tool request_to_developer returned string chars=27" in caplog.text

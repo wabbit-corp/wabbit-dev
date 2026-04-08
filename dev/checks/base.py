@@ -144,14 +144,18 @@ class IssueList:
         Adds an issue to the list.
         """
         if self.issues:
-            if self.issues[-1] == issue:
+            previous_issue = self.issues[-1]
+            if previous_issue == issue:
                 return
-            if self.issues[-1].issue_type == issue.issue_type and self.issues[-1].data == issue.data:
-                if self.issues[-1].location and issue.location:
-                    if self.issues[-1].location.path != issue.location.path:
-                        return
-
-                    self.issues[-1].location = self.issues[-1].location + issue.location
+            if (
+                previous_issue.issue_type == issue.issue_type
+                and previous_issue.data == issue.data
+                and previous_issue.location is not None
+                and issue.location is not None
+                and previous_issue.location.path == issue.location.path
+            ):
+                previous_issue.location = previous_issue.location + issue.location
+                return
         self.issues.append(issue)
 
     def __iter__(self) -> Iterator[Issue]:
@@ -165,10 +169,9 @@ class IssueList:
         Adds multiple issues to the list.
         """
         if isinstance(issues, IssueList):
-            for issue in issues.issues:
-                self.append(issue)
-        else:
-            self.issues.extend(issues)
+            issues = issues.issues
+        for issue in issues:
+            self.append(issue)
 
 
 class CheckFailedWithReportedIssues(Exception):

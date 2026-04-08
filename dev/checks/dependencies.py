@@ -40,7 +40,7 @@ class PythonRequirementsPinnedCheck(FileCheck):
                 continue
 
             if not req.specifier:
-                ctx.add_issue(E_UNPINNED_DEPENDENCY, dep=line, path=ctx.path, line_number=ln)
+                ctx.add_issue(E_UNPINNED_DEPENDENCY, line=ln, dep=line)
                 continue
 
             #     # consider pinned only if there is exactly one == specifier
