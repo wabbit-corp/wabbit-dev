@@ -3,8 +3,8 @@
 ## Global Usage
 
 ```bash
+dev <command> [options]
 wabbit-dev <command> [options]
-python3 dev.py <command> [options]
 ```
 
 The command set is configuration-driven. Commands walk upward from the current
@@ -13,7 +13,7 @@ directory until `root.clj` and `root.private.clj` can be loaded.
 The CLI suggests close matches for mistyped commands, project IDs, checks, and
 path-or-project targets when it can infer what you meant.
 
-Use `wabbit-dev where` to inspect the exact workspace, project, and repo context
+Use `dev where` to inspect the exact workspace, project, and repo context
 the CLI inferred from the current directory.
 
 ## Target Model
@@ -82,26 +82,26 @@ commands from the workspace root.
 ### `completion bash`
 
 ```bash
-wabbit-dev completion bash
+dev completion bash
 ```
 
 Prints a bash completion script. Source it directly:
 
 ```bash
-source <(wabbit-dev completion bash)
+source <(dev completion bash)
 ```
 
 ### `completion zsh`
 
 ```bash
-wabbit-dev completion zsh
+dev completion zsh
 ```
 
 Prints a zsh completion script. Initialize completion, then source it:
 
 ```bash
 autoload -Uz compinit && compinit
-source <(wabbit-dev completion zsh)
+source <(dev completion zsh)
 ```
 
 The generated completion scripts query the live workspace when you press tab, so
@@ -118,10 +118,10 @@ they can complete:
 ### `doctor`
 
 ```bash
-wabbit-dev doctor
-wabbit-dev doctor app-wabbit-dev
-wabbit-dev doctor --only publish app-wabbit-dev
-wabbit-dev doctor --json
+dev doctor
+dev doctor app-wabbit-dev
+dev doctor --only publish app-wabbit-dev
+dev doctor --json
 ```
 
 Runs an environment and workspace readiness check covering:
@@ -153,8 +153,8 @@ project closure.
 ### `where`
 
 ```bash
-wabbit-dev where
-wabbit-dev where --json
+dev where
+dev where --json
 ```
 
 Prints the cwd context the CLI inferred, including:
@@ -174,7 +174,7 @@ or `status` will target when you omit explicit arguments.
 ### `config check`
 
 ```bash
-wabbit-dev config check
+dev config check
 ```
 
 Parses `root.clj` and `root.private.clj` and validates:
@@ -190,7 +190,7 @@ Use this first when changing the config DSL or debugging setup/build behavior.
 ### `project list`
 
 ```bash
-wabbit-dev project list
+dev project list
 ```
 
 Prints the configured projects in declaration order and groups nested repo
@@ -200,8 +200,8 @@ detected project type such as `python`, `kotlin/jvm`, or `kotlin/kmp`.
 ### `project show`
 
 ```bash
-wabbit-dev project show [TARGET ...]
-wabbit-dev project show [TARGET ...] --json
+dev project show [TARGET ...]
+dev project show [TARGET ...] --json
 ```
 
 Prints the resolved metadata for one or more configured projects, including:
@@ -217,10 +217,10 @@ Prints the resolved metadata for one or more configured projects, including:
 Example:
 
 ```bash
-wabbit-dev project show
-wabbit-dev project show app-wabbit-dev
-wabbit-dev project show jeeves
-wabbit-dev project show app-wabbit-dev --json
+dev project show
+dev project show app-wabbit-dev
+dev project show jeeves
+dev project show app-wabbit-dev --json
 ```
 
 With no targets from inside a configured project or repo, the command defaults
@@ -230,8 +230,8 @@ target to avoid dumping the full workspace.
 ### `project deps`
 
 ```bash
-wabbit-dev project deps [TARGET ...]
-wabbit-dev project deps [TARGET ...] --json
+dev project deps [TARGET ...]
+dev project deps [TARGET ...] --json
 ```
 
 Prints just the resolved dependency list for one or more configured projects.
@@ -241,10 +241,10 @@ post-resolution dependency view.
 Examples:
 
 ```bash
-wabbit-dev project deps
-wabbit-dev project deps app-wabbit-dev
-wabbit-dev project deps jeeves
-wabbit-dev project deps jeeves --json
+dev project deps
+dev project deps app-wabbit-dev
+dev project deps jeeves
+dev project deps jeeves --json
 ```
 
 With no targets from inside a configured project or repo, the command defaults
@@ -254,8 +254,8 @@ target to avoid dumping the full workspace.
 ### `project repo`
 
 ```bash
-wabbit-dev project repo [TARGET ...]
-wabbit-dev project repo [TARGET ...] --json
+dev project repo [TARGET ...]
+dev project repo [TARGET ...] --json
 ```
 
 Prints repo-level metadata for the repos associated with one or more configured
@@ -274,10 +274,10 @@ The output includes:
 Examples:
 
 ```bash
-wabbit-dev project repo
-wabbit-dev project repo app-wabbit-dev
-wabbit-dev project repo jeeves
-wabbit-dev project repo jeeves --json
+dev project repo
+dev project repo app-wabbit-dev
+dev project repo jeeves
+dev project repo jeeves --json
 ```
 
 With no targets from inside a configured project or repo, the command defaults
@@ -287,8 +287,8 @@ configured repo.
 ### `project targets`
 
 ```bash
-wabbit-dev project targets [TARGET ...]
-wabbit-dev project targets [TARGET ...] --json
+dev project targets [TARGET ...]
+dev project targets [TARGET ...] --json
 ```
 
 Prints the declared Kotlin Multiplatform target platforms for matching
@@ -308,10 +308,10 @@ and the raw Gradle `targetKinds`.
 Examples:
 
 ```bash
-wabbit-dev project targets
-wabbit-dev project targets jeeves
-wabbit-dev project targets ./jeeves/client
-wabbit-dev project targets jeeves --json
+dev project targets
+dev project targets jeeves
+dev project targets ./jeeves/client
+dev project targets jeeves --json
 ```
 
 ## Generation, Build, and Maintenance
@@ -319,7 +319,7 @@ wabbit-dev project targets jeeves --json
 ### `setup`
 
 ```bash
-wabbit-dev setup [--dev] [--local] [--json] [TARGET ...]
+dev setup [--dev] [--local] [--json] [TARGET ...]
 ```
 
 Generates or refreshes managed files from configuration.
@@ -337,17 +337,17 @@ Behavior:
 Typical uses:
 
 ```bash
-wabbit-dev setup
-wabbit-dev setup app-wabbit-dev
-wabbit-dev setup jeeves
-wabbit-dev setup --local app-datatron
-wabbit-dev setup app-wabbit-dev --json
+dev setup
+dev setup app-wabbit-dev
+dev setup jeeves
+dev setup --local app-datatron
+dev setup app-wabbit-dev --json
 ```
 
 ### `build`
 
 ```bash
-wabbit-dev build [TARGET ...] [--json]
+dev build [TARGET ...] [--json]
 ```
 
 Builds configured projects in topological dependency order.
@@ -365,7 +365,7 @@ results, and a summary count.
 ### `clean`
 
 ```bash
-wabbit-dev clean [TARGET ...]
+dev clean [TARGET ...]
 ```
 
 Removes generated build and cache directories such as:
@@ -383,7 +383,7 @@ projects or repos.
 ### `cloc`
 
 ```bash
-wabbit-dev cloc [TARGET ...]
+dev cloc [TARGET ...]
 ```
 
 Runs `cloc` and prints per-language totals.
@@ -404,7 +404,7 @@ Project-specific scope:
 ### `duplicates`
 
 ```bash
-wabbit-dev duplicates FOLDER ... [--exclude PATTERN ...] [--filter PATTERN ...] [--size BYTES] [--no-default-excludes] [--zip-contents] [--weak-encrypted-zip]
+dev duplicates FOLDER ... [--exclude PATTERN ...] [--filter PATTERN ...] [--size BYTES] [--no-default-excludes] [--zip-contents] [--weak-encrypted-zip]
 ```
 
 Finds duplicate files and duplicate directory trees using staged fingerprinting.
@@ -420,7 +420,7 @@ Useful options:
 ### `llmcopy`
 
 ```bash
-wabbit-dev llmcopy PATH ...
+dev llmcopy PATH ...
 ```
 
 Reads files, directories, or glob patterns and copies their contents to the
@@ -448,7 +448,7 @@ Ignored by default:
 ### `dep graph`
 
 ```bash
-wabbit-dev dep graph [TARGET ...] [--artifacts]
+dev dep graph [TARGET ...] [--artifacts]
 ```
 
 Generates an SVG dependency graph.
@@ -462,7 +462,7 @@ Output is written as `dependency_graph.svg`.
 ### `dep updates`
 
 ```bash
-wabbit-dev dep updates
+dev dep updates
 ```
 
 Checks the named Maven libraries defined in `root.clj` against their configured
@@ -474,7 +474,7 @@ named library aliases.
 ### `jitpack info`
 
 ```bash
-wabbit-dev jitpack info GROUP ARTIFACT [VERSION]
+dev jitpack info GROUP ARTIFACT [VERSION]
 ```
 
 Prints JitPack metadata for an artifact, including:
@@ -488,8 +488,8 @@ Prints JitPack metadata for an artifact, including:
 ### `publish`
 
 ```bash
-wabbit-dev publish [TARGET ...]
-wabbit-dev publish [TARGET ...] --dry-run
+dev publish [TARGET ...]
+dev publish [TARGET ...] --dry-run
 ```
 
 Publishes configured projects in dependency order.
@@ -515,11 +515,11 @@ targets without uploading artifacts or contacting remote publish services.
 ### `check`
 
 ```bash
-wabbit-dev check --list
-wabbit-dev check --list --json
-wabbit-dev check --describe SpdxHeaderCheck
-wabbit-dev check --describe SpdxHeaderCheck --json
-wabbit-dev check [TARGET] [CHECK ...] [--fix]
+dev check --list
+dev check --list --json
+dev check --describe SpdxHeaderCheck
+dev check --describe SpdxHeaderCheck --json
+dev check [TARGET] [CHECK ...] [--fix]
 ```
 
 Runs the loaded check suite against:
@@ -538,13 +538,13 @@ Discovery helpers:
 Examples:
 
 ```bash
-wabbit-dev check .
-wabbit-dev check app-wabbit-dev
-wabbit-dev check jeeves
-wabbit-dev check app-wabbit-dev/dev/cli.py
-wabbit-dev check :app-wabbit-dev
-wabbit-dev check :root --fix
-wabbit-dev check . SpdxHeaderCheck
+dev check .
+dev check app-wabbit-dev
+dev check jeeves
+dev check app-wabbit-dev/dev/cli.py
+dev check :app-wabbit-dev
+dev check :root --fix
+dev check . SpdxHeaderCheck
 ```
 
 Important notes:
@@ -556,13 +556,13 @@ Important notes:
 ### `spdx headers`
 
 ```bash
-wabbit-dev spdx headers [TARGET] [--fix]
+dev spdx headers [TARGET] [--fix]
 ```
 
 Runs only the SPDX header check. This is a focused shortcut for:
 
 ```bash
-wabbit-dev check TARGET SpdxHeaderCheck
+dev check TARGET SpdxHeaderCheck
 ```
 
 Use `--fix` to insert or normalize headers where the check supports it.
@@ -570,7 +570,7 @@ Use `--fix` to insert or normalize headers where the check supports it.
 ### `secrets scan`
 
 ```bash
-wabbit-dev secrets scan [TARGET]
+dev secrets scan [TARGET]
 ```
 
 Runs the internal high-entropy-string check against a target path.
@@ -578,8 +578,8 @@ Runs the internal high-entropy-string check against a target path.
 Examples:
 
 ```bash
-wabbit-dev secrets scan .
-wabbit-dev secrets scan :root
+dev secrets scan .
+dev secrets scan :root
 ```
 
 Targets can be:
@@ -592,7 +592,7 @@ Targets can be:
 ### `contributors audit`
 
 ```bash
-wabbit-dev contributors audit
+dev contributors audit
 ```
 
 Audits configured repositories for contributor identities that do not match the
@@ -606,7 +606,7 @@ loaded workspace config.
 ### `status`
 
 ```bash
-wabbit-dev status TARGET ... [--json]
+dev status TARGET ... [--json]
 ```
 
 Shows tracked working-tree changes for:
@@ -624,8 +624,8 @@ integrations.
 ### `commit`
 
 ```bash
-wabbit-dev commit [TARGET ...]
-wabbit-dev commit [TARGET ...] --dry-run
+dev commit [TARGET ...]
+dev commit [TARGET ...] --dry-run
 ```
 
 Runs PROD setup for the selected projects, groups them by repository, stages
@@ -642,8 +642,8 @@ modifying files or creating commits.
 ### `push`
 
 ```bash
-wabbit-dev push [TARGET ...]
-wabbit-dev push [TARGET ...] --dry-run
+dev push [TARGET ...]
+dev push [TARGET ...] --dry-run
 ```
 
 Pushes `origin/master` and tags.

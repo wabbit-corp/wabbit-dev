@@ -21,9 +21,9 @@ generated files match the source of truth in `root.clj`.
 Typical workflow:
 
 ```bash
-python3 dev.py config check
-python3 dev.py setup --local app-wabbit-dev
-python3 dev.py check app-wabbit-dev
+dev config check
+dev setup --local app-wabbit-dev
+dev check app-wabbit-dev
 ```
 
 ## Docs Maintenance

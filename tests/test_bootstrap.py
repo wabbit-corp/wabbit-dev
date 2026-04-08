@@ -45,16 +45,15 @@ def test_build_workspace_venv_reexec_argv_for_module_mode(tmp_path: Path) -> Non
     assert result == [str(venv_python), "-m", "dev", "build", "demo"]
 
 
-def test_canonical_rerun_command_prefers_workspace_dev_shim(tmp_path: Path) -> None:
+def test_canonical_rerun_command_uses_global_dev_name(tmp_path: Path) -> None:
     from dev.bootstrap import canonical_rerun_command
 
     workspace_root = tmp_path / "workspace"
     nested = workspace_root / "apps" / "demo"
     nested.mkdir(parents=True, exist_ok=True)
     (workspace_root / "root.clj").write_text("()", encoding="utf-8")
-    (workspace_root / "dev").write_text("#!/bin/sh\n", encoding="utf-8")
 
     command = canonical_rerun_command(["build", "demo"], cwd=nested)
 
     assert command is not None
-    assert "&& ./dev build demo" in command
+    assert "&& dev build demo" in command

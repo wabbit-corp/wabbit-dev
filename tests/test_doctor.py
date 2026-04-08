@@ -61,17 +61,17 @@ def test_preflight_for_command_prints_doctor_hint(monkeypatch: pytest.MonkeyPatc
                 label="Config load",
                 status=DoctorStatus.FAIL,
                 detail="Failed to parse workspace config.",
-                fix="Run `wabbit-dev config check` after fixing root.clj.",
+                fix="Run `dev config check` after fixing root.clj.",
             )
         ],
     )
 
-    ok = doctor_task.preflight_for_command("build", prog="dev.py")
+    ok = doctor_task.preflight_for_command("build", prog="dev")
 
     assert ok is False
     output = capsys.readouterr().out
     assert "Preflight checks failed for `build`." in output
-    assert "Run `dev.py doctor --only build` for targeted diagnostics" in output
+    assert "Run `dev doctor --only build` for targeted diagnostics" in output
 
 
 def test_resolve_doctor_check_ids_expands_command_groups() -> None:

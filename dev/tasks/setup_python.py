@@ -705,7 +705,7 @@ def _render_managed_pyproject_text(ctx: PythonSetupContext, project: PythonProje
         body_lines=[
             "This file is generated from workspace configuration in root.clj.",
             "To change it, update root.clj and regenerate with the dev command, for example:",
-            "  ./dev setup <project-or-repo>",
+            "  dev setup <project-or-repo>",
             "For unmanaged additional TOML sections, create pyproject.extra.toml beside this file.",
             "Do not redefine tables or keys already generated here.",
             "Direct edits to this file will be overwritten the next time setup runs.",
@@ -837,7 +837,7 @@ def _render_managed_mkdocs_text(
         body_lines=[
             "This file is generated from workspace configuration in root.clj.",
             "To change it, update root.clj and regenerate with the dev command, for example:",
-            "  ./dev setup <project-or-repo>",
+            "  dev setup <project-or-repo>",
             "For unmanaged additional MkDocs top-level keys, create mkdocs.extra.yml beside this file.",
             "Do not redefine keys already generated here.",
             "Direct edits to this file will be overwritten the next time setup runs.",

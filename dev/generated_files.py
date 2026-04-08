@@ -13,23 +13,23 @@ _BASE58_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]+$")
 
 _REPAIR_GUIDANCE_BY_FILENAME: Mapping[str, str] = {
     "build.gradle.kts": (
-        "Update root.clj and rerun ./dev setup; use build.extra.gradle.kts for durable manual Gradle logic."
+        "Update root.clj and rerun dev setup; use build.extra.gradle.kts for durable manual Gradle logic."
     ),
     "settings.gradle.kts": (
-        "Update root.clj and rerun ./dev setup; use settings.local.gradle.kts for local includeBuild and dependency-substitution overrides."
+        "Update root.clj and rerun dev setup; use settings.local.gradle.kts for local includeBuild and dependency-substitution overrides."
     ),
     "settings.local.gradle.kts": (
-        "Update root.clj and rerun ./dev setup --local instead of editing this generated local overlay directly."
+        "Update root.clj and rerun dev setup --local instead of editing this generated local overlay directly."
     ),
-    "gradle.properties": "Update root.clj and rerun ./dev setup for durable Gradle property changes.",
+    "gradle.properties": "Update root.clj and rerun dev setup for durable Gradle property changes.",
     "pyproject.toml": (
-        "Update root.clj and rerun ./dev setup; use pyproject.extra.toml for unmanaged extra TOML sections."
+        "Update root.clj and rerun dev setup; use pyproject.extra.toml for unmanaged extra TOML sections."
     ),
     "mkdocs.yml": (
-        "Update root.clj and rerun ./dev setup; use mkdocs.extra.yml for unmanaged extra MkDocs top-level keys."
+        "Update root.clj and rerun dev setup; use mkdocs.extra.yml for unmanaged extra MkDocs top-level keys."
     ),
-    "requirements.txt": "Update root.clj and rerun ./dev setup for durable dependency changes.",
-    "requirements-dev.txt": "Update root.clj and rerun ./dev setup for durable dependency changes.",
+    "requirements.txt": "Update root.clj and rerun dev setup for durable dependency changes.",
+    "requirements-dev.txt": "Update root.clj and rerun dev setup for durable dependency changes.",
 }
 
 
@@ -84,7 +84,7 @@ def is_setup_managed_file(path: Path) -> bool:
 def managed_file_repair_guidance(path: Path) -> str:
     return _REPAIR_GUIDANCE_BY_FILENAME.get(
         path.name,
-        "Update root.clj or the sanctioned override file, then rerun ./dev setup.",
+        "Update root.clj or the sanctioned override file, then rerun dev setup.",
     )
 
 

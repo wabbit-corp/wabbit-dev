@@ -23,8 +23,8 @@ configuration to:
 
 The main entrypoints are:
 
-- `wabbit-dev ...` after installation
-- `python3 dev.py ...` when running from this repository
+- `dev ...` after installation
+- `wabbit-dev ...` as a compatible explicit alias
 
 ## Installation
 
@@ -36,6 +36,8 @@ Install the published package:
 python3 -m pip install wabbit-dev
 ```
 
+This installs both `dev` and `wabbit-dev`.
+
 Install it from a checkout for local development:
 
 ```bash
@@ -43,6 +45,9 @@ python3 -m venv .venv
 . .venv/bin/activate
 python3 -m pip install -e .
 ```
+
+That editable install also exposes `dev` and `wabbit-dev` inside the active
+virtualenv.
 
 If you also want the test and packaging toolchain:
 
@@ -59,8 +64,8 @@ python3 -m pip install "mkdocs>=1.6,<2.0" "mkdocs-material>=9.6,<9.7" "pymdown-e
 Enable shell completion:
 
 ```bash
-source <(wabbit-dev completion bash)
-autoload -Uz compinit && compinit && source <(wabbit-dev completion zsh)
+source <(dev completion bash)
+autoload -Uz compinit && compinit && source <(dev completion zsh)
 ```
 
 ## Quick Start
@@ -68,34 +73,34 @@ autoload -Uz compinit && compinit && source <(wabbit-dev completion zsh)
 Validate the workspace configuration:
 
 ```bash
-python3 dev.py config check
+dev config check
 ```
 
 Inspect the configured project inventory:
 
 ```bash
-python3 dev.py project list
-python3 dev.py where
+dev project list
+dev where
 ```
 
 Generate managed files for a project and its dependencies:
 
 ```bash
-python3 dev.py setup --local app-datatron
+dev setup --local app-datatron
 ```
 
 Run checks:
 
 ```bash
-python3 dev.py check :root
-python3 dev.py check app-wabbit-dev
-python3 dev.py spdx headers . --fix
+dev check :root
+dev check app-wabbit-dev
+dev spdx headers . --fix
 ```
 
 Build a configured project:
 
 ```bash
-python3 dev.py build app-datatron
+dev build app-datatron
 ```
 
 ## Command Reference
@@ -153,9 +158,9 @@ Config-driven commands can be run from the workspace root or any nested
 subdirectory inside it. The CLI walks upward until it finds `root.clj`.
 
 Many target-oriented commands also infer a default target from the current
-directory. For example, running `python3 dev.py build` from inside a configured
-project builds that current project; running `python3 dev.py status` from
-inside a configured repo shows that current repo. Use `python3 dev.py where` to
+directory. For example, running `dev build` from inside a configured
+project builds that current project; running `dev status` from
+inside a configured repo shows that current repo. Use `dev where` to
 see the inferred workspace, project, and repo context.
 
 Common `root.clj` forms include:
@@ -214,42 +219,42 @@ HOST = "10.0.0.0"  # check:ignore E_HARDCODED_INTERNAL_HOSTNAME_IP value=10.0.0.
 
 The main target forms are:
 
-- `python3 dev.py doctor`
-- `python3 dev.py doctor --only publish app-wabbit-dev`
-- `python3 dev.py doctor --json`
-- `python3 dev.py build app-wabbit-dev --json`
-- `python3 dev.py setup app-wabbit-dev --json`
-- `python3 dev.py status app-wabbit-dev --json`
-- `python3 dev.py check --list`
-- `python3 dev.py check --list --json`
-- `python3 dev.py check --describe SpdxHeaderCheck`
-- `python3 dev.py check --describe SpdxHeaderCheck --json`
-- `python3 dev.py check .`
-- `python3 dev.py check path/to/file.py`
-- `python3 dev.py check app-wabbit-dev`
-- `python3 dev.py check jeeves`
-- `python3 dev.py check :app-wabbit-dev`
-- `python3 dev.py check :root`
-- `python3 dev.py secrets scan .`
+- `dev doctor`
+- `dev doctor --only publish app-wabbit-dev`
+- `dev doctor --json`
+- `dev build app-wabbit-dev --json`
+- `dev setup app-wabbit-dev --json`
+- `dev status app-wabbit-dev --json`
+- `dev check --list`
+- `dev check --list --json`
+- `dev check --describe SpdxHeaderCheck`
+- `dev check --describe SpdxHeaderCheck --json`
+- `dev check .`
+- `dev check path/to/file.py`
+- `dev check app-wabbit-dev`
+- `dev check jeeves`
+- `dev check :app-wabbit-dev`
+- `dev check :root`
+- `dev secrets scan .`
 
 Inventory commands:
 
-- `python3 dev.py project list`
-- `python3 dev.py project show app-wabbit-dev`
-- `python3 dev.py project show app-wabbit-dev --json`
-- `python3 dev.py project deps jeeves`
-- `python3 dev.py project deps jeeves --json`
-- `python3 dev.py project repo jeeves`
-- `python3 dev.py project repo jeeves --json`
-- `python3 dev.py project targets`
-- `python3 dev.py project targets jeeves --json`
-- `python3 dev.py contributors audit`
+- `dev project list`
+- `dev project show app-wabbit-dev`
+- `dev project show app-wabbit-dev --json`
+- `dev project deps jeeves`
+- `dev project deps jeeves --json`
+- `dev project repo jeeves`
+- `dev project repo jeeves --json`
+- `dev project targets`
+- `dev project targets jeeves --json`
+- `dev contributors audit`
 
 Dry-run commands:
 
-- `python3 dev.py publish --dry-run app-wabbit-dev`
-- `python3 dev.py commit --dry-run jeeves`
-- `python3 dev.py push --dry-run .`
+- `dev publish --dry-run app-wabbit-dev`
+- `dev commit --dry-run jeeves`
+- `dev push --dry-run .`
 
 ## Documentation
 

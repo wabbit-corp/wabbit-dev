@@ -105,17 +105,5 @@ def canonical_rerun_command(
     if workspace_root is None:
         return None
 
-    workspace_dev = workspace_root / "dev"
-    if workspace_dev.is_file():
-        command_parts = ["./dev", *args]
-    else:
-        venv_python = workspace_venv_python(workspace_root)
-        if not venv_python.is_file():
-            return None
-        command_parts = [
-            _relative_command_path(venv_python, workspace_root),
-            _relative_command_path(tool_dev_script(), workspace_root),
-            *args,
-        ]
-
+    command_parts = ["dev", *args]
     return f"cd {shlex.quote(str(workspace_root))} && {shlex.join(command_parts)}"

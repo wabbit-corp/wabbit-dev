@@ -12,18 +12,20 @@
 python3 -m pip install wabbit-dev
 ```
 
+This installs both `dev` and `wabbit-dev`.
+
 After installation:
 
 ```bash
-wabbit-dev --help
-wabbit-dev doctor
+dev --help
+dev doctor
 ```
 
 Enable shell completion:
 
 ```bash
-source <(wabbit-dev completion bash)
-autoload -Uz compinit && compinit && source <(wabbit-dev completion zsh)
+source <(dev completion bash)
+autoload -Uz compinit && compinit && source <(dev completion zsh)
 ```
 
 Persist one of those lines in your shell profile if you want completion on every
@@ -59,8 +61,10 @@ python3 -m pip install "mkdocs>=1.6,<2.0" "mkdocs-material>=9.6,<9.7" "pymdown-e
 Run it from the repo:
 
 ```bash
-python3 dev.py --help
+dev --help
 ```
+
+The editable install also provides `wabbit-dev --help` as an explicit alias.
 
 ## Workspace Expectations
 

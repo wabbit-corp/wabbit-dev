@@ -2153,7 +2153,7 @@ def test_write_gradle_root_files_resolves_local_gradle_plugin_projects_in_settin
             "// This file is generated from workspace configuration in root.clj.\n"
             "// To change it, update root.clj (or the relevant setup inputs) and regenerate\n"
             "// with the dev command, for example:\n"
-            "//   ./dev setup <project-or-repo>\n"
+            "//   dev setup <project-or-repo>\n"
             "// Direct edits to this file will be overwritten the next time setup runs.\n"
             "\n"
             "plugins {}\n",

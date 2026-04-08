@@ -554,6 +554,7 @@ class Commands:
 
 def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     parser = SuggestingArgumentParser(
+        prog="dev",
         description=_doc(
             """
             Wabbit development toolkit.
@@ -578,7 +579,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             f"{prog} project list",
         ],
         notes=[
-            "Install the package and run `wabbit-dev`, or run `./dev` from the workspace root.",
+            "Install the package and run `dev` (or `wabbit-dev`) from anywhere in the workspace.",
             "When a workspace `.venv` exists next to `root.clj`, the launcher prefers it automatically.",
             "Config-driven commands walk upward from the current directory to find root.clj and root.private.clj.",
         ],
@@ -632,7 +633,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         help="Generate shell completion scripts.",
         description=_doc(
             """
-            Generate shell completion scripts for the wabbit-dev CLI.
+            Generate shell completion scripts for the dev CLI.
 
             The generated completions include top-level commands, nested
             subcommands, configured project and repo IDs, and loaded check names.

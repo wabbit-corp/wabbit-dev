@@ -244,7 +244,7 @@ def _config_finding(ctx: DoctorContext) -> DoctorFinding:
         label="Config load",
         status=DoctorStatus.FAIL,
         detail=f"Failed to parse workspace config: {ctx._config_error}",
-        fix="Fix the config error and re-run `wabbit-dev config check`.",
+        fix="Fix the config error and re-run `dev config check`.",
     )
 
 
@@ -302,7 +302,7 @@ def _gradle_finding(ctx: DoctorContext) -> DoctorFinding:
         label="Gradle",
         status=DoctorStatus.FAIL,
         detail="Gradle projects are configured, but neither `gradle` nor any `gradlew` wrapper was found.",
-        fix="Install Gradle or run `wabbit-dev setup` in the repos that should contain generated Gradle wrappers.",
+        fix="Install Gradle or run `dev setup` in the repos that should contain generated Gradle wrappers.",
     )
 
 
@@ -541,7 +541,7 @@ def _publish_jitpack_finding(ctx: DoctorContext) -> DoctorFinding:
         label="Publish / JitPack",
         status=DoctorStatus.FAIL,
         detail="JitPack publishing requires an OpenAI key for version recommendations.",
-        fix='Add `(openai-key "...")` to root.private.clj before running `wabbit-dev publish`.',
+        fix='Add `(openai-key "...")` to root.private.clj before running `dev publish`.',
     )
 
 

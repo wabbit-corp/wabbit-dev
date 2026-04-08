@@ -86,7 +86,7 @@ def write_requirements_file(path: Path, deps: list[str], *, interactive: bool, p
         body_lines=[
             "This file is generated from workspace configuration in root.clj.",
             "To change it, update root.clj and regenerate with the dev command, for example:",
-            "  ./dev setup <project-or-repo>",
+            "  dev setup <project-or-repo>",
             "Direct edits to this file will be overwritten the next time setup runs.",
         ],
     )

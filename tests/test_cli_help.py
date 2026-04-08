@@ -69,7 +69,7 @@ async def test_completion_parent_help_lists_shells(
     output = capsys.readouterr().out
     assert "bash" in output
     assert "zsh" in output
-    assert "source <(dev.py completion bash)" in output
+    assert "source <(dev completion bash)" in output
 
 
 @pytest.mark.asyncio
@@ -247,7 +247,7 @@ async def test_cli_doctor_prints_next_steps(monkeypatch: pytest.MonkeyPatch, cap
     assert result == 0
     output = capsys.readouterr().out
     assert "Next useful commands:" in output
-    assert "dev.py config check" in output
+    assert "dev config check" in output
 
 
 @pytest.mark.asyncio
@@ -399,7 +399,7 @@ def test_print_failure_context_includes_rerun_command(
     assert "Resolved context:" in err
     assert "workspace root:" in err
     assert "Retry from workspace root:" in err
-    assert "./dev build demo" in err
+    assert "dev build demo" in err
 
 
 @pytest.mark.asyncio

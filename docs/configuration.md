@@ -47,7 +47,7 @@ Do not commit real secret values.
 
 `setup` owns the generated config files. The source of truth is still
 `root.clj`, so durable changes should start there and then be regenerated with
-`./dev setup ...`.
+`dev setup ...`.
 
 When a generated config needs extra unmanaged content, use the matching sidecar
 file instead of editing the generated file directly:

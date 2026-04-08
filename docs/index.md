@@ -18,34 +18,34 @@ workspace, and then uses that model to:
 Validate configuration:
 
 ```bash
-python3 dev.py doctor
-python3 dev.py config check
+dev doctor
+dev config check
 ```
 
 List configured projects:
 
 ```bash
-python3 dev.py project list
+dev project list
 ```
 
 Generate local development files for a project:
 
 ```bash
-python3 dev.py setup --local app-datatron
+dev setup --local app-datatron
 ```
 
 Run checks:
 
 ```bash
-python3 dev.py check :root
-python3 dev.py secrets scan .
-python3 dev.py spdx headers . --fix
+dev check :root
+dev secrets scan .
+dev spdx headers . --fix
 ```
 
 Build a configured project:
 
 ```bash
-python3 dev.py build app-datatron
+dev build app-datatron
 ```
 
 ## Read Next
