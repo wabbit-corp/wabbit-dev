@@ -543,11 +543,15 @@ def _verify_gradle_project(
         result["missingDependencies"] = preflight["missing"]
         return result
 
-    tasks = [_gradle_task_name(project, "build")]
     if publish_target == "maven-central":
-        tasks.append(_gradle_task_name(project, "publishToMavenLocal"))
+        if project.is_kmp:
+            tasks = [_gradle_task_name(project, "publishKotlinMultiplatformPublicationToMavenLocal")]
+        else:
+            tasks = [_gradle_task_name(project, "build"), _gradle_task_name(project, "publishToMavenLocal")]
     elif publish_target == "intellij-marketplace":
         tasks = [_gradle_task_name(project, "verifyPlugin"), _gradle_task_name(project, "buildPlugin")]
+    else:
+        tasks = [_gradle_task_name(project, "build")]
 
     gradle_root = project.effective_gradle_root
     command = [*_gradle_command(gradle_root), "--no-daemon", *tasks]

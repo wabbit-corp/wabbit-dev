@@ -292,6 +292,7 @@ def _contains_any_keyword(values: Iterable[str], keywords: Sequence[str]) -> boo
 def _section_findings(readme_path: Path, text: str, code_blocks: Sequence[FencedCodeBlock]) -> list[DocsFinding]:
     headings = _markdown_headings(text)
     link_texts = _markdown_link_texts(text)
+    plain_text = _plain_markdown_text(text)
     intro_text = _readme_intro_text(text)
     findings: list[DocsFinding] = []
     has_install = any(any(keyword in heading for keyword in _INSTALL_KEYWORDS) for heading in headings)
@@ -301,9 +302,13 @@ def _section_findings(readme_path: Path, text: str, code_blocks: Sequence[Fenced
     has_purpose = _contains_any_keyword(headings, _PURPOSE_KEYWORDS) or len(intro_text.split()) >= 12
     has_status = _contains_any_keyword(headings, _STATUS_KEYWORDS) or _contains_any_keyword([text], _STATUS_KEYWORDS)
     has_docs_link = _contains_any_keyword(link_texts, _DOCS_LINK_KEYWORDS)
-    has_support_link = _contains_any_keyword(link_texts, _SUPPORT_LINK_KEYWORDS)
-    has_changelog_link = _contains_any_keyword(headings, _CHANGELOG_KEYWORDS) or _contains_any_keyword(
-        link_texts, _CHANGELOG_KEYWORDS
+    has_support_link = _contains_any_keyword(link_texts, _SUPPORT_LINK_KEYWORDS) or _contains_any_keyword(
+        [plain_text], _SUPPORT_LINK_KEYWORDS
+    )
+    has_changelog_link = (
+        _contains_any_keyword(headings, _CHANGELOG_KEYWORDS)
+        or _contains_any_keyword(link_texts, _CHANGELOG_KEYWORDS)
+        or _contains_any_keyword([plain_text], _CHANGELOG_KEYWORDS)
     )
 
     if not has_install:
@@ -607,6 +612,57 @@ def _run_gradle_snippet_build(
     *,
     redirect_output: bool,
 ) -> tuple[list[DocsFinding], dict[str, object]]:
+    if project.is_kmp:
+        from dev.tasks.release_verify import _gradle_command, _gradle_task_name
+
+        gradle_root = project.effective_gradle_root
+        command = [
+            *_gradle_command(gradle_root),
+            "--no-daemon",
+            _gradle_task_name(project, "publishKotlinMultiplatformPublicationToMavenLocal"),
+        ]
+        run_kwargs: dict[str, object] = {}
+        if redirect_output:
+            run_kwargs["stdout"] = sys.stderr
+            run_kwargs["stderr"] = sys.stderr
+        try:
+            subprocess.run(command, cwd=gradle_root, check=True, **run_kwargs)
+        except subprocess.CalledProcessError as ex:
+            result = {
+                "status": "failed",
+                "details": {
+                    "kind": "gradle",
+                    "gradleRoot": str(gradle_root.resolve()),
+                    "command": command,
+                    "error": f"Build failed with exit code {ex.returncode}.",
+                    "returnCode": ex.returncode,
+                },
+                "mode": "kmp-multiplatform-publication",
+            }
+            finding = DocsFinding(
+                code="E_DOCS_SNIPPETS_GRADLE_BUILD_FAILED",
+                severity="error",
+                message=(
+                    "Gradle snippet verification requested a coarse project build, and that build failed. "
+                    "This validates the project build as a whole, not each snippet individually."
+                ),
+                path=str(project.path.resolve()),
+            )
+            return [finding], result
+
+        return (
+            [],
+            {
+                "status": "success",
+                "details": {
+                    "kind": "gradle",
+                    "gradleRoot": str(gradle_root.resolve()),
+                    "command": command,
+                },
+                "mode": "kmp-multiplatform-publication",
+            },
+        )
+
     from dev.tasks.build import _build_gradle_project
 
     success_build, details = _build_gradle_project(
