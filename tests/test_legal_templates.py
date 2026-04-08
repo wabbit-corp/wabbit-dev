@@ -22,6 +22,7 @@ class _FakeProject:
     authors: list[str]
     copyright_holder: str | None = None
     copyright_year_start: int | None = None
+    test_license: str | None = None
 
 
 @dataclass
@@ -120,3 +121,12 @@ def test_workspace_legal_templates_render_without_unresolved_placeholders(tmp_pa
     assert "legal@example.com" in (tmp_path / "CLA.md").read_text(encoding="utf-8")
     assert "legal@example.com" in (tmp_path / "CONTRIBUTOR_PRIVACY.md").read_text(encoding="utf-8")
     assert "legal@example.com" in (tmp_path / "CODE_OF_CONDUCT.md").read_text(encoding="utf-8")
+
+
+def test_workspace_license_templates_include_public_test_license_keys() -> None:
+    legal_root = _workspace_template_root() / "legal"
+    licenses = load_license_texts(legal_root / "licenses")
+
+    assert "Wabbit-Public-Tests-License" in licenses
+    assert "LicenseRef-Wabbit-Public-Test-License" in licenses
+    assert "LicenseRef-Wabbit-Public-Test-License-1.1" in licenses

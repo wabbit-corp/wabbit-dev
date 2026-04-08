@@ -130,6 +130,8 @@ def _make_render_context(pyproject_template: str | None = None) -> RepoSetupCont
         python_docs_deploy_workflow_template=jinja2.Template(""),
         gradle_release_publish_workflow_template=jinja2.Template(""),
         gradle_snapshot_publish_workflow_template=jinja2.Template(""),
+        gradle_compiler_plugin_release_publish_workflow_template=jinja2.Template(""),
+        gradle_compiler_plugin_snapshot_publish_workflow_template=jinja2.Template(""),
         gradle_docs_quality_workflow_template=jinja2.Template(""),
         gradle_docs_deploy_workflow_template=jinja2.Template(""),
         python_codespell_ignore_words_template=jinja2.Template(""),
@@ -480,7 +482,8 @@ def test_setup_generates_python_docs_and_quality_defaults(tmp_path: Path, monkey
     )
     deploy_workflow = (generated_project / ".github" / "workflows" / "docs-deploy.yml").read_text(encoding="utf-8")
     assert "actions/configure-pages@v5" in deploy_workflow
-    assert "actions/upload-pages-artifact@v3" in deploy_workflow
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in deploy_workflow
+    assert "actions/upload-pages-artifact@v4" in deploy_workflow
     assert "actions/deploy-pages@v4" in deploy_workflow
     assert "peaceiris/actions-gh-pages@v4" not in deploy_workflow
     assert "mkdocs gh-deploy" not in deploy_workflow

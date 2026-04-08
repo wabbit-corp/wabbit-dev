@@ -9,8 +9,8 @@ import jinja2
 
 import dev.io
 from dev.banner import create_banner
-from dev.config import Config, OwnershipType, Project
-from dev.licenses import canonicalize_license_key, cla_primary_license_reference, render_project_license
+from dev.config import Config, DataProject, GradleProject, OwnershipType, PremakeProject, Project, PurescriptProject, PythonProject
+from dev.licenses import canonicalize_license_key, cla_primary_license_reference, license_display_name, render_project_license
 from dev.messages import error, warning
 
 
@@ -102,6 +102,115 @@ def _wabbit_legal_template_context(ctx: CommonSetupContext, project: Project) ->
     }
 
 
+def _license_lookup_candidates(license_key: str | None) -> list[str]:
+    if license_key is None:
+        return []
+
+    raw = license_key.strip()
+    if not raw:
+        return []
+
+    normalized = canonicalize_license_key(raw)
+    candidates: list[str] = []
+    for candidate in [normalized, raw]:
+        if candidate is not None and candidate not in candidates:
+            candidates.append(candidate)
+            if candidate.startswith("LicenseRef-"):
+                stripped = candidate.removeprefix("LicenseRef-")
+                if stripped not in candidates:
+                    candidates.append(stripped)
+    return candidates
+
+
+def _resolve_license_text(licenses: dict[str, str], license_key: str | None) -> str | None:
+    for candidate in _license_lookup_candidates(license_key):
+        template_text = licenses.get(candidate)
+        if template_text is not None:
+            return template_text
+    return None
+
+
+def _license_heading_from_text(template_text: str) -> str | None:
+    for line in template_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            return stripped[2:].strip()
+    return None
+
+
+def _license_reference_label(licenses: dict[str, str], license_key: str | None) -> str:
+    display_name = license_display_name(license_key)
+    if display_name is not None:
+        return display_name
+    template_text = _resolve_license_text(licenses, license_key)
+    heading = _license_heading_from_text(template_text) if template_text is not None else None
+    if heading is not None:
+        return heading
+    return license_key or "the configured license"
+
+
+def _test_license_paths(project: Project) -> list[str]:
+    if isinstance(project, GradleProject):
+        return [
+            "src/*Test/**",
+            "src/test/**",
+            "test/**",
+            "tests/**",
+        ]
+    if isinstance(project, PythonProject):
+        return ["tests/**", "test/**"]
+    if isinstance(project, PurescriptProject):
+        return ["test/**", "tests/**"]
+    if isinstance(project, PremakeProject):
+        return ["test/**", "tests/**"]
+    if isinstance(project, DataProject):
+        return ["test/**", "tests/**"]
+    return ["test/**", "tests/**"]
+
+
+def _render_mixed_license_file(
+    *,
+    project: Project,
+    primary_license_reference: str,
+    primary_license_text: str,
+    test_license_reference: str,
+    test_license_text: str,
+) -> str:
+    test_paths = "\n".join(f"- `{path}`" for path in _test_license_paths(project))
+    return clean_text(
+        f"""# Licensing
+
+This repository contains materials under multiple licenses.
+
+## Primary License
+
+Unless otherwise noted, the production source code and other non-test project materials are licensed under {primary_license_reference}.
+
+## Test License
+
+Test suites, test fixtures, test data, benchmark code, and test-only helper code under the following repository path conventions are licensed under {test_license_reference}:
+
+{test_paths}
+
+If a file carries a different SPDX header, that file-level notice controls.
+
+Published artifacts must not include files covered by the test license.
+
+---
+
+## Primary License Text
+
+{primary_license_text.rstrip()}
+
+---
+
+## Test License Text
+
+{test_license_text.rstrip()}
+"""
+    )
+
+
 def write_wabbit_legal_documents(ctx: CommonSetupContext, project: Project) -> None:
     legal_template_context = _wabbit_legal_template_context(ctx, project)
     if not legal_template_context:
@@ -127,14 +236,37 @@ def write_wabbit_legal_files(ctx: CommonSetupContext, project: Project) -> None:
         return
 
     project_license = canonicalize_license_key(project.license)
+    test_license = canonicalize_license_key(project.test_license)
     if project_license is not None:
-        license_text = ctx.licenses.get(project_license)
+        license_text = _resolve_license_text(ctx.licenses, project_license)
         if license_text is None:
             supported = ", ".join(sorted(ctx.licenses))
             error(f"Unknown license key: {project_license}. Supported keys: {supported}")
+            write_wabbit_legal_documents(ctx, project)
+            return
+
+        rendered_license_text = render_project_license(license_text, project)
+        if test_license is not None:
+            test_license_text = _resolve_license_text(ctx.licenses, test_license)
+            if test_license_text is None:
+                supported = ", ".join(sorted(ctx.licenses))
+                error(f"Unknown test license key: {test_license}. Supported keys: {supported}")
+                write_wabbit_legal_documents(ctx, project)
+                return
+            rendered_test_license_text = render_project_license(test_license_text, project)
+            dev.io.write_text_file(
+                project.path / "LICENSE.md",
+                _render_mixed_license_file(
+                    project=project,
+                    primary_license_reference=cla_primary_license_reference(project_license),
+                    primary_license_text=rendered_license_text,
+                    test_license_reference=_license_reference_label(ctx.licenses, test_license),
+                    test_license_text=rendered_test_license_text,
+                ),
+            )
         else:
-            rendered_license_text = render_project_license(license_text, project)
             dev.io.write_text_file(project.path / "LICENSE.md", rendered_license_text)
+
     write_wabbit_legal_documents(ctx, project)
 
 

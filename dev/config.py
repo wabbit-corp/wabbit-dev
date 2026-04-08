@@ -325,6 +325,42 @@ class GradlePlugins(Feature):
 
 
 @dataclass
+class KotlinCompilerPluginCompatibilitySource:
+    kotlinVersionPrefix: str
+    path: str
+
+    def __post_init__(self) -> None:
+        if not self.kotlinVersionPrefix.strip():
+            raise ValueError("kotlin-compiler-plugin.compatibilitySources keys must not be empty")
+        if not self.path.strip():
+            raise ValueError(
+                f"kotlin-compiler-plugin.compatibilitySources[{self.kotlinVersionPrefix!r}] must not be empty"
+            )
+
+
+@dataclass
+class KotlinCompilerPlugin(Feature):
+    __feature_name__ = "kotlin-compiler-plugin"
+    compatibilitySources: list[KotlinCompilerPluginCompatibilitySource] = dataclasses.field(default_factory=list)
+    publishVersionWithKotlin: bool = True
+
+    def implied(self) -> list[Feature]:
+        return [Kotlin(), Jvm()]
+
+
+@dataclass
+class KotlinCompilerGradlePlugin(Feature):
+    __feature_name__ = "kotlin-compiler-gradle-plugin"
+    compilerPluginProject: str
+    versionPackage: str | None = None
+    versionClassName: str | None = None
+    versionConstantName: str | None = None
+
+    def implied(self) -> list[Feature]:
+        return [Kotlin(), Jvm()]
+
+
+@dataclass
 class KmpAndroidLibrary(Feature):
     __feature_name__ = "kmp-android-library"
     namespace: str
@@ -558,6 +594,9 @@ class RepoDefinition:
     github_repo: str | None
     gradle_root_project_name: str | None
     jvm_policy: str | None
+    project_version: str | None = None
+    default_kotlin_version: str | None = None
+    supported_kotlin_versions: list[str] = dataclasses.field(default_factory=list)
     docs_project_id: str | None = None
     project_ids: list[str] = dataclasses.field(default_factory=list)
 
@@ -721,6 +760,7 @@ class Project(ABC):
     description: str | None
     authors: list[str]
     license: str | None
+    test_license: str | None
     copyright_holder: str | None
     copyright_year_start: int | None
     quarantine: bool
@@ -817,6 +857,7 @@ class PythonProject(Project):
     publish_snapshots: bool = False
     docs_enabled: bool = True
     docs_system: str | None = "mkdocs"
+    test_license: str | None = None
     # (We keep a list of `Dependency` too if you want to unify anything across projects,
     #  but typically a pure Python project won't rely on Gradle dependencies.)
 
@@ -854,6 +895,7 @@ class PurescriptProject(Project):
     publish_snapshots: bool = False
     docs_enabled: bool = False
     docs_system: str | None = None
+    test_license: str | None = None
 
     def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
@@ -889,6 +931,7 @@ class PremakeProject(Project):
     publish_snapshots: bool = False
     docs_enabled: bool = False
     docs_system: str | None = None
+    test_license: str | None = None
 
     def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
@@ -924,6 +967,7 @@ class DataProject(Project):
     publish_snapshots: bool = False
     docs_enabled: bool = False
     docs_system: str | None = None
+    test_license: str | None = None
 
     def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
@@ -980,6 +1024,8 @@ class GradleProject(Project):
     publish_snapshots: bool = False
     docs_enabled: bool = False
     docs_system: str | None = None
+    version_from_repo: bool = False
+    test_license: str | None = None
 
     @property
     def artifact_name(self) -> str:
@@ -1690,6 +1736,25 @@ def load_config() -> Config:
                     )
                 ]
             )
+        if isinstance(command, config_typed.KotlinCompilerPluginCommand):
+            compatibility_sources = [
+                KotlinCompilerPluginCompatibilitySource(kotlinVersionPrefix=prefix, path=path)
+                for prefix, path in (command.compatibilitySources or {}).items()
+            ]
+            return KotlinCompilerPlugin(
+                compatibilitySources=compatibility_sources,
+                publishVersionWithKotlin=command.publishVersionWithKotlin,
+            )
+        if isinstance(command, config_typed.KotlinCompilerGradlePluginCommand):
+            return KotlinCompilerGradlePlugin(
+                compilerPluginProject=_normalize_project_reference(
+                    command.compilerPluginProject,
+                    field_name="kotlin-compiler-gradle-plugin.compilerPluginProject",
+                ),
+                versionPackage=command.versionPackage,
+                versionClassName=command.versionClassName,
+                versionConstantName=command.versionConstantName,
+            )
         if isinstance(command, config_typed.KmpAndroidLibraryCommand):
             return KmpAndroidLibrary(
                 namespace=command.namespace,
@@ -1993,6 +2058,7 @@ def load_config() -> Config:
 
     def verify_project(project: Project) -> None:
         project.license = canonicalize_license_key(project.license)
+        project.test_license = canonicalize_license_key(project.test_license)
         if project.copyright_holder is not None:
             project.copyright_holder = project.copyright_holder.strip() or None
         if project.copyright_year_start is not None and project.copyright_year_start <= 0:
@@ -2200,6 +2266,7 @@ def load_config() -> Config:
                 publish_snapshots=publish_snapshots,
                 docs_enabled=docs_enabled,
                 docs_system=docs_system,
+                test_license=command.testLicense,
             )
             verify_project(python_project)
             register_project(project_id, python_project)
@@ -2227,6 +2294,7 @@ def load_config() -> Config:
                 managed_by_setup=managed_by_setup,
                 copyright_holder=command.copyright_holder,
                 copyright_year_start=command.copyright_year_start,
+                test_license=command.testLicense,
             )
             verify_project(purescript_project)
             register_project(project_id, purescript_project)
@@ -2254,6 +2322,7 @@ def load_config() -> Config:
                 managed_by_setup=managed_by_setup,
                 copyright_holder=command.copyright_holder,
                 copyright_year_start=command.copyright_year_start,
+                test_license=command.testLicense,
             )
             verify_project(data_project)
             register_project(project_id, data_project)
@@ -2281,6 +2350,7 @@ def load_config() -> Config:
                 managed_by_setup=managed_by_setup,
                 copyright_holder=command.copyright_holder,
                 copyright_year_start=command.copyright_year_start,
+                test_license=command.testLicense,
             )
             verify_project(premake_project)
             register_project(project_id, premake_project)
@@ -2512,6 +2582,8 @@ def load_config() -> Config:
                 publish_snapshots=publish_snapshots,
                 docs_enabled=docs_enabled,
                 docs_system=docs_system,
+                version_from_repo=command.versionFromRepo,
+                test_license=command.testLicense,
             )
             verify_project(gradle_project)
             register_project(project_id, gradle_project)
@@ -2737,6 +2809,9 @@ def load_config() -> Config:
                 github_repo=command.repo,
                 gradle_root_project_name=command.gradleRootProjectName,
                 jvm_policy=command.jvmPolicy,
+                project_version=command.projectVersion,
+                default_kotlin_version=command.defaultKotlinVersion,
+                supported_kotlin_versions=list(command.supportedKotlinVersions or []),
                 docs_project_id=docs_project_id,
                 project_ids=nested_project_ids,
             )

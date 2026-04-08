@@ -45,6 +45,8 @@ def _make_repo_setup_context() -> RepoSetupContext:
         python_docs_deploy_workflow_template=jinja2.Template(""),
         gradle_release_publish_workflow_template=jinja2.Template(""),
         gradle_snapshot_publish_workflow_template=jinja2.Template(""),
+        gradle_compiler_plugin_release_publish_workflow_template=jinja2.Template(""),
+        gradle_compiler_plugin_snapshot_publish_workflow_template=jinja2.Template(""),
         gradle_docs_quality_workflow_template=jinja2.Template(""),
         gradle_docs_deploy_workflow_template=jinja2.Template(""),
         python_codespell_ignore_words_template=jinja2.Template(""),

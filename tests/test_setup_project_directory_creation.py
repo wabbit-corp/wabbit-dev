@@ -11,7 +11,7 @@ import pytest
 from git import Repo
 
 if TYPE_CHECKING:
-    from dev.config import Config, PurescriptProject, PythonApplication, PythonProject
+    from dev.config import Config, DataProject, PremakeProject, PurescriptProject, PythonApplication, PythonProject
     from dev.tasks.setup import RepoSetupContext
 
 
@@ -77,6 +77,44 @@ def _make_purescript_project(path: Path, github_repo: str | None = None) -> Pure
     )
 
 
+def _make_premake_project(path: Path, github_repo: str | None = None) -> PremakeProject:
+    from dev.config import OwnershipType, PremakeProject
+
+    return PremakeProject(
+        path=path,
+        name="pkg",
+        description=None,
+        authors=[],
+        quarantine=False,
+        publish=False,
+        license="AGPL",
+        github_repo=github_repo,
+        ownership=OwnershipType.WABBIT,
+        version=None,
+        resolved_dependencies=[],
+        test_license="LicenseRef-Wabbit-Public-Test-License",
+    )
+
+
+def _make_data_project(path: Path, github_repo: str | None = None) -> DataProject:
+    from dev.config import DataProject, OwnershipType
+
+    return DataProject(
+        path=path,
+        name="pkg",
+        description=None,
+        authors=[],
+        quarantine=False,
+        publish=False,
+        license="AGPL",
+        github_repo=github_repo,
+        ownership=OwnershipType.WABBIT,
+        version=None,
+        resolved_dependencies=[],
+        test_license="LicenseRef-Wabbit-Public-Test-License",
+    )
+
+
 def _make_setup_context(pyproject_template: str, codespell_words: str = "wabbit\n") -> RepoSetupContext:
     import dev.tasks.setup as setup_module
 
@@ -120,6 +158,12 @@ def _make_setup_context(pyproject_template: str, codespell_words: str = "wabbit\
         python_docs_deploy_workflow_template=jinja2.Template("name: Docs Deploy\n"),
         gradle_release_publish_workflow_template=jinja2.Template("name: Release Publish\n"),
         gradle_snapshot_publish_workflow_template=jinja2.Template("name: Snapshot Publish\n"),
+        gradle_compiler_plugin_release_publish_workflow_template=jinja2.Template(
+            "name: Compiler Release Publish\n"
+        ),
+        gradle_compiler_plugin_snapshot_publish_workflow_template=jinja2.Template(
+            "name: Compiler Snapshot Publish\n"
+        ),
         gradle_docs_quality_workflow_template=jinja2.Template("name: Gradle Docs Quality\n"),
         gradle_docs_deploy_workflow_template=jinja2.Template("name: Gradle Docs Deploy\n"),
         python_codespell_ignore_words_template=jinja2.Template(codespell_words),
@@ -310,6 +354,43 @@ def test_setup_purescript_project_generates_legal_files(tmp_path: Path, monkeypa
     assert (project.path / ".gitignore").is_file()
     assert wrote_legal_files
     assert wrote_banner
+
+
+@pytest.mark.parametrize(
+    ("project_factory", "project_type_name"),
+    [
+        (_make_premake_project, "PremakeProject"),
+        (_make_data_project, "DataProject"),
+    ],
+)
+def test_setup_project_generates_legal_files_for_data_like_projects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    project_factory: object,
+    project_type_name: str,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    import dev.tasks.setup as setup_module
+
+    project = project_factory(tmp_path / "pkg", github_repo="org/pkg")
+    project.path.mkdir(parents=True, exist_ok=True)
+
+    written_projects: list[object] = []
+
+    def fake_write_wabbit_legal_files(_ctx: object, current_project: object) -> None:
+        written_projects.append(current_project)
+
+    monkeypatch.setattr(setup_module, "_write_wabbit_legal_files", fake_write_wabbit_legal_files)
+
+    ctx = _make_setup_context('[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n')
+    ctx.mode = setup_module.RepoSetupMode.LOCAL
+    ctx.is_github_api_available = False
+
+    setup_module.setup_project(ctx, project, interactive=False, commit_changes=False, allow_push=False)
+
+    assert written_projects == [project], project_type_name
 
 
 def test_setup_python_project_generates_app_build_script_for_python_application(
@@ -664,6 +745,149 @@ def test_targeted_prod_setup_omits_cross_repo_gradle_projects_from_root_settings
     ]
 
 
+def test_setup_prod_removes_stale_gradle_local_overlay_from_selected_repo_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    from dev.config import Config, GradleProject, KotlinPluginDefinition, OwnershipType, RepoDefinition, Version
+
+    repo_root = tmp_path / "kotlin-web-common"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    (repo_root / "settings.local.gradle.kts").write_text("// stale local overlay\n", encoding="utf-8")
+
+    project = GradleProject(
+        path=repo_root,
+        group_name="one.wabbit",
+        name="kotlin-web-common",
+        version=Version.parse("1.1.0"),
+        description=None,
+        authors=[],
+        license="AGPL",
+        quarantine=False,
+        publish=False,
+        github_repo="wabbit-corp/kotlin-web-common",
+        ownership=OwnershipType.WABBIT,
+        raw_dependencies=[],
+        raw_features=[],
+        resolved_dependencies=[],
+        resolved_maven_repositories=[],
+        resolved_features={},
+        platforms=["jvm"],
+        source_set_dependencies={},
+        project_id="kotlin-web-common",
+        repo_id="kotlin-web-common",
+        repo_root=repo_root,
+        gradle_root=repo_root,
+        module_dir=Path("."),
+        gradle_project_name="kotlin-web-common",
+    )
+
+    config = Config(raw=Document([]))
+    config.defined_projects["kotlin-web-common"] = project
+    config.defined_repos["kotlin-web-common"] = RepoDefinition(
+        repo_id="kotlin-web-common",
+        path=repo_root,
+        github_repo="wabbit-corp/kotlin-web-common",
+        gradle_root_project_name="kotlin-web-common",
+        jvm_policy=None,
+        project_ids=["kotlin-web-common"],
+    )
+    config.plugins["kotlin-jvm"] = KotlinPluginDefinition(plugin_id="org.jetbrains.kotlin.jvm", version="2.3.10")
+
+    monkeypatch.setattr(setup_module, "load_config", lambda: config)
+    monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["kotlin-web-common"])
+    monkeypatch.setattr(setup_module, "create_repo_setup_context", lambda _config, mode: SimpleNamespace(config=config, mode=mode))
+    monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "_write_repo_root_wabbit_legal_documents", lambda *_args, **_kwargs: None)
+
+    setup_module.setup(setup_module.RepoSetupMode.PROD, interactive=False, project="kotlin-web-common")
+
+    assert not (repo_root / "settings.local.gradle.kts").exists()
+
+
+def test_setup_treats_empty_projects_list_as_all_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    from dev.config import Config, GradleProject, KotlinPluginDefinition, OwnershipType, Version
+
+    demo_root = tmp_path / "demo"
+    demo_project = GradleProject(
+        path=demo_root,
+        group_name="one.wabbit",
+        name="demo",
+        version=Version.parse("0.0.1"),
+        description=None,
+        authors=[],
+        license="AGPL",
+        quarantine=False,
+        publish=False,
+        github_repo="org/demo",
+        ownership=OwnershipType.WABBIT,
+        raw_dependencies=[],
+        raw_features=[],
+        resolved_dependencies=[],
+        resolved_maven_repositories=[],
+        resolved_features={},
+        platforms=["jvm"],
+        source_set_dependencies={},
+        project_id="demo",
+        repo_id=None,
+        repo_root=demo_root,
+        gradle_root=demo_root,
+        module_dir=Path("."),
+        gradle_project_name="demo",
+    )
+
+    config = Config(raw=Document([]))
+    config.default_maven_project_group = "one.wabbit"
+    config.defined_projects["demo"] = demo_project
+    config.plugins["kotlin-jvm"] = KotlinPluginDefinition(plugin_id="org.jetbrains.kotlin.jvm", version="2.2.20")
+
+    root_write_calls: list[tuple[Path, list[str], bool, bool]] = []
+    setup_calls: list[str] = []
+
+    monkeypatch.setattr(setup_module, "load_config", lambda: config)
+    monkeypatch.setattr(
+        setup_module,
+        "toposort_projects",
+        lambda *_args, **_kwargs: pytest.fail("toposort_projects should not be called when projects=[] means all projects"),
+    )
+    monkeypatch.setattr(
+        setup_module,
+        "create_repo_setup_context",
+        lambda _config, mode: SimpleNamespace(config=config, mode=mode),
+    )
+    monkeypatch.setattr(
+        setup_module,
+        "_write_gradle_root_files",
+        lambda _ctx, *, root_path, seed_projects, include_external_dependencies, write_dependency_substitutions, **_kwargs: root_write_calls.append(
+            (
+                root_path,
+                [project.project_id for project in seed_projects],
+                include_external_dependencies,
+                write_dependency_substitutions,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        setup_module,
+        "setup_project",
+        lambda _ctx, project, **_kwargs: setup_calls.append(project.project_id),
+    )
+    monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
+
+    setup_module.setup(setup_module.RepoSetupMode.LOCAL, interactive=False, projects=[])
+
+    assert root_write_calls == [
+        (Path("."), ["demo"], True, True),
+    ]
+    assert setup_calls == ["demo"]
+
+
 def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -859,6 +1083,108 @@ def test_setup_writes_repo_root_license_when_repo_managed_gradle_project_license
 
     assert written_license_paths == [repo_root]
     assert written_document_paths == []
+
+
+def test_setup_repo_root_license_keeps_shared_test_license_when_some_repo_projects_do_not_set_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    import dev.tasks.setup_common as setup_common_module
+    from dev.config import Config, GradleProject, KotlinPluginDefinition, OwnershipType, RepoDefinition, Version
+
+    def make_gradle_project(
+        path: Path,
+        *,
+        project_id: str,
+        repo_root_path: Path,
+        test_license: str | None,
+    ) -> GradleProject:
+        return GradleProject(
+            path=path,
+            group_name="one.wabbit",
+            name=path.name,
+            version=Version.parse("0.0.1"),
+            description=None,
+            authors=[],
+            license="AGPL",
+            test_license=test_license,
+            quarantine=False,
+            publish=False,
+            github_repo="org/repo",
+            ownership=OwnershipType.WABBIT,
+            raw_dependencies=[],
+            raw_features=[],
+            resolved_dependencies=[],
+            resolved_maven_repositories=[],
+            resolved_features={},
+            platforms=["jvm"],
+            source_set_dependencies={},
+            project_id=project_id,
+            repo_id=project_id.split("/", 1)[0],
+            repo_root=repo_root_path,
+            managed_by_setup=False,
+            gradle_root=repo_root_path,
+            module_dir=Path(path.name),
+            gradle_project_name=path.name,
+        )
+
+    repo_root = tmp_path / "repo"
+    api_project = make_gradle_project(
+        repo_root / "api",
+        project_id="repo/api",
+        repo_root_path=repo_root,
+        test_license="LicenseRef-Wabbit-Public-Test-License",
+    )
+    quarantined_project = make_gradle_project(
+        repo_root / "quarantined",
+        project_id="repo/quarantined",
+        repo_root_path=repo_root,
+        test_license=None,
+    )
+    quarantined_project.quarantine = True
+
+    config = Config(raw=Document([]))
+    config.defined_projects.update({"repo/api": api_project, "repo/quarantined": quarantined_project})
+    config.defined_repos["repo"] = RepoDefinition(
+        repo_id="repo",
+        path=repo_root,
+        github_repo="org/repo",
+        gradle_root_project_name="one.wabbit",
+        jvm_policy=None,
+        project_ids=["repo/api", "repo/quarantined"],
+    )
+    config.plugins["kotlin-jvm"] = KotlinPluginDefinition(plugin_id="org.jetbrains.kotlin.jvm", version="2.2.20")
+
+    written_projects: list[GradleProject] = []
+
+    monkeypatch.setattr(setup_module, "load_config", lambda: config)
+    monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["repo/api"])
+    monkeypatch.setattr(
+        setup_module,
+        "create_repo_setup_context",
+        lambda _config, mode: SimpleNamespace(config=config, mode=mode),
+    )
+    monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        setup_common_module,
+        "write_wabbit_legal_files",
+        lambda _ctx, project: written_projects.append(project),
+    )
+    monkeypatch.setattr(
+        setup_common_module,
+        "write_wabbit_legal_documents",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
+
+    setup_module.setup(setup_module.RepoSetupMode.LOCAL, interactive=False, project="repo/api")
+
+    assert len(written_projects) == 1
+    assert written_projects[0].path == repo_root
+    assert written_projects[0].test_license == "LicenseRef-Wabbit-Public-Test-License"
 
 
 def test_setup_does_not_commit_or_push_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1346,6 +1672,129 @@ def test_write_gradle_local_overlay_includes_local_plugin_projects_for_reachable
     assert "../kotlin-acyclic-plugin:[one.wabbit:kotlin-acyclic-plugin=>:]" in overlay_text
 
 
+def test_write_gradle_local_overlay_merges_plugin_and_compiler_included_builds_for_same_repo_root(tmp_path: Path) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    from dev.config import (
+        Config,
+        Feature,
+        GradlePluginApplication,
+        GradlePlugins,
+        GradleProject,
+        KotlinPluginDefinition,
+        OwnershipType,
+        Version,
+    )
+
+    def make_gradle_project(
+        path: Path,
+        *,
+        project_id: str,
+        repo_root_path: Path,
+        gradle_root_path: Path,
+        gradle_project_name: str,
+        artifact_id: str | None = None,
+        resolved_features: dict[str, Feature] | None = None,
+    ) -> GradleProject:
+        return GradleProject(
+            path=path,
+            group_name="one.wabbit",
+            name=artifact_id or gradle_project_name,
+            version=Version.parse("0.0.1"),
+            description=None,
+            authors=[],
+            license="AGPL",
+            quarantine=False,
+            publish=False,
+            github_repo="org/repo",
+            ownership=OwnershipType.IMPORTED,
+            raw_dependencies=[],
+            raw_features=[],
+            resolved_dependencies=[],
+            resolved_maven_repositories=[],
+            resolved_features=resolved_features or {},
+            platforms=["jvm"],
+            source_set_dependencies={},
+            project_id=project_id,
+            repo_id=project_id.split("/", 1)[0] if "/" in project_id else None,
+            repo_root=repo_root_path,
+            gradle_root=gradle_root_path,
+            module_dir=Path(path.name),
+            gradle_project_name=gradle_project_name,
+        )
+
+    consumer_root = tmp_path / "consumer"
+    consumer_project = make_gradle_project(
+        consumer_root,
+        project_id="consumer",
+        repo_root_path=consumer_root,
+        gradle_root_path=consumer_root,
+        gradle_project_name="consumer",
+        resolved_features={
+            "gradle-plugin": GradlePlugins(entries=[GradlePluginApplication(name="acyclic-gradle")]),
+        },
+    )
+
+    acyclic_root = tmp_path / "kotlin-acyclic"
+    gradle_plugin_project = make_gradle_project(
+        acyclic_root / "gradle-plugin",
+        project_id="kotlin-acyclic/gradle-plugin",
+        repo_root_path=acyclic_root,
+        gradle_root_path=acyclic_root,
+        gradle_project_name="gradle-plugin",
+        artifact_id="kotlin-acyclic-gradle-plugin",
+    )
+    gradle_plugin_project.gradle_plugin_id = "one.wabbit.acyclic"
+
+    compiler_plugin_project = make_gradle_project(
+        acyclic_root / "compiler-plugin",
+        project_id="kotlin-acyclic/compiler-plugin",
+        repo_root_path=acyclic_root,
+        gradle_root_path=acyclic_root,
+        gradle_project_name="compiler-plugin",
+        artifact_id="kotlin-acyclic-plugin",
+    )
+
+    config = Config(raw=Document([]))
+    config.defined_projects.update(
+        {
+            "consumer": consumer_project,
+            "kotlin-acyclic/gradle-plugin": gradle_plugin_project,
+            "kotlin-acyclic/compiler-plugin": compiler_plugin_project,
+        }
+    )
+    config.plugins["acyclic-gradle"] = KotlinPluginDefinition(
+        project="kotlin-acyclic/gradle-plugin",
+        compiler_plugin="kotlin-acyclic/compiler-plugin",
+    )
+
+    ctx = _make_setup_context('[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n')
+    ctx.config = config
+    ctx.settings_local_template = jinja2.Template(
+        "{% for plugin_build_path in plugin_included_builds %}"
+        "{{ plugin_build_path }}:[plugin]\n"
+        "{% endfor %}"
+        "{% for included_build in included_builds %}"
+        "{{ included_build.build_path }}:"
+        "{% for substitution in included_build.substitutions %}"
+        "[{{ substitution.module_coordinate }}=>{{ substitution.project_path }}]"
+        "{% endfor %}"
+        "\n"
+        "{% endfor %}"
+    )
+
+    setup_module._write_gradle_local_overlay(
+        ctx,
+        root_path=consumer_root,
+        seed_projects=[consumer_project],
+    )
+
+    overlay_text = (consumer_root / "settings.local.gradle.kts").read_text(encoding="utf-8")
+    assert "../kotlin-acyclic:[plugin]" in overlay_text
+    assert "../kotlin-acyclic:[one.wabbit:kotlin-acyclic-plugin=>:compiler-plugin]" in overlay_text
+
+
 def test_write_gradle_root_files_writes_workspace_dependency_substitutions_in_local_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1544,6 +1993,95 @@ def test_write_gradle_root_files_resolves_local_gradle_plugin_projects_in_settin
 
     settings_text = (workspace_root / "settings.gradle.kts").read_text(encoding="utf-8")
     assert "[one.wabbit.acyclic=0.0.1]" in settings_text
+
+
+@pytest.mark.parametrize(
+    ("existing_build_text", "expected_write_build"),
+    [
+        (None, True),
+        ("// Generated by app-wabbit-dev setup. Do not edit by hand.\nplugins {}\n", True),
+        ("plugins { base }\n", False),
+    ],
+)
+def test_setup_gradle_repo_root_only_overwrites_generated_root_builds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    existing_build_text: str | None,
+    expected_write_build: bool,
+) -> None:
+    from mu.types import Document
+
+    import dev.tasks.setup as setup_module
+    from dev.config import Config, GradleProject, OwnershipType, RepoDefinition, Version
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    if existing_build_text is not None:
+        (repo_root / "build.gradle.kts").write_text(existing_build_text, encoding="utf-8")
+
+    project = GradleProject(
+        path=repo_root / "library",
+        group_name="one.wabbit",
+        name="library",
+        version=Version.parse("0.0.1"),
+        description=None,
+        authors=[],
+        license="AGPL",
+        quarantine=False,
+        publish=False,
+        github_repo="org/repo",
+        ownership=OwnershipType.WABBIT,
+        raw_dependencies=[],
+        raw_features=[],
+        resolved_dependencies=[],
+        resolved_maven_repositories=[],
+        resolved_features={},
+        platforms=["jvm"],
+        source_set_dependencies={},
+        project_id="repo/library",
+        repo_id="repo",
+        repo_root=repo_root,
+        gradle_root=repo_root,
+        gradle_project_name="library",
+    )
+
+    config = Config(raw=Document([]))
+    config.defined_projects["repo/library"] = project
+    config.defined_repos["repo"] = RepoDefinition(
+        repo_id="repo",
+        path=repo_root,
+        github_repo="org/repo",
+        gradle_root_project_name="repo",
+        jvm_policy=None,
+        project_ids=["repo/library"],
+    )
+
+    captured_write_build: list[bool] = []
+
+    def fake_write_gradle_root_files(
+        ctx: object,
+        *,
+        root_path: Path,
+        root_project_name: str,
+        seed_projects: list[GradleProject],
+        write_wrapper: bool,
+        write_build: bool = True,
+        include_external_dependencies: bool = False,
+        write_dependency_substitutions: bool = False,
+    ) -> None:
+        del ctx, root_path, root_project_name, seed_projects, write_wrapper, include_external_dependencies, write_dependency_substitutions
+        captured_write_build.append(write_build)
+
+    monkeypatch.setattr(setup_module, "_write_gradle_root_files", fake_write_gradle_root_files)
+    monkeypatch.setattr(setup_module, "_write_repo_root_wabbit_legal_documents", lambda ctx, projects: None)
+    monkeypatch.setattr(setup_module.setup_kotlin, "_write_gradle_repo_root_workflows", lambda *args, **kwargs: None)
+
+    ctx = _make_setup_context('[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n')
+    ctx.config = config
+
+    setup_module.setup_gradle_repo_root(ctx, project)
+
+    assert captured_write_build == [expected_write_build]
 
 
 def test_write_gradle_root_files_renders_extra_gradle_plugins_in_settings(tmp_path: Path) -> None:

@@ -590,6 +590,22 @@ class GradlePluginCommand:
     compilerOptions: dict[str, str] | None = None
 
 
+@tag("kotlin-compiler-plugin")
+@dataclass(frozen=True)
+class KotlinCompilerPluginCommand:
+    compatibilitySources: dict[str, str] | None = None
+    publishVersionWithKotlin: bool = True
+
+
+@tag("kotlin-compiler-gradle-plugin")
+@dataclass(frozen=True)
+class KotlinCompilerGradlePluginCommand:
+    compilerPluginProject: str
+    versionPackage: str | None = None
+    versionClassName: str | None = None
+    versionConstantName: str | None = None
+
+
 @tag("kmp-android-library")
 @dataclass(frozen=True)
 class KmpAndroidLibraryCommand:
@@ -679,6 +695,8 @@ FeatureCommand = (
     | IntellijPluginCommand
     | KotlinSerializationCommand
     | GradlePluginCommand
+    | KotlinCompilerPluginCommand
+    | KotlinCompilerGradlePluginCommand
     | KmpAndroidLibraryCommand
     | KmpComposeCommand
     | KmpJvmRunsCommand
@@ -767,6 +785,7 @@ class PythonProjectCommand:
     docsSystem: str | None = None
     repo: str | None = None
     ownership: str | None = None
+    testLicense: str | None = None
 
 
 @tag("purescript")
@@ -784,6 +803,7 @@ class PurescriptProjectCommand:
     publish: bool = True
     repo: str | None = None
     ownership: str | None = None
+    testLicense: str | None = None
 
 
 @tag("data")
@@ -801,6 +821,7 @@ class DataProjectCommand:
     publish: bool = True
     repo: str | None = None
     ownership: str | None = None
+    testLicense: str | None = None
 
 
 @tag("premake")
@@ -818,6 +839,7 @@ class PremakeProjectCommand:
     publish: bool = True
     repo: str | None = None
     ownership: str | None = None
+    testLicense: str | None = None
 
 
 @tag("gradle")
@@ -855,10 +877,12 @@ class GradleProjectCommand:
     publishSnapshots: bool | None = None
     docs: bool | None = None
     docsSystem: str | None = None
+    versionFromRepo: bool = False
     jvmPolicy: str | None = None
     jvmTaskPolicies: dict[str, str] | None = None
     repo: str | None = None
     ownership: str | None = None
+    testLicense: str | None = None
 
 
 RepoProjectCommand = (
@@ -872,6 +896,9 @@ class RepoCommand:
     dir_name: str
     repo: str | None = None
     gradleRootProjectName: str | None = None
+    projectVersion: str | None = None
+    defaultKotlinVersion: str | None = None
+    supportedKotlinVersions: list[str] | None = None
     jvmPolicy: str | None = None
     docsProject: str | None = None
     projects: list[RepoProjectCommand] | None = None
@@ -1005,6 +1032,8 @@ __all__ = [
     "JvmKotlinLibraryCommand",
     "JvmScalaLibraryCommand",
     "JvmVersionCommand",
+    "KotlinCompilerGradlePluginCommand",
+    "KotlinCompilerPluginCommand",
     "KotlinSerializationCommand",
     "LibraryGroupChild",
     "MavenCoordinateExpr",

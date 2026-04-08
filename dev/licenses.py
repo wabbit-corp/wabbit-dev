@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import re
 from typing import Protocol
 
 import jinja2
@@ -132,8 +133,28 @@ def cla_primary_license_reference(license_key: str | None) -> str:
     return f"{display_name} ({spdx_identifier})"
 
 
+def _spdx_identifiers_from_text(template_text: str) -> list[str]:
+    identifiers = re.findall(r"SPDX-License-Identifier:\s*([^\s`]+)", template_text)
+    return list(dict.fromkeys(identifier.strip() for identifier in identifiers if identifier.strip()))
+
+
 def load_license_texts(licenses_dir: Path) -> dict[str, str]:
-    return {item.key: dev.io.read_text_file(licenses_dir / item.template_file) for item in SUPPORTED_LICENSES}
+    loaded: dict[str, str] = {}
+
+    for path in sorted(licenses_dir.glob("*.md")):
+        template_text = dev.io.read_text_file(path)
+        loaded.setdefault(path.stem, template_text)
+        if path.stem == "Wabbit-Public-Tests-License":
+            loaded.setdefault("LicenseRef-Wabbit-Public-Test-License", template_text)
+        for spdx_identifier in _spdx_identifiers_from_text(template_text):
+            loaded.setdefault(spdx_identifier, template_text)
+
+    for item in SUPPORTED_LICENSES:
+        template_text = dev.io.read_text_file(licenses_dir / item.template_file)
+        loaded[item.key] = template_text
+        loaded.setdefault(item.python_spdx, template_text)
+
+    return loaded
 
 
 class LicenseProjectLike(Protocol):

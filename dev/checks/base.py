@@ -318,6 +318,7 @@ class FileContext:
     check_name: str
     path: Path
     issues: IssueList = field(default_factory=IssueList)
+    project: Project | None = None
     project_type: CoarseProjectType | None = None
     file_scope: CoarseFileScope | None = None
     scoped_read_suppressions: ScopedReadSuppressions | None = None

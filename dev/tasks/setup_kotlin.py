@@ -5,7 +5,7 @@ import re
 import shlex
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -23,6 +23,8 @@ from dev.config import (
     JarFileDependencyTarget,
     KmpAndroidLibrary,
     KmpJvmRuns,
+    KotlinCompilerGradlePlugin,
+    KotlinCompilerPlugin,
     MavenDependencyTarget,
     NpmDependencyTarget,
     PremakeProject,
@@ -30,6 +32,7 @@ from dev.config import (
     ProjectDependencyTarget,
     PurescriptProject,
     PythonProject,
+    RepoDefinition,
     get_gradle_plugin_applications,
     resolve_kotlin_compiler_plugin_id,
     resolve_kotlin_plugin_id,
@@ -44,6 +47,7 @@ DEFAULT_COMPOSE_PLUGIN_VERSION = "1.9.1"
 DOKKA_PLUGIN_VERSION = "2.0.0"
 KOVER_PLUGIN_VERSION = "0.9.3"
 INTELLIJ_GRADLE_PLUGIN_VERSION = "1.17.2"
+INTELLIJ_PLATFORM_GRADLE_PLUGIN_VERSION = "2.10.4"
 PAPERWEIGHT_USERDEV_PLUGIN_VERSION = "2.0.0-beta.17"
 BUKKIT_PLUGIN_YML_VERSION = "0.6.0"
 VANNIKTECH_MAVEN_PUBLISH_PLUGIN_VERSION = "0.36.0"
@@ -67,9 +71,66 @@ BUILTIN_GRADLE_PLUGIN_IDS_BY_FEATURE: dict[str, tuple[str, ...]] = {
     "kotlin-serialization": ("org.jetbrains.kotlin.plugin.serialization",),
     "kmp-compose": ("org.jetbrains.compose", "org.jetbrains.kotlin.plugin.compose"),
     "shadow-jar": ("com.gradleup.shadow",),
-    "intellij-plugin": ("org.jetbrains.intellij",),
+    "intellij-plugin": ("org.jetbrains.intellij", "org.jetbrains.intellij.platform"),
     "paper-plugin": ("io.papermc.paperweight.userdev", "net.minecrell.plugin-yml.bukkit"),
 }
+
+DEFAULT_INTELLIJ_BUNDLED_PLUGIN = "com.intellij.java"
+
+
+def _parse_intellij_platform_version(version: str | None) -> tuple[int, int] | None:
+    if version is None:
+        return None
+    match = re.fullmatch(r"(\d{4})\.(\d+)", version.strip())
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _uses_intellij_platform_gradle_plugin_v2(feature: IntellijPlugin) -> bool:
+    parsed_version = _parse_intellij_platform_version(feature.ideaVersion)
+    if parsed_version is not None and parsed_version >= (2025, 3):
+        return True
+    since_build = (feature.sinceBuild or "").strip()
+    if since_build.isdigit() and int(since_build) >= 253:
+        return True
+    return False
+
+
+def _effective_intellij_bundled_plugins(feature: IntellijPlugin) -> list[str]:
+    if feature.bundledPlugins:
+        return feature.bundledPlugins
+    inferred_plugins = [dep for dep in feature.depends or [] if not dep.startswith("com.intellij.modules.")]
+    return inferred_plugins or [DEFAULT_INTELLIJ_BUNDLED_PLUGIN]
+
+
+def _renderable_gradle_features(features: Mapping[str, object]) -> dict[str, object]:
+    rendered_features = dict(features)
+    intellij_feature = rendered_features.get("intellij-plugin")
+    if isinstance(intellij_feature, IntellijPlugin):
+        rendered_features["intellij-plugin"] = replace(
+            intellij_feature,
+            bundledPlugins=_effective_intellij_bundled_plugins(intellij_feature),
+        )
+    return rendered_features
+
+
+def _materialize_gradle_plugin_version_resources(project: GradleProject) -> None:
+    if project.gradle_plugin_id is None:
+        return
+    resources_dir = project.path / "src" / "main" / "resources"
+    if not resources_dir.exists():
+        return
+
+    project_version = str(project.version)
+    for properties_file in resources_dir.rglob("*gradle-plugin.properties"):
+        if not properties_file.is_file():
+            continue
+        content = properties_file.read_text(encoding="utf-8")
+        updated_content = content.replace("${projectVersion}", project_version)
+        updated_content = re.sub(r"(?m)^version=.*$", f"version={project_version}", updated_content)
+        if updated_content != content:
+            dev.io.write_text_file(properties_file, updated_content)
 
 
 class GradleSetupContext(Protocol):
@@ -110,6 +171,12 @@ class GradleSetupContext(Protocol):
     def gradle_snapshot_publish_workflow_template(self) -> jinja2.Template: ...
 
     @property
+    def gradle_compiler_plugin_release_publish_workflow_template(self) -> jinja2.Template: ...
+
+    @property
+    def gradle_compiler_plugin_snapshot_publish_workflow_template(self) -> jinja2.Template: ...
+
+    @property
     def gradle_docs_quality_workflow_template(self) -> jinja2.Template: ...
 
     @property
@@ -142,9 +209,44 @@ def _project_version_for_comment(project: Project) -> object | None:
     return None
 
 
+def _repo_definition_for_project(ctx: GradleSetupContext, project: Project) -> RepoDefinition | None:
+    if not isinstance(project, GradleProject):
+        return None
+    repo_id = project.repo_id
+    if repo_id is None:
+        return None
+    return ctx.config.defined_repos.get(repo_id)
+
+
+def _project_uses_repo_kotlin_version(ctx: GradleSetupContext, project: Project) -> bool:
+    repo_definition = _repo_definition_for_project(ctx, project)
+    return repo_definition is not None and repo_definition.default_kotlin_version is not None
+
+
+def _project_uses_repo_base_version(project: GradleProject) -> bool:
+    return (
+        project.version_from_repo
+        or "kotlin-compiler-plugin" in project.resolved_features
+        or "kotlin-compiler-gradle-plugin" in project.resolved_features
+    )
+
+
+def _dynamic_kotlin_artifact_coordinate(artifact: str) -> str | None:
+    parts = artifact.split(":")
+    if len(parts) < 3 or parts[0] != "org.jetbrains.kotlin":
+        return None
+    group_id, artifact_id, _version, *suffix = parts
+    return ":".join([group_id, artifact_id, "$kotlinVersion", *suffix])
+
+
 def _render_dependency_for_mode(ctx: GradleSetupContext, project: Project, dependency: Dependency) -> str:
     target = dependency.target
     if isinstance(target, MavenDependencyTarget):
+        if isinstance(project, GradleProject) and target.artifact and _project_uses_repo_kotlin_version(ctx, project):
+            dynamic_artifact = _dynamic_kotlin_artifact_coordinate(target.artifact)
+            if dynamic_artifact is not None:
+                modifier = dependency.scope or "implementation"
+                return f'{modifier}("{dynamic_artifact}")'
         if isinstance(project, GradleProject) and "kmp-compose" in project.resolved_features and target.artifact:
             for prefix, accessor in COMPOSE_ACCESSOR_PREFIXES:
                 if target.artifact.startswith(prefix):
@@ -332,9 +434,88 @@ def _gradle_plugin_project_context(project: GradleProject) -> dict[str, str] | N
     return {
         "gradle_plugin_id": plugin_id,
         "gradle_plugin_declaration_name": _camel_case(plugin_tail),
-        "gradle_plugin_implementation_class": f"{plugin_id}.gradle.{plugin_class_prefix}GradlePlugin",
+        "gradle_plugin_implementation_class": f"{_package_safe_name(plugin_id)}.gradle.{plugin_class_prefix}GradlePlugin",
         "gradle_plugin_display_name": f"{plugin_label} Gradle plugin",
         "gradle_plugin_description": project.description or f"Gradle plugin for {plugin_id}.",
+    }
+
+
+def _version_property_context(ctx: GradleSetupContext, project: GradleProject) -> dict[str, object]:
+    repo_definition = _repo_definition_for_project(ctx, project)
+    base_version_fallback = str(project.version) if project.version is not None else "0.0.1"
+    kotlin_version_fallback = ctx.config.plugins["kotlin-jvm"].version
+    if repo_definition is not None and repo_definition.default_kotlin_version is not None:
+        kotlin_version_fallback = repo_definition.default_kotlin_version
+
+    return {
+        "uses_repo_base_version": _project_uses_repo_base_version(project),
+        "base_version_fallback": base_version_fallback,
+        "uses_repo_kotlin_version": _project_uses_repo_kotlin_version(ctx, project),
+        "repo_kotlin_version_fallback": kotlin_version_fallback,
+    }
+
+
+def _sorted_compiler_compatibility_sources(feature: KotlinCompilerPlugin) -> list[dict[str, str]]:
+    return [
+        {
+            "version_prefix": entry.kotlinVersionPrefix,
+            "path": entry.path,
+        }
+        for entry in sorted(
+            feature.compatibilitySources,
+            key=lambda entry: (-len(entry.kotlinVersionPrefix), entry.kotlinVersionPrefix),
+        )
+    ]
+
+
+def _kotlin_compiler_plugin_context(project: GradleProject) -> dict[str, object]:
+    feature = project.resolved_features.get("kotlin-compiler-plugin")
+    if not isinstance(feature, KotlinCompilerPlugin):
+        return {}
+
+    return {
+        "is_kotlin_compiler_plugin_project": True,
+        "compiler_plugin_publish_version_with_kotlin": feature.publishVersionWithKotlin,
+        "compiler_plugin_compatibility_sources": _sorted_compiler_compatibility_sources(feature),
+    }
+
+
+def _snake_case_upper(value: str) -> str:
+    words = _identifier_words(value)
+    if not words:
+        return "PLUGIN"
+    return "_".join(word.upper() for word in words)
+
+
+def _package_safe_name(value: str) -> str:
+    segments = [segment for segment in value.split(".") if segment]
+    cleaned_segments: list[str] = []
+    for segment in segments:
+        words = _identifier_words(segment)
+        cleaned_segments.append("".join(words) if words else "plugin")
+    return ".".join(cleaned_segments)
+
+
+def _kotlin_compiler_gradle_plugin_context(project: GradleProject) -> dict[str, object]:
+    feature = project.resolved_features.get("kotlin-compiler-gradle-plugin")
+    if not isinstance(feature, KotlinCompilerGradlePlugin):
+        return {}
+
+    plugin_context = _gradle_plugin_project_context(project)
+    if plugin_context is None:
+        raise ValueError(f"{project.name} uses kotlin-compiler-gradle-plugin but has no gradle_plugin_id")
+
+    plugin_tail = project.gradle_plugin_id.rsplit(".", 1)[-1] if project.gradle_plugin_id is not None else project.name
+    version_package = feature.versionPackage or f"{_package_safe_name(project.gradle_plugin_id)}.gradle"
+    version_class_name = feature.versionClassName or f"{_pascal_case(plugin_tail) or 'Plugin'}GradlePluginVersion"
+    version_constant_name = feature.versionConstantName or f"{_snake_case_upper(plugin_tail)}_GRADLE_PLUGIN_VERSION"
+
+    return {
+        "is_kotlin_compiler_gradle_plugin_project": True,
+        "linked_compiler_plugin_project_id": feature.compilerPluginProject,
+        "compiler_gradle_version_package": version_package,
+        "compiler_gradle_version_class_name": version_class_name,
+        "compiler_gradle_version_constant_name": version_constant_name,
     }
 
 
@@ -358,6 +539,7 @@ def settings_plugin_versions(ctx: GradleSetupContext) -> dict[str, str]:
         "kover_version": KOVER_PLUGIN_VERSION,
         "maven_publish_plugin_version": VANNIKTECH_MAVEN_PUBLISH_PLUGIN_VERSION,
         "intellij_gradle_plugin_version": INTELLIJ_GRADLE_PLUGIN_VERSION,
+        "intellij_platform_gradle_plugin_version": INTELLIJ_PLATFORM_GRADLE_PLUGIN_VERSION,
         "paperweight_userdev_plugin_version": plugin_version(
             "paperweight-userdev",
             PAPERWEIGHT_USERDEV_PLUGIN_VERSION,
@@ -369,12 +551,75 @@ def settings_plugin_versions(ctx: GradleSetupContext) -> dict[str, str]:
 def settings_plugin_context(
     ctx: GradleSetupContext,
     projects: Sequence[GradleProject],
+    *,
+    root_path: Path | None = None,
 ) -> dict[str, object]:
     extra_gradle_plugins, extra_gradle_plugin_repositories = _extra_gradle_plugins_for_projects(ctx, projects)
     context: dict[str, object] = dict(settings_plugin_versions(ctx))
     context["extra_gradle_plugins"] = extra_gradle_plugins
     context["extra_gradle_plugin_repositories"] = extra_gradle_plugin_repositories
+    repo_definition: RepoDefinition | None = None
+    if root_path is not None:
+        repo_ids = {project.repo_id for project in projects if project.repo_id is not None}
+        if len(repo_ids) == 1:
+            repo_definition = ctx.config.defined_repos.get(next(iter(repo_ids)))
+            if repo_definition is not None and repo_definition.path.resolve() != root_path.resolve():
+                repo_definition = None
+    context["use_gradle_property_kotlin_version"] = (
+        repo_definition is not None and repo_definition.default_kotlin_version is not None
+    )
+    context["repo_default_kotlin_version"] = (
+        repo_definition.default_kotlin_version if repo_definition is not None else None
+    )
     return context
+
+
+def _local_plugin_included_build_name(relative_path: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9]+", "-", relative_path).strip("-")
+    return f"local-plugin-{normalized or 'build'}"
+
+
+def local_plugin_included_builds(
+    ctx: GradleSetupContext,
+    *,
+    root_path: Path,
+    projects: Sequence[GradleProject],
+) -> list[dict[str, str]]:
+    build_paths: list[dict[str, str]] = []
+    seen_paths: set[str] = set()
+
+    for project in projects:
+        for application in get_gradle_plugin_applications(project):
+            definition = ctx.config.plugins[application.name]
+            plugin_id = resolve_kotlin_plugin_id(ctx.config, definition)
+            plugin_project = next(
+                (
+                    candidate
+                    for candidate in ctx.config.defined_projects.values()
+                    if isinstance(candidate, GradleProject) and candidate.gradle_plugin_id == plugin_id
+                ),
+                None,
+            )
+            if plugin_project is None:
+                continue
+
+            build_root = plugin_project.effective_gradle_root.resolve()
+            if build_root == root_path.resolve():
+                continue
+
+            relative_path = os.path.relpath(build_root, root_path)
+            if relative_path in seen_paths:
+                continue
+
+            seen_paths.add(relative_path)
+            build_paths.append(
+                {
+                    "build_path": relative_path,
+                    "build_name": _local_plugin_included_build_name(relative_path),
+                }
+            )
+
+    return build_paths
 
 
 def _effective_targets(project: GradleProject) -> list[GradleTargetSpec]:
@@ -821,11 +1066,11 @@ def _workflow_task_name(project: GradleProject, task_name: str) -> str:
     return task_name
 
 
-def _workflow_command(tasks: Sequence[str], *, quiet: bool = False) -> str:
+def _workflow_command(tasks: Sequence[str], *, quiet: bool = False, extra_args: Sequence[str] = ()) -> str:
     command = ["./gradlew"]
     if quiet:
         command.append("--quiet")
-    command.extend(["--no-daemon", *tasks])
+    command.extend(["--no-daemon", *extra_args, *tasks])
     return shlex.join(command)
 
 
@@ -922,6 +1167,90 @@ def _gradle_workflow_context_for_projects(
     )
 
 
+def _compiler_plugin_repo_workflow_context(
+    *,
+    root_path: Path,
+    repo_definition: RepoDefinition,
+    projects: Sequence[GradleProject],
+    java_version: int,
+) -> dict[str, str | bool]:
+    publish_projects = [project for project in projects if _is_maven_central_publishable_project(project)]
+    compiler_plugin_projects = [
+        project for project in publish_projects if isinstance(project.resolved_features.get("kotlin-compiler-plugin"), KotlinCompilerPlugin)
+    ]
+    if not compiler_plugin_projects:
+        raise ValueError("Compiler-plugin workflow context requires at least one compiler plugin project")
+
+    base_version_projects = [project for project in publish_projects if _project_uses_repo_base_version(project)]
+    core_publish_projects = [project for project in publish_projects if project not in compiler_plugin_projects]
+    if not base_version_projects:
+        raise ValueError("Compiler-plugin workflow context requires at least one base-version project")
+
+    github_repo = repo_definition.github_repo
+    if github_repo is None:
+        raise ValueError(f"{repo_definition.repo_id} requires github_repo for workflow generation")
+
+    core_release_validation_tasks = [_workflow_task_name(project, "assertReleaseVersion") for project in core_publish_projects]
+    core_release_publish_tasks = [
+        _workflow_task_name(project, "publishAndReleaseToMavenCentral") for project in core_publish_projects
+    ]
+    core_snapshot_tasks = [_workflow_task_name(project, "assertSnapshotVersion") for project in core_publish_projects]
+    core_snapshot_tasks.extend(_workflow_task_name(project, "publishToMavenCentral") for project in core_publish_projects)
+
+    compiler_release_validation_tasks = [
+        _workflow_task_name(project, "assertReleaseVersion") for project in compiler_plugin_projects
+    ]
+    compiler_release_build_tasks = [_workflow_task_name(project, "build") for project in compiler_plugin_projects]
+    compiler_release_publish_tasks = [
+        _workflow_task_name(project, "publishAndReleaseToMavenCentral") for project in compiler_plugin_projects
+    ]
+    compiler_snapshot_tasks = [_workflow_task_name(project, "assertSnapshotVersion") for project in compiler_plugin_projects]
+    compiler_snapshot_tasks.extend(
+        _workflow_task_name(project, "publishToMavenCentral") for project in compiler_plugin_projects
+    )
+
+    matrix_property_arg = "-PkotlinVersion=${{ matrix.kotlin-version }}"
+
+    return {
+        "project_name": projects[0].name,
+        "github_repo": github_repo,
+        "java_version": str(java_version),
+        "needs_android": _projects_need_android_setup(publish_projects),
+        "pages_url": _github_pages_url(github_repo),
+        "repo_base_version_print_command": _workflow_command(
+            [_workflow_task_name(project, "printBaseVersion") for project in base_version_projects],
+            quiet=True,
+        ),
+        "core_release_validation_command": _workflow_command(
+            core_release_validation_tasks or ["assertReleaseVersion"]
+        ),
+        "core_release_build_command": _workflow_command(["build"]),
+        "core_release_publish_command": _workflow_command(["build", *core_release_publish_tasks]),
+        "core_snapshot_publish_command": _workflow_command(["build", *core_snapshot_tasks]),
+        "compiler_release_validation_command": _workflow_command(
+            compiler_release_validation_tasks or ["assertReleaseVersion"],
+            extra_args=[matrix_property_arg],
+        ),
+        "compiler_release_build_command": _workflow_command(
+            compiler_release_build_tasks or ["build"],
+            extra_args=[matrix_property_arg],
+        ),
+        "compiler_release_publish_command": _workflow_command(
+            compiler_release_publish_tasks or ["publishAndReleaseToMavenCentral"],
+            extra_args=[matrix_property_arg],
+        ),
+        "compiler_base_version_print_command": _workflow_command(
+            [_workflow_task_name(project, "printBaseVersion") for project in compiler_plugin_projects],
+            quiet=True,
+            extra_args=[matrix_property_arg],
+        ),
+        "compiler_snapshot_publish_command": _workflow_command(
+            compiler_snapshot_tasks or ["assertSnapshotVersion", "publishToMavenCentral"],
+            extra_args=[matrix_property_arg],
+        ),
+    }
+
+
 def _write_gradle_workflows(ctx: GradleSetupContext, project: GradleProject, *, java_version: int) -> None:
     workflows_dir = project.path / ".github" / "workflows"
     release_publish_path = workflows_dir / "release-publish.yml"
@@ -985,6 +1314,14 @@ def _write_gradle_repo_root_workflows(
     snapshot_publish_path = workflows_dir / "snapshot-publish.yml"
     docs_quality_path = workflows_dir / "docs-quality.yml"
     docs_deploy_path = workflows_dir / "docs-deploy.yml"
+    repo_definition = next(
+        (
+            definition
+            for definition in ctx.config.defined_repos.values()
+            if definition.path.resolve() == root_path.resolve()
+        ),
+        None,
+    )
 
     publish_projects = [project for project in projects if _is_maven_central_publishable_project(project)]
     release_workflow_projects: list[GradleProject] = []
@@ -998,7 +1335,61 @@ def _write_gradle_repo_root_workflows(
                 f"publishable modules have differing versions {sorted(publish_versions)}"
             )
 
-    if repo_github_repo is not None and release_workflow_projects:
+    compiler_plugin_projects = [
+        project for project in publish_projects if isinstance(project.resolved_features.get("kotlin-compiler-plugin"), KotlinCompilerPlugin)
+    ]
+    use_compiler_plugin_workflows = (
+        repo_github_repo is not None
+        and bool(compiler_plugin_projects)
+        and repo_definition is not None
+        and bool(repo_definition.supported_kotlin_versions)
+    )
+
+    if use_compiler_plugin_workflows:
+        workflow_context = _compiler_plugin_repo_workflow_context(
+            root_path=root_path,
+            repo_definition=repo_definition,
+            projects=projects,
+            java_version=java_version,
+        )
+        dev.io.write_text_file(
+            release_publish_path,
+            clean_text(render_template(ctx.gradle_compiler_plugin_release_publish_workflow_template, **workflow_context)),
+        )
+        if any(project.publish_snapshots for project in publish_projects):
+            dev.io.write_text_file(
+                snapshot_publish_path,
+                clean_text(render_template(ctx.gradle_compiler_plugin_snapshot_publish_workflow_template, **workflow_context)),
+            )
+        else:
+            dev.io.delete_if_exists(snapshot_publish_path)
+    elif compiler_plugin_projects and repo_github_repo is not None and repo_definition is not None:
+        warning(
+            f"Skipping compiler-plugin matrix workflows for {root_path}: "
+            "repo definition is missing supportedKotlinVersions"
+        )
+        if release_workflow_projects:
+            workflow_context = _gradle_workflow_context_for_projects(
+                root_path=root_path,
+                projects=release_workflow_projects,
+                docs_project=docs_project,
+                java_version=java_version,
+            )
+            dev.io.write_text_file(
+                release_publish_path,
+                clean_text(render_template(ctx.gradle_release_publish_workflow_template, **workflow_context)),
+            )
+            if any(project.publish_snapshots for project in release_workflow_projects):
+                dev.io.write_text_file(
+                    snapshot_publish_path,
+                    clean_text(render_template(ctx.gradle_snapshot_publish_workflow_template, **workflow_context)),
+                )
+            else:
+                dev.io.delete_if_exists(snapshot_publish_path)
+        else:
+            dev.io.delete_if_exists(release_publish_path)
+            dev.io.delete_if_exists(snapshot_publish_path)
+    elif repo_github_repo is not None and release_workflow_projects:
         workflow_context = _gradle_workflow_context_for_projects(
             root_path=root_path,
             projects=release_workflow_projects,
@@ -1277,8 +1668,18 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
     )
     extra_gradle_plugins, _extra_gradle_plugin_repositories = _extra_gradle_plugins_for_projects(ctx, [project])
     kotlin_compiler_plugin_options = _kotlin_compiler_plugin_options_for_project(ctx, project)
-    publish_to_maven_central = _supports_gradle_maven_central(project)
+    publish_to_maven_central = _is_maven_central_publishable_project(project)
     maven_central_context = _maven_central_context(ctx, project) if publish_to_maven_central else {}
+    template_features = _renderable_gradle_features(project.resolved_features)
+    version_property_context = _version_property_context(ctx, project)
+    kotlin_compiler_plugin_context = _kotlin_compiler_plugin_context(project)
+    kotlin_compiler_gradle_plugin_context = _kotlin_compiler_gradle_plugin_context(project)
+    intellij_feature = template_features.get("intellij-plugin")
+    use_intellij_platform_gradle_plugin_v2 = (
+        isinstance(intellij_feature, IntellijPlugin)
+        and _uses_intellij_platform_gradle_plugin_v2(intellij_feature)
+    )
+    _materialize_gradle_plugin_version_resources(project)
 
     if project.is_kmp:
         dokka_source_link_remote_url = _dokka_source_link_remote_url(project, "src")
@@ -1300,6 +1701,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             project_name=project.name,
             project_group=project.group_name,
             project_version=project.version,
+            published_artifact_id=project.effective_artifact_id,
             repositories=project.resolved_maven_repositories,
             kotlin_mp_version=ctx.config.plugins["kotlin-mp"].version,
             kotlin_serialization_version=ctx.config.plugins["kotlin-serialization"].version,
@@ -1309,7 +1711,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             kover_version=KOVER_PLUGIN_VERSION,
             java_version=java_version,
             kotlin_jvm_target=kotlin_jvm_target,
-            features=project.resolved_features,
+            features=template_features,
             use_root_plugin_management=nested_gradle_project,
             platforms=project.platforms,
             targets=targets,
@@ -1335,6 +1737,9 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             publish_to_maven_central=publish_to_maven_central,
             inline_extra_build_imports=inline_extra_build.imports,
             inline_extra_build_script=inline_extra_build.body,
+            use_intellij_platform_gradle_plugin_v2=use_intellij_platform_gradle_plugin_v2,
+            **version_property_context,
+            **kotlin_compiler_plugin_context,
             **maven_central_context,
         )
     else:
@@ -1355,7 +1760,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             java_version=java_version,
             kotlin_jvm_target=kotlin_jvm_target,
             shadow_version=ctx.config.plugins["shadow"].version,
-            features=project.resolved_features,
+            features=template_features,
             use_root_plugin_management=nested_gradle_project,
             project_dependencies=project_dependencies,
             other_dependencies=other_dependencies,
@@ -1372,6 +1777,10 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             is_gradle_plugin_project=project.gradle_plugin_id is not None,
             inline_extra_build_imports=inline_extra_build.imports,
             inline_extra_build_script=inline_extra_build.body,
+            use_intellij_platform_gradle_plugin_v2=use_intellij_platform_gradle_plugin_v2,
+            **version_property_context,
+            **kotlin_compiler_plugin_context,
+            **kotlin_compiler_gradle_plugin_context,
             **maven_central_context,
             **gradle_plugin_project_context,
         )
@@ -1382,13 +1791,19 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
         _cleanup_nested_gradle_project_files(project)
         if not _nested_gradle_project_keeps_license(ctx, project):
             dev.io.delete_if_exists(project.path / "LICENSE.md")
+            dev.io.delete_if_exists(project.path / "LICENSES")
     else:
         dev.io.write_text_file(
             project.path / "settings.gradle.kts",
             clean_gradle_build_text(
                 render_template(
                     ctx.subproject_settings_template,
-                    **settings_plugin_context(ctx, [project]),
+                    **settings_plugin_context(ctx, [project], root_path=project.path),
+                    local_plugin_included_builds=local_plugin_included_builds(
+                        ctx,
+                        root_path=project.path,
+                        projects=[project],
+                    ),
                     project_name=project.effective_gradle_project_name,
                     features=project.resolved_features,
                 )
@@ -1404,7 +1819,14 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
         )
         dev.io.write_text_file(
             project.path / "gradle.properties",
-            clean_text(render_template(ctx.gradle_properties_template)),
+            clean_text(
+                render_template(
+                    ctx.gradle_properties_template,
+                    repo_project_version=None,
+                    repo_default_kotlin_version=None,
+                    repo_supported_kotlin_versions=[],
+                )
+            ),
         )
 
     intellij_feature = project.resolved_features.get("intellij-plugin")

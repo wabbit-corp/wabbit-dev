@@ -52,6 +52,8 @@ class _Context:
     subproject_build_kmp_template: jinja2.Template
     gradle_release_publish_workflow_template: jinja2.Template
     gradle_snapshot_publish_workflow_template: jinja2.Template
+    gradle_compiler_plugin_release_publish_workflow_template: jinja2.Template
+    gradle_compiler_plugin_snapshot_publish_workflow_template: jinja2.Template
     gradle_docs_quality_workflow_template: jinja2.Template
     gradle_docs_deploy_workflow_template: jinja2.Template
     settings_template: jinja2.Template
@@ -106,6 +108,8 @@ def _make_context(
         gradle_snapshot_publish_workflow_template=jinja2.Template(
             "snapshot {{ project_name }} android={{ needs_android }}"
         ),
+        gradle_compiler_plugin_release_publish_workflow_template=jinja2.Template("compiler release"),
+        gradle_compiler_plugin_snapshot_publish_workflow_template=jinja2.Template("compiler snapshot"),
         gradle_docs_quality_workflow_template=jinja2.Template("docs-quality {{ project_name }}"),
         gradle_docs_deploy_workflow_template=jinja2.Template("docs-deploy {{ docs_output_dir }}"),
         settings_template=jinja2.Template(""),
@@ -563,6 +567,35 @@ def test_setup_gradle_project_renders_depends_on_parents_via_source_set_provider
     assert 'dependsOn(sourceSets.getByName("nativeMain"))' in build_text
     assert 'dependsOn(sourceSets.getByName("ortNativeMain"))' in build_text
     assert build_text.index("val nativeMain by getting") < build_text.index("val ortNativeMain by creating")
+
+
+def test_setup_gradle_project_remaps_kmp_publication_artifact_ids(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "kmp-library", platforms=["jvm", "iosArm64"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.targets = [
+        GradleTargetSpec(kind="jvm"),
+        GradleTargetSpec(kind="iosArm64"),
+    ]
+    project.gradle_project_name = "library"
+    project.artifact_id = "kotlin-example"
+
+    repo_root = Path(__file__).resolve().parents[2]
+    kmp_template = (
+        repo_root / "data-repo-template" / "gradle-files" / "subproject-build-kmp.gradle.kts.jinja2"
+    ).read_text(encoding="utf-8")
+    ctx = _make_context(tmp_path, jvm_template="JVM_TEMPLATE", kmp_template=kmp_template)
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
+    assert 'val configuredArtifactId = "kotlin-example"' in build_text
+    assert 'artifactId == project.name -> configuredArtifactId' in build_text
+    assert 'artifactId.startsWith(projectArtifactPrefix)' in build_text
+    assert 'artifactId.removePrefix(projectArtifactPrefix)' in build_text
 
 
 def test_setup_gradle_project_renders_extra_gradle_plugin_in_jvm_build_and_settings(
@@ -1171,6 +1204,19 @@ def test_setup_gradle_project_renders_gradle_plugin_project_defaults(
     project = _make_project(tmp_path / "typeclasses-gradle-plugin", platforms=["jvm"])
     project.path.mkdir(parents=True, exist_ok=True)
     project.gradle_plugin_id = "one.wabbit.typeclass"
+    version_resource = (
+        project.path
+        / "src"
+        / "main"
+        / "resources"
+        / "one"
+        / "wabbit"
+        / "typeclass"
+        / "gradle"
+        / "typeclass-gradle-plugin.properties"
+    )
+    version_resource.parent.mkdir(parents=True, exist_ok=True)
+    version_resource.write_text("version=${projectVersion}\n", encoding="utf-8")
 
     repo_root = Path(__file__).resolve().parents[2]
     jvm_template = (
@@ -1190,11 +1236,12 @@ def test_setup_gradle_project_renders_gradle_plugin_project_defaults(
     assert 'testImplementation("org.jetbrains.kotlin:kotlin-gradle-plugin-api:2.2.20")' in build_text
     assert "testImplementation(gradleApi())" in build_text
     assert "testImplementation(gradleTestKit())" in build_text
-    assert 'filesMatching("**/*gradle-plugin.properties")' in build_text
-    assert "pluginUnderTestMetadata {" in build_text
+    assert 'filesMatching("**/*gradle-plugin.properties")' not in build_text
+    assert "pluginUnderTestMetadata {" not in build_text
     assert 'id = "one.wabbit.typeclass"' in build_text
     assert 'implementationClass = "one.wabbit.typeclass.gradle.TypeclassGradlePlugin"' in build_text
     assert 'displayName = "Typeclass Gradle plugin"' in build_text
+    assert version_resource.read_text(encoding="utf-8") == "version=0.0.1\n"
 
 
 def test_setup_gradle_project_uses_configured_paper_versions(
