@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dev.config import GradleProject, PremakeProject, PythonProject, load_config
+from dev.discoverability import did_you_mean_suffix
 from dev.messages import warning
 
 
@@ -14,6 +15,18 @@ class ClocStats:
     blank: int
     comment: int
     code: int
+
+
+def _merge_stats(
+    target: defaultdict[str, ClocStats],
+    source: defaultdict[str, ClocStats],
+) -> None:
+    for lang, stats in source.items():
+        current = target[lang]
+        current.files += stats.files
+        current.blank += stats.blank
+        current.comment += stats.comment
+        current.code += stats.code
 
 
 def _run_cloc(path: Path) -> defaultdict[str, ClocStats]:
@@ -56,24 +69,32 @@ def cloc(
     # print(f"Running cloc for: {project_or_dir_or_file or 'all projects'}")
     # print(f"All projects: {list(config.defined_projects.keys()) if config else 'N/A'}")
 
-    projects = []
+    project_names: list[str] = []
+    direct_path: Path | None = None
     if project_or_dir_or_file is None:
         if config is not None:
-            projects = list(config.defined_projects.keys())
+            project_names = list(config.defined_projects.keys())
         else:
             warning("No project specified and no config found. Nothing to do.")
             return
     else:
         if config is not None and project_or_dir_or_file in config.defined_projects:
-            projects = [project_or_dir_or_file]
+            project_names = [project_or_dir_or_file]
         else:
-            projects = [project_or_dir_or_file]
+            direct_path = Path(project_or_dir_or_file).absolute()
+            if not direct_path.exists():
+                suggestion = did_you_mean_suffix(project_or_dir_or_file, config.defined_projects) if config is not None else ""
+                warning(f"Path '{direct_path}' does not exist.{suggestion} Nothing to do.")
+                return
 
     combined_stats: defaultdict[str, defaultdict[str, ClocStats]] = defaultdict(
         lambda: defaultdict(lambda: ClocStats(0, 0, 0, 0))
     )
 
-    for project in projects:
+    if direct_path is not None:
+        combined_stats[direct_path.as_posix()] = _run_cloc(direct_path)
+
+    for project in project_names:
         proj = config.defined_projects.get(project) if config else None
         if proj is None:
             warning(f"Project '{project}' not found in config. Skipping.")
@@ -93,7 +114,7 @@ def cloc(
                 ]
                 for src_dir in src_dirs:
                     if src_dir.exists():
-                        combined_stats[proj.name] = _run_cloc(src_dir)
+                        _merge_stats(combined_stats[proj.name], _run_cloc(src_dir))
             case PremakeProject():
                 # Count only src
                 src_dir = proj_path / "src"

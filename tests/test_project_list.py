@@ -4,8 +4,17 @@ from pathlib import Path
 import pytest
 from mu.parser import parse
 
-from dev.config import Config, GradleProject, Kotlin, OwnershipType, PythonProject, Version
-from dev.tasks.project_list import render_project_list_lines
+from dev.config import (
+    Config,
+    Dependency,
+    GradleProject,
+    Kotlin,
+    OwnershipType,
+    ProjectDependencyTarget,
+    PythonProject,
+    Version,
+)
+from dev.tasks.project_list import render_project_list_lines, render_project_show_lines
 
 
 def _empty_config() -> Config:
@@ -132,12 +141,50 @@ def test_render_project_list_lines_groups_repo_projects() -> None:
     assert lines[5].endswith("python")
 
 
+def test_render_project_show_lines_includes_resolved_metadata() -> None:
+    config = _empty_config()
+    repo_root = Path("./jeeves")
+    project = _gradle_project(
+        repo_root / "client",
+        project_id="jeeves/client",
+        build_model="kmp",
+        repo_id="jeeves",
+        repo_root=repo_root,
+    )
+    project.publish_target = "maven-central"
+    project.docs_enabled = True
+    project.docs_system = "dokka"
+    project.jvm_policy = "android-agp-21"
+    project.jvm_task_policies = {"compileKotlinJvm": "jvm-21"}
+    project.resolved_dependencies = [
+        Dependency(scope="api", target=ProjectDependencyTarget("jeeves/api")),
+    ]
+    config.defined_projects = OrderedDict([("jeeves/client", project)])
+
+    lines = render_project_show_lines("jeeves/client", config, colorize=False)
+
+    assert "Project: jeeves/client" in lines
+    assert "Type: kotlin/kmp" in lines
+    assert "Repo root: jeeves" in lines
+    assert "Publish target: maven-central" in lines
+    assert "Docs system: dokka" in lines
+    assert "JVM policy: android-agp-21" in lines
+    assert "JVM task overrides: compileKotlinJvm -> jvm-21" in lines
+    assert "Resolved dependencies (1):" in lines
+    assert "  - api: jeeves/api" in lines
+    assert "Relevant generated files:" in lines
+    assert any("settings.local.gradle.kts" in line for line in lines)
+
+
 @pytest.mark.asyncio
 async def test_cli_project_list_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev import cli
+    from dev.tasks import doctor as doctor_task
     from dev.tasks import project_list
 
     called: list[str] = []
+
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None: True)
 
     def fake_list_projects() -> None:
         called.append("called")
@@ -149,3 +196,56 @@ async def test_cli_project_list_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert result == 0
     assert called == ["called"]
+
+
+@pytest.mark.asyncio
+async def test_cli_project_show_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import doctor as doctor_task
+    from dev.tasks import project_list
+
+    called: list[str] = []
+
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None: True)
+
+    def fake_show_project(project_id: str) -> None:
+        called.append(project_id)
+
+    monkeypatch.setattr(project_list, "show_project", fake_show_project)
+    monkeypatch.setattr("sys.argv", ["dev.py", "project", "show", "app-wabbit-dev"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == ["app-wabbit-dev"]
+
+
+@pytest.mark.asyncio
+async def test_cli_project_show_suggests_close_project_id(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+    from dev.tasks import doctor as doctor_task
+    from dev.tasks import project_list
+
+    config = _empty_config()
+    config.defined_projects = OrderedDict(
+        [
+            (
+                "app-wabbit-dev",
+                _python_project(Path("./app-wabbit-dev"), project_id="app-wabbit-dev"),
+            )
+        ]
+    )
+
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None: True)
+    monkeypatch.setattr(project_list, "load_config", lambda: config)
+    monkeypatch.setattr("sys.argv", ["dev.py", "project", "show", "app-wabbit-de"])
+
+    result = await cli.async_main()
+
+    assert result == 2
+    err = capsys.readouterr().err
+    assert "Unknown project: 'app-wabbit-de'" in err
+    assert "Did you mean 'app-wabbit-dev'?" in err

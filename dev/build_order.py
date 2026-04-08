@@ -7,6 +7,7 @@ Subproject Dependency Graph & Topological Sort
 from collections import defaultdict, deque
 
 from dev.config import Project
+from dev.discoverability import unknown_name_message
 
 
 def build_dependency_graph(projects: dict[str, Project]) -> tuple[dict[str, list[str]], dict[str, int]]:
@@ -53,7 +54,7 @@ def toposort_projects(
             return []
         for target in target_projects:
             if target not in projects:
-                raise ValueError(f"Unknown project: {target}")
+                raise ValueError(unknown_name_message("project", target, projects))
         unique_targets: list[str] = []
         seen_targets: set[str] = set()
         for target in target_projects:

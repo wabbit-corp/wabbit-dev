@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from argparse import ArgumentParser
+import inspect
+import re
+from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -11,6 +13,7 @@ import pathspec
 
 from dev.base import Module
 from dev.checks.base import (
+    Check,
     CheckFailedWithReportedIssues,
     DirectoryCheck,
     FileCheck,
@@ -26,6 +29,7 @@ from dev.checks.base import (
     known_issue_types,
 )
 from dev.config import Project, load_config
+from dev.discoverability import did_you_mean_suffix, unknown_name_message
 from dev.messages import error, info, warning
 
 E_GITIGNORE_WITHOUT_REPO = IssueType(
@@ -33,8 +37,236 @@ E_GITIGNORE_WITHOUT_REPO = IssueType(
     "Gitignore file found without a git repository.",
 )
 
+_ISSUE_ID_RE = re.compile(r"\b(E_[A-Z0-9_]+)\b")
 
-def trufflehog(
+
+@dataclass(frozen=True)
+class CheckCatalogEntry:
+    name: str
+    kind: str
+    summary: str
+    fixable: str
+    issue_types: tuple[IssueType, ...]
+    config_commands: tuple[str, ...]
+
+
+def _load_optional_config() -> object | None:
+    config_path = Path("./root.clj").absolute()
+    return load_config() if config_path.exists() else None
+
+
+def _load_check_modules(config: object | None) -> dict[str, Module]:
+    if config is not None and hasattr(config, "modules"):
+        return getattr(config, "modules")
+
+    try:
+        return Module.load_modules()
+    except Exception as ex:
+        warning(f"Failed to auto-load checks without config: {ex}")
+        return {}
+
+
+def _load_all_checks(config: object | None) -> dict[str, Check]:
+    modules = _load_check_modules(config)
+    return {
+        check_name: check
+        for check_name, check in modules.items()
+        if isinstance(check, Check)
+    }
+
+
+def _check_kind(check: Check) -> str:
+    if isinstance(check, RepoCheck):
+        return "repo"
+    if isinstance(check, ProjectCheck):
+        return "project"
+    if isinstance(check, DirectoryCheck):
+        return "directory"
+    if isinstance(check, FileCheck):
+        return "file"
+    return "check"
+
+
+def _normalize_summary(text: str) -> str:
+    cleaned = " ".join(text.strip().split())
+    cleaned = re.sub(r"\s*\(\{[^}]+\}\)", "", cleaned)
+    cleaned = re.sub(r"\{[^}]+\}", "value", cleaned)
+    cleaned = cleaned.replace("'value'", "value").replace('"value"', "value")
+    cleaned = cleaned.strip(" -*")
+    return cleaned.rstrip(".") + "." if cleaned else ""
+
+
+def _humanize_check_name(name: str) -> str:
+    words = re.sub(r"(?<!^)(?=[A-Z])", " ", name.removesuffix("Check")).strip().lower()
+    if not words:
+        return name
+    return f"Check {words}."
+
+
+def _issue_types_for_check(check: Check) -> tuple[IssueType, ...]:
+    module = inspect.getmodule(check.__class__)
+    if module is None:
+        return ()
+
+    issue_types_by_name = {
+        name: value
+        for name, value in vars(module).items()
+        if isinstance(value, IssueType)
+    }
+    if not issue_types_by_name:
+        return ()
+
+    try:
+        source = inspect.getsource(check.__class__)
+    except OSError:
+        source = ""
+
+    ordered_ids: list[str] = []
+    seen: set[str] = set()
+    for issue_id in _ISSUE_ID_RE.findall(source):
+        for value in issue_types_by_name.values():
+            if value.id != issue_id or value.id in seen:
+                continue
+            ordered_ids.append(value.id)
+            seen.add(value.id)
+
+    if ordered_ids:
+        ordered: list[IssueType] = []
+        for issue_id in ordered_ids:
+            for value in issue_types_by_name.values():
+                if value.id == issue_id:
+                    ordered.append(value)
+                    break
+        return tuple(ordered)
+
+    if len(issue_types_by_name) == 1:
+        return tuple(issue_types_by_name.values())
+
+    return ()
+
+
+def _config_commands_for_check(check: Check) -> tuple[str, ...]:
+    try:
+        registrations = check.register_typed_config_commands()
+    except Exception:
+        return ()
+
+    tags = [
+        tag
+        for registration in registrations
+        if (tag := getattr(registration.command_type, "__mu_tag__", None)) is not None
+    ]
+    return tuple(tags)
+
+
+def _check_fixable(check: Check) -> str:
+    try:
+        source = inspect.getsource(check.__class__)
+    except OSError:
+        return "unknown"
+
+    if "fix=" in source or ".fixable(" in source:
+        return "yes"
+    return "no"
+
+
+def _check_summary(check: Check, issue_types: Sequence[IssueType]) -> str:
+    raw_doc = check.__class__.__doc__
+    if raw_doc:
+        doc = inspect.cleandoc(raw_doc)
+        first_paragraph = doc.split("\n\n", 1)[0].replace("\n", " ")
+        if ":" in first_paragraph:
+            head, tail = first_paragraph.split(":", 1)
+            if "- " in tail:
+                return _normalize_summary(head)
+        sentence_match = re.search(r"(.+?[.?!])(?:\s|$)", first_paragraph)
+        if sentence_match is not None:
+            return _normalize_summary(sentence_match.group(1))
+        return _normalize_summary(first_paragraph)
+    if issue_types:
+        return _normalize_summary(issue_types[0].message)
+    return _humanize_check_name(check.__class__.__name__)
+
+
+def _catalog_entry(check: Check) -> CheckCatalogEntry:
+    issue_types = _issue_types_for_check(check)
+    return CheckCatalogEntry(
+        name=check.__class__.__name__,
+        kind=_check_kind(check),
+        summary=_check_summary(check, issue_types),
+        fixable=_check_fixable(check),
+        issue_types=issue_types,
+        config_commands=_config_commands_for_check(check),
+    )
+
+
+def _catalog(config: object | None = None) -> dict[str, CheckCatalogEntry]:
+    checks = _load_all_checks(config)
+    return {
+        name: _catalog_entry(check)
+        for name, check in checks.items()
+    }
+
+
+def list_checks() -> int:
+    catalog = _catalog(_load_optional_config())
+    if not catalog:
+        warning("No checks were loaded.")
+        return 1
+
+    entries = sorted(catalog.values(), key=lambda entry: (entry.kind, entry.name))
+    name_width = max(len(entry.name) for entry in entries)
+    kind_width = max(len(entry.kind) for entry in entries)
+    fix_width = max(len(entry.fixable) for entry in entries)
+
+    print(f"Available checks ({len(entries)}):")
+    for entry in entries:
+        print(
+            f"  {entry.name.ljust(name_width)}  "
+            f"{entry.kind.ljust(kind_width)}  "
+            f"fix:{entry.fixable.ljust(fix_width)}  "
+            f"{entry.summary}"
+        )
+    print()
+    print("Run `check --describe <check>` for issue IDs, config knobs, and suppression examples.")
+    return 0
+
+
+def describe_check(check_name: str) -> int:
+    catalog = _catalog(_load_optional_config())
+    entry = catalog.get(check_name)
+    if entry is None:
+        raise ValueError(unknown_name_message("check", check_name, catalog))
+
+    print(f"Check: {entry.name}")
+    print(f"Kind: {entry.kind}")
+    print(f"Summary: {entry.summary}")
+    print(f"Auto-fix support: {entry.fixable}")
+    if entry.config_commands:
+        print("Config commands:")
+        for command in entry.config_commands:
+            print(f"  - {command}")
+    else:
+        print("Config commands: none")
+
+    if entry.issue_types:
+        print("Issue types:")
+        for issue_type in entry.issue_types:
+            print(f"  - {issue_type.id}: {issue_type.message}")
+    else:
+        print("Issue types: not detected automatically")
+
+    print("Suppression examples:")
+    issue_id = entry.issue_types[0].id if entry.issue_types else "E_SOME_ISSUE"
+    print(f'  - root.clj disable: (checks/disable "{issue_id}" "**/*")')
+    print(f'  - root.clj ignore finding text: (checks/ignore-finding "{issue_id}" "**/*" "needle")')
+    if entry.kind == "file":
+        print(f"  - inline ignore (content-based checks only): # check:ignore {issue_id}")
+        print(f"  - inline ignore specific value: # check:ignore {issue_id} value=needle")
+    return 0
+
+
+def secrets_scan(
     project_or_dir_or_file: str = ".",
     fix: bool = False,
 ) -> int:
@@ -51,7 +283,7 @@ def check_main(
     """
 
     config_path = Path("./root.clj").absolute()
-    config = load_config() if config_path.exists() else None
+    config = _load_optional_config()
     if config is None:
         warning("No config file found. Some checks may not have sufficient context to run.")
 
@@ -71,7 +303,7 @@ def check_main(
                 root_paths.append(project.path)
         else:
             if project_name not in config.defined_projects:
-                raise ValueError(f"Unknown project: {project_name}")
+                raise ValueError(unknown_name_message("project", project_name, config.defined_projects))
             project = config.defined_projects[project_name]
             root_paths.append(project.path)
 
@@ -80,31 +312,14 @@ def check_main(
 
     for path in root_paths:
         if not path.exists():
-            raise ValueError(f"Path does not exist: {path}")
+            suggestion = did_you_mean_suffix(project_or_dir_or_file, config.defined_projects) if config is not None else ""
+            raise ValueError(f"Path does not exist: {path}.{suggestion}")
 
-    # Gather checks
-    from dev.checks.base import (
-        Check,
-    )
-
-    all_checks: dict[str, Check] = {}
-    modules: dict[str, Module] = {}
-    if config is not None:
-        modules = config.modules
-    else:
-        try:
-            modules = Module.load_modules()
-        except Exception as e:
-            warning(f"Failed to auto-load checks without config: {e}")
-            modules = {}
-
-    for check_name, check in modules.items():
-        if isinstance(check, Check):
-            all_checks[check_name] = check
+    all_checks = _load_all_checks(config)
 
     for check_name in enabled_checks or []:
         if check_name not in all_checks:
-            raise ValueError(f"Unknown check: {check_name}")
+            raise ValueError(unknown_name_message("check", check_name, all_checks))
 
     check_set = set(enabled_checks) if enabled_checks else set(all_checks.keys())
     all_checks = {k: v for k, v in all_checks.items() if k in check_set}
@@ -405,6 +620,7 @@ def check_main(
                 ctx = FileContext(
                     check_name=file_check.__class__.__name__,
                     path=path,
+                    project=project,
                     project_type=project_type,
                     file_scope=file_scope,
                     scoped_read_suppressions=scoped_suppressions,
@@ -428,23 +644,53 @@ def check_main(
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser(description="Run checks on the project.")
+    parser = ArgumentParser(
+        description=(
+            "Run the loaded repository, project, directory, and file checks "
+            "against a path or configured project, or inspect the available checks."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  check.py --list\n"
+            "  check.py --describe SpdxHeaderCheck\n"
+            "  check.py .\n"
+            "  check.py :root --fix\n"
+            "  check.py app-wabbit-dev/dev/cli.py --checks SpdxHeaderCheck"
+        ),
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument(
         "project_or_dir_or_file",
         type=str,
+        nargs="?",
+        default=".",
         help="Project or directory or file to check.",
+    )
+    parser.add_argument("--list", action="store_true", help="List all loaded checks and a short summary for each.")
+    parser.add_argument(
+        "--describe",
+        metavar="CHECK",
+        help="Show issue IDs, config commands, and suppression examples for a named check.",
     )
     parser.add_argument("--checks", nargs="+", default=[], help="List of checks to run.")
     parser.add_argument("--fix", action="store_true", help="Fix issues found during checks.")
 
     args = parser.parse_args()
-
-    raise SystemExit(check_main(args.project_or_dir_or_file, args.checks, args.fix))
+    try:
+        if args.list:
+            raise SystemExit(list_checks())
+        if args.describe is not None:
+            raise SystemExit(describe_check(args.describe))
+        raise SystemExit(check_main(args.project_or_dir_or_file, args.checks, args.fix))
+    except ValueError as ex:
+        parser.exit(2, f"{parser.prog}: error: {ex}\n")
 
 
 __all__ = [
     "Module",
     "E_GITIGNORE_WITHOUT_REPO",
     "check_main",
-    "trufflehog",
+    "describe_check",
+    "list_checks",
+    "secrets_scan",
 ]

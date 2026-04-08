@@ -4,6 +4,7 @@ from git import Repo
 
 from dev.config import load_config, project_repo_root
 from dev.messages import error, success
+from dev.repo_resolution import resolve_repo_target
 
 
 def push(project_name: str) -> None:
@@ -27,7 +28,11 @@ def push(project_name: str) -> None:
                     repo.close()
                     pushed_repo_paths.add(path)
     else:
-        path = Path(project_name)
+        try:
+            _resolved_name, path = resolve_repo_target(project_name)
+        except ValueError as ex:
+            error(str(ex))
+            return
         if not path.exists():
             error(f"Project {project_name} does not exist")
         else:

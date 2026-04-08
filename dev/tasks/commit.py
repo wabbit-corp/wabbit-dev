@@ -8,6 +8,7 @@ from git.exc import InvalidGitRepositoryError, NoSuchPathError
 from dev.base import Scope
 from dev.build_order import toposort_projects
 from dev.config import Project, load_config, project_repo_root
+from dev.discoverability import unknown_name_message
 from dev.messages import error, info
 from dev.tasks.setup import (
     RepoSetupMode,
@@ -33,7 +34,7 @@ def commit(project_name: str | None = None) -> None:
     with Scope() as scope:
         config = load_config()
         if project_name is not None and project_name not in config.defined_projects:
-            error(f"Project {project_name} is not defined in the config")
+            error(unknown_name_message("project", project_name, config.defined_projects))
             return
 
         if config.openai_key is None:

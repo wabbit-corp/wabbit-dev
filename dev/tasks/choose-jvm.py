@@ -11,6 +11,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from dev.config import GradleProject, load_config
+from dev.discoverability import unknown_name_message
 from dev.jvms import (
     criteria_from_policy_name,
     discover_installed_jvms,
@@ -20,29 +21,46 @@ from dev.jvms import (
 )
 
 
+class HelpFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentDefaultsHelpFormatter):
+    pass
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description=(
+            "Select the best matching installed JVM for a named policy, a configured project, "
+            "or a legacy free-form query."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  choose-jvm.py --policy jvm-21\n"
+            "  choose-jvm.py --project jeeves/client --task compileKotlinJvm\n"
+            "  choose-jvm.py 21 latest amazon\n"
+            "  choose-jvm.py --policy android-agp-21 --json"
+        ),
+        formatter_class=HelpFormatter,
+    )
     parser.add_argument(
         "query",
         nargs="*",
-        help="Legacy JVM query, for example: 21 latest amazon",
+        help="Legacy JVM query tokens, for example: 21 latest amazon.",
     )
     parser.add_argument(
         "--policy",
-        help="Named JVM policy, for example: android-agp-21 or jvm-21",
+        help="Named JVM policy, for example: android-agp-21 or jvm-21.",
     )
     parser.add_argument(
         "--project",
-        help="Project id from root.clj, for example: jeeves/client",
+        help="Project ID from root.clj, for example: jeeves/client.",
     )
     parser.add_argument(
         "--task",
-        help="Optional Gradle task name used for jvmTaskPolicies matching",
+        help="Optional Gradle task name used when matching project-specific jvmTaskPolicies.",
     )
     parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit the selected JVM as JSON instead of shell exports",
+        help="Emit the selected JVM as JSON instead of shell exports.",
     )
     return parser
 
@@ -50,7 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _resolve_policy_from_project(project_id: str, task_name: str | None) -> str:
     config = load_config()
     if project_id not in config.defined_projects:
-        raise ValueError(f"Unknown project {project_id!r}")
+        raise ValueError(unknown_name_message("project", project_id, config.defined_projects))
 
     project = config.defined_projects[project_id]
     if not isinstance(project, GradleProject):

@@ -21,4 +21,6 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Installation: installation.md
+  - Command Reference: commands.md
+  - Configuration Reference: configuration.md
   - Development: development.md

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from graphviz import Digraph
 
 from dev.config import load_config
+from dev.discoverability import unknown_name_message
 from dev.messages import error, info
 
 
@@ -18,7 +19,7 @@ def get_project_dependencies(
     config = load_config()
 
     if focus_project_name and focus_project_name not in config.defined_projects:
-        error(f"Project '{focus_project_name}' not found in configuration.")
+        error(unknown_name_message("project", focus_project_name, config.defined_projects))
         return
 
     # Determine the graph title

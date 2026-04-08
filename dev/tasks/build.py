@@ -3,11 +3,19 @@ from __future__ import annotations
 import os
 import py_compile
 import subprocess
-from pathlib import Path
 from collections.abc import Iterator
+from pathlib import Path
 
 from dev.build_order import toposort_projects
-from dev.config import GradleProject, PythonProject, load_config
+from dev.config import (
+    Config,
+    GradleProject,
+    PythonProject,
+    get_gradle_plugin_applications,
+    load_config,
+    resolve_kotlin_plugin_compiler_plugin_project,
+)
+from dev.discoverability import did_you_mean_suffix
 from dev.messages import error, info, success, warning
 
 
@@ -88,13 +96,54 @@ def _build_gradle_project(project: GradleProject) -> bool:
     return True
 
 
+def _publish_local_compiler_plugins(
+    config: Config,
+    project: GradleProject,
+    *,
+    published: set[str],
+) -> bool:
+    if not (project.effective_gradle_root / "settings.local.gradle.kts").is_file():
+        return True
+
+    compiler_projects: list[GradleProject] = []
+    seen: set[str] = set()
+    for application in get_gradle_plugin_applications(project):
+        definition = config.plugins[application.name]
+        candidate = resolve_kotlin_plugin_compiler_plugin_project(config, definition)
+        if candidate is None:
+            continue
+        if candidate.project_id in seen or candidate.project_id in published:
+            continue
+        seen.add(candidate.project_id)
+        compiler_projects.append(candidate)
+
+    for compiler_project in compiler_projects:
+        gradle_root = compiler_project.effective_gradle_root
+        command = [*_gradle_command(gradle_root), "--no-daemon", _gradle_task_name(compiler_project, "publishToMavenLocal")]
+        info(f"Publishing local compiler plugin for {project.name}: {' '.join(command)}")
+        try:
+            subprocess.run(command, cwd=gradle_root, check=True)
+        except subprocess.CalledProcessError as ex:
+            error(f"{compiler_project.name}: publishToMavenLocal failed with exit code {ex.returncode}")
+            return False
+        except FileNotFoundError:
+            error(f"{compiler_project.name}: gradle wrapper or command not found (checked: {gradle_root / 'gradlew'})")
+            return False
+        published.add(compiler_project.project_id)
+
+    return True
+
+
 def build(projects: list[str] | None = None) -> None:
     config = load_config()
     if projects:
         missing_projects = [project_name for project_name in projects if project_name not in config.defined_projects]
         if missing_projects:
-            missing = ", ".join(missing_projects)
-            error(f"No such project(s): {missing}")
+            messages = [
+                f"{project_name}{did_you_mean_suffix(project_name, config.defined_projects)}"
+                for project_name in missing_projects
+            ]
+            error("No such project(s): " + ", ".join(messages))
             return
 
     order = toposort_projects(config.defined_projects, target_project=projects or None)
@@ -122,6 +171,7 @@ def build(projects: list[str] | None = None) -> None:
 
     info("Topological order of projects to build:\n  " + ", ".join(order))
     executed_count = 0
+    published_local_compiler_plugins: set[str] = set()
 
     for name in order:
         project = config.defined_projects[name]
@@ -131,6 +181,13 @@ def build(projects: list[str] | None = None) -> None:
 
         match project:
             case GradleProject():
+                if not _publish_local_compiler_plugins(
+                    config,
+                    project,
+                    published=published_local_compiler_plugins,
+                ):
+                    error(f"Build failed for {name}.")
+                    return
                 ok = _build_gradle_project(project)
             case PythonProject():
                 ok = _compile_python_project(project)

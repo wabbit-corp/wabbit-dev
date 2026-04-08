@@ -1,0 +1,412 @@
+# Configuration Reference
+
+`wabbit-dev` is driven by a small, typed DSL stored in two files at the
+workspace root:
+
+- `root.clj`: public workspace metadata
+- `root.private.clj`: private credentials and local secrets
+
+The loader lives in `dev/config.py`, and the typed command definitions live in
+`dev/config_typed.py`.
+
+## File Roles
+
+### `root.clj`
+
+Use this file for:
+
+- project definitions
+- repo definitions
+- dependency aliases
+- repository aliases
+- Kotlin plugin aliases
+- check suppressions
+- global defaults
+
+### `root.private.clj`
+
+Use this file for:
+
+- `openai-key`
+- `github-token`
+- `anthropic-key`
+- `jetbrains-marketplace-token`
+- `pypi-token`
+- `maven-username`
+- `maven-password`
+- `maven-gpg-private-key`
+- `maven-gpg-passphrase`
+- `maven-gpg-key-id`
+- `jitpack-cookie`
+- `git-user`
+- `git-censor`
+
+Do not commit real secret values.
+
+## Top-Level Command Families
+
+| Family | Purpose |
+| --- | --- |
+| `checks/...` | Check tuning and suppressions. |
+| `define...` | Reusable variables, repository aliases, plugin aliases, and library aliases. |
+| credential commands | Private tokens and publish credentials. |
+| defaults commands | Global Python, JVM, company, and git defaults. |
+| project commands | `python`, `gradle`, `purescript`, `data`, `premake`. |
+| `repo` | Group nested projects under a shared repository root. |
+
+## Check Tuning Commands
+
+| Command | Purpose |
+| --- | --- |
+| `(checks/stale-todo/age-days N)` | Set the age threshold for stale TODO/FIXME detection. |
+| `(checks/censored-words/error-on ["word" ...])` | Fail when listed words appear in text files. |
+| `(checks/disable "ISSUE_ID" "glob")` | Disable an issue type for matching paths. |
+| `(checks/ignore-finding "ISSUE_ID" "glob" "text")` | Ignore findings that contain a specific value on matching paths. |
+
+Examples:
+
+```clojure
+(checks/stale-todo/age-days 30)
+(checks/censored-words/error-on ["example-name"])
+(checks/disable "E_HARDCODED_URL" "**/LICENSE.md")
+(checks/ignore-finding "E_HARDCODED_INTERNAL_HOSTNAME_IP" "**/*.py" "10.0.0.0")
+```
+
+## Defaults and Credential Commands
+
+| Command | Purpose |
+| --- | --- |
+| `(define name value)` | Define a reusable variable. Currently most useful for Maven version strings. |
+| `(openai-key "...")` | OpenAI credential used by AI-powered workflows such as `commit`. |
+| `(github-token "...")` | GitHub API token used by setup and related workflows. |
+| `(anthropic-key "...")` | Anthropic credential. |
+| `(jetbrains-marketplace-token "...")` | Token for JetBrains Marketplace publishing. |
+| `(pypi-token "...")` | Token for PyPI publishing. |
+| `(maven-username "...")` | Maven Central username. |
+| `(maven-password "...")` | Maven Central password. |
+| `(maven-gpg-private-key "...")` | GPG private key for signed publishing. |
+| `(maven-gpg-passphrase "...")` | Passphrase for the GPG private key. |
+| `(maven-gpg-key-id "...")` | GPG key ID for publishing. |
+| `(jitpack-cookie "...")` | Session cookie for JitPack interactions. |
+| `(default-maven-project-group "...")` | Default Maven group used by generated workspace files. |
+| `(default-company-email "...")` | Default company email used in generated legal templates. |
+| `(default-company-legal-name "...")` | Default company legal name used in generated legal templates. |
+| `(default-company-short-name "...")` | Default company short name used in generated legal templates. |
+| `(git-user "Name" "email@example.com")` | Default git identity expected across configured repos. |
+| `(git-censor :name "...")` | Censor a contributor name in contributor-related checks or tooling. |
+| `(git-censor :email "...")` | Censor a contributor email in contributor-related checks or tooling. |
+| `(jvm-version 21)` | Set the global default JVM version. |
+| `(jvm-defaults :version 21)` | Set JVM defaults using a named command form. |
+| `(python-defaults :requires-python ">=3.12" :line-length 120 :coverage-fail-under 80)` | Set shared Python defaults. |
+
+## Repository, Plugin, and Library Definitions
+
+### Maven Repositories
+
+```clojure
+(define-maven-repo "repo:jitpack" "https://jitpack.io")
+```
+
+Creates a named Maven repository alias that libraries and plugins can reference.
+
+### Kotlin Plugins
+
+```clojure
+(define-kotlin-plugin "kotlin-jvm" "org.jetbrains.kotlin.jvm:2.3.10")
+(define-kotlin-plugin "kotlin-acyclic-gradle" ":kotlin-acyclic/gradle-plugin"
+  :compilerPlugin ":kotlin-acyclic/compiler-plugin")
+```
+
+Two styles are supported:
+
+- `plugin-id:version`
+- `:project-id` for a locally defined Gradle plugin project
+
+Optional fields:
+
+- `:repo`
+- `:compilerPlugin`
+- `:compilerPluginId`
+
+### Default Gradle Plugins
+
+```clojure
+(add-default-gradle-plugin "kotlin-no-globals-gradle")
+```
+
+Adds a Gradle plugin application that will be injected by default into generated
+Gradle projects.
+
+### Maven Libraries
+
+```clojure
+(define-maven-library "jsoup" "org.jsoup:jsoup:1.21.2")
+(define ktor-version "3.2.0")
+(define-maven-library "ktor-client-core" "io.ktor:ktor-client-core:${ktor-version}")
+```
+
+Variables may be used only in the Maven version component.
+
+### Library Groups
+
+```clojure
+(define-maven-library-group "web-common-libraries" [
+  "jsoup"
+  "kotlinx-coroutines-core"
+  ":kotlin-minilog"
+  (dep "kotlin-compiler-embeddable" "compileOnly")
+])
+```
+
+Groups can contain:
+
+- named libraries
+- other named library groups
+- project references
+- direct Maven coordinates
+- dependency calls
+
+## Dependency Syntax
+
+Dependency inputs are used in project dependency lists and source set dependency
+lists.
+
+| Syntax | Meaning |
+| --- | --- |
+| `":kotlin-minilog"` | Another configured project. |
+| `"sqlite-jdbc"` | A named library alias defined by `define-maven-library`. |
+| `"org.jsoup:jsoup:1.21.2"` | A direct Maven coordinate. |
+| `(dep "kotlin-compiler-embeddable" "compileOnly")` | A dependency alias with an explicit Gradle scope modifier. |
+| `"npm:react:18.3.1"` | An npm dependency for JS/KMP targets. |
+| `"./libs/custom-tooling.jar"` | A local jar file dependency. |
+
+Common Gradle scope modifiers include:
+
+- `api`
+- `implementation`
+- `compileOnly`
+- `runtimeOnly`
+- `testImplementation`
+- `testCompileOnly`
+- `testRuntimeOnly`
+- `kapt`
+
+## Project Commands
+
+### Shared Project Fields
+
+These fields appear on multiple project commands:
+
+| Field | Purpose |
+| --- | --- |
+| `:version` | Project version. |
+| `:name` | Published or display name override. |
+| `:description` | Human-facing project description. |
+| `:authors` | Author list. |
+| `:license` | Primary license identifier. |
+| `:copyright-holder` | Explicit copyright owner. |
+| `:copyright-year-start` | First copyright year. |
+| `:quarantine` | Skip certain automation workflows for this project. |
+| `:publish` | Enable or disable publishing. |
+| `:repo` | GitHub repository or repo override. |
+| `:ownership` | Ownership model used by setup/legal generation. |
+| `:testLicense` | Test license override used by generated files. |
+
+### `python`
+
+```clojure
+(python "app-wabbit-dev"
+  :version "1.1.0"
+  :name "wabbit-dev"
+  :requires-python ">=3.12,<4.0"
+  :dependencies ["requests>=2.32.3,<3.0.0"]
+  :dev-dependencies ["pytest>=8.2.2,<9.0.0"]
+  :features [
+    (python-application
+      :script "wabbit-dev"
+      :entry "dev.cli:main"
+      :path "dev.py")])
+```
+
+Python-only fields:
+
+| Field | Purpose |
+| --- | --- |
+| `:requires-python` | Python version specifier. |
+| `:dependencies` | Runtime dependencies. |
+| `:dev-dependencies` | Development dependencies. |
+| `:scripts` | Legacy script entries in `name=module:function` form. |
+| `:features` | Python feature blocks such as `python-application`. |
+| `:homepage` | Homepage URL. |
+| `:repository` | Repository URL override. |
+| `:keywords` | Poetry keywords. |
+| `:classifiers` | Poetry classifiers. |
+| `:publishTarget` | Publish target, typically `pypi`. |
+| `:publishSnapshots` | Snapshot publishing flag. |
+| `:docs` | Enable or disable docs generation. |
+| `:docsSystem` | Docs system, currently typically `mkdocs`. |
+
+### `gradle`
+
+```clojure
+(gradle "app-datatron"
+  :version "1.0.0"
+  :features [
+    (jvm-kotlin-application :main "datatron.MainKt")
+    (kotlin-serialization)]
+  :dependencies [
+    ":kotlin-minilog"
+    "sqlite-jdbc"])
+```
+
+Gradle-only fields:
+
+| Field | Purpose |
+| --- | --- |
+| `:buildModel` | Build model such as `jvm` or `kmp`. |
+| `:gradleProjectName` | Generated Gradle project name override. |
+| `:artifactId` | Published artifact ID override. |
+| `:gradlePluginId` | Published Gradle plugin ID. |
+| `:platforms` | Explicit platform list. |
+| `:targets` | Structured KMP target definitions. |
+| `:dependencies` | Main dependency list. |
+| `:sourceSetDependencies` | Dependency lists keyed by source set name. |
+| `:sourceSets` | Structured source set definitions. |
+| `:kotlinFreeCompilerArgs` | Extra Kotlin compiler arguments. |
+| `:dokkaSuppressSourceSets` | Dokka source sets to suppress. |
+| `:features` | Gradle feature blocks. |
+| `:publishTarget` | Publish target such as `maven-central`, `jitpack`, or `jetbrains-marketplace`. |
+| `:publishSnapshots` | Snapshot publishing flag. |
+| `:docs` | Enable or disable generated docs support. |
+| `:docsSystem` | Docs system, usually `dokka`. |
+| `:versionFromRepo` | Use the repo version instead of an independent project version. |
+| `:jvmPolicy` | JVM selection policy name. |
+| `:jvmTaskPolicies` | Task-pattern-specific JVM policy overrides. |
+
+### `purescript`
+
+Use for PureScript projects with shared metadata plus version and repository
+information.
+
+### `data`
+
+Use for data-only projects that still participate in setup/legal metadata and
+workspace inventory.
+
+### `premake`
+
+Use for Premake-based projects with shared metadata and setup integration.
+
+## Repo Definitions
+
+`repo` groups multiple nested projects under a shared repository root.
+
+```clojure
+(repo "jeeves"
+  :repo "wabbit-corp/jeeves"
+  :gradleRootProjectName "one.wabbit"
+  :jvmPolicy "jvm-21"
+  :projects [
+    (gradle "api" :version "0.0.1" :buildModel "kmp")
+    (gradle "client" :version "0.0.1" :buildModel "kmp")
+    (python "audio-backend" :version "0.1.0")])
+```
+
+Repo fields:
+
+| Field | Purpose |
+| --- | --- |
+| `:repo` | Shared GitHub repository name. |
+| `:gradleRootProjectName` | Shared Gradle root project name. |
+| `:projectVersion` | Shared repo-level version. |
+| `:defaultKotlinVersion` | Default Kotlin version for nested projects. |
+| `:supportedKotlinVersions` | Supported Kotlin release lines. |
+| `:jvmPolicy` | Default JVM policy for nested projects. |
+| `:docsProject` | Nested project that owns repository docs. |
+| `:projects` | Nested `python`, `gradle`, `purescript`, `data`, or `premake` commands. |
+
+Nested project IDs resolve as `repo-id/project-id`.
+
+## Feature Commands
+
+### Python Features
+
+| Feature | Purpose |
+| --- | --- |
+| `python-application` | Declares an installable Python entry point and the source path for the application. |
+| `python-deptry` | Configures generated `deptry` package maps and rule ignores. |
+| `python-importlinter` | Configures generated import-linter settings. |
+
+`python-application` fields:
+
+| Field | Purpose |
+| --- | --- |
+| `:script` | Primary command name. |
+| `:entry` | `module:function` entry point. |
+| `:path` | Application source path. |
+| `:aliases` | Additional script names. |
+
+### Gradle and KMP Features
+
+| Feature | Purpose |
+| --- | --- |
+| `jvm-kotlin-library` | Marks the project as a Kotlin JVM library. |
+| `jvm-scala-library` | Marks the project as a Scala JVM library. |
+| `jvm-kotlin-application` | Declares a Kotlin JVM application entry point. |
+| `jvm-kotlin-agent` | Declares a Kotlin JVM agent entry point. |
+| `shadow-jar` | Enables shaded jar generation. |
+| `paper-plugin` | Declares Paper/Bukkit plugin metadata. |
+| `intellij-plugin` | Declares IntelliJ plugin metadata and publish configuration. |
+| `kotlin-serialization` | Enables Kotlin serialization support. |
+| `gradle-plugin` | Applies a named Gradle plugin alias from config. |
+| `kotlin-compiler-plugin` | Marks a project as a Kotlin compiler plugin. |
+| `kotlin-compiler-gradle-plugin` | Declares a Gradle plugin that wires a compiler plugin project. |
+| `kmp-android-library` | Declares Android library target metadata for KMP. |
+| `kmp-compose` | Enables Compose Multiplatform resource and plugin configuration. |
+| `kmp-jvm-runs` | Declares custom JVM run tasks for KMP projects. |
+
+Important feature fields:
+
+| Feature | Key fields |
+| --- | --- |
+| `jvm-kotlin-application` | `:main`, optional `:jar` |
+| `jvm-kotlin-agent` | `:main`, optional `:jar` |
+| `shadow-jar` | optional `:jar` |
+| `paper-plugin` | `:name`, `:main`, `:apiVersion`, optional `:depend` |
+| `intellij-plugin` | `:pluginName`, optional publish/build metadata such as `:pluginId`, `:ideaVersion`, `:sinceBuild`, `:untilBuild`, `:depends`, `:bundledPlugins`, `:publishChannel`, `:marketplaceTokenEnv` |
+| `gradle-plugin` | `:name`, optional `:compilerOptions` |
+| `kotlin-compiler-plugin` | optional `:compatibilitySources`, `:publishVersionWithKotlin` |
+| `kotlin-compiler-gradle-plugin` | `:compilerPluginProject`, optional version resource metadata |
+| `kmp-android-library` | `:namespace`, `:compileSdk`, `:minSdk`, optional `:manifestPath` |
+| `kmp-compose` | optional `:publicResClass`, `:resClassPackage` |
+| `kmp-jvm-runs` | `:entries` list of `taskName`, `mainClass`, `description`, and optional `jvmArgs` |
+
+## Example Configuration
+
+```clojure
+(checks/stale-todo/age-days 30)
+(checks/disable "E_HARDCODED_URL" "**/LICENSE.md")
+
+(define kotlin-version "2.3.10")
+(define-maven-repo "repo:jitpack" "https://jitpack.io")
+(define-kotlin-plugin "kotlin-jvm" "org.jetbrains.kotlin.jvm:${kotlin-version}")
+(define-maven-library "kotlin-stdlib" "org.jetbrains.kotlin:kotlin-stdlib:${kotlin-version}")
+
+(python "app-wabbit-dev"
+  :version "1.1.0"
+  :requires-python ">=3.12,<4.0"
+  :features [
+    (python-application
+      :script "wabbit-dev"
+      :entry "dev.cli:main"
+      :path "dev.py")])
+
+(gradle "app-datatron"
+  :version "1.0.0"
+  :features [
+    (jvm-kotlin-application :main "datatron.MainKt")
+    (kotlin-serialization)]
+  :dependencies [
+    ":kotlin-minilog"
+    "sqlite-jdbc"])
+```

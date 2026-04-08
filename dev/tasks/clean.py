@@ -10,6 +10,7 @@ from pathlib import Path
 
 import dev.io
 from dev.config import GradleProject, PythonProject, load_config
+from dev.discoverability import unknown_name_message
 
 DRY_RUN = False
 PathLikeStr = str | os.PathLike[str]
@@ -218,6 +219,9 @@ if __name__ == "__main__":
 
 def clean(project_name: str | None) -> None:
     config = load_config()
+    if project_name is not None and project_name not in config.defined_projects:
+        print(unknown_name_message("project", project_name, config.defined_projects))
+        return
 
     dev.io.delete_if_exists(Path("__pycache__"))
     dev.io.delete_if_exists(Path(".gradle"))

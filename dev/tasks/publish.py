@@ -7,6 +7,7 @@ from typing import Literal
 
 from dev.build_order import toposort_projects
 from dev.config import GradleProject, Project, PythonProject, load_config
+from dev.discoverability import unknown_name_message
 from dev.jitpack import JitPackAPI
 from dev.messages import error, success, warning
 from dev.tasks.publish_common import PublishError
@@ -41,7 +42,7 @@ async def publish_main(project_name: str | None = None) -> None:
 
     all_projects = {name: p for name, p in config.defined_projects.items()}
     if project_name and project_name not in all_projects:
-        error(f"No such project: {project_name}")
+        error(unknown_name_message("project", project_name, all_projects, prefix="No such"))
         return
 
     order = toposort_projects(all_projects, target_project=project_name)
