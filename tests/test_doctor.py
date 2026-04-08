@@ -57,3 +57,36 @@ def test_preflight_for_command_prints_doctor_hint(monkeypatch: pytest.MonkeyPatc
     output = capsys.readouterr().out
     assert "Preflight checks failed for `build`." in output
     assert "Run `dev.py doctor` for a full environment check." in output
+
+
+def test_doctor_json_output_includes_summary(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    import dev.tasks.doctor as doctor_task
+    from dev.tasks.doctor import DoctorContext, DoctorFinding, DoctorStatus
+
+    monkeypatch.setattr(
+        doctor_task,
+        "collect_doctor_findings",
+        lambda check_ids=doctor_task.FULL_CHECK_ORDER, ctx=None: [
+            DoctorFinding(
+                key="git",
+                label="git",
+                status=DoctorStatus.PASS,
+                detail="Found git.",
+            ),
+            DoctorFinding(
+                key="config",
+                label="Config load",
+                status=DoctorStatus.WARN,
+                detail="Config warning.",
+            ),
+        ],
+    )
+
+    result = doctor_task.doctor(json_output=True)
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert '"summary"' in output
+    assert '"pass": 1' in output
+    assert '"warn": 1' in output
+    assert '"findings"' in output

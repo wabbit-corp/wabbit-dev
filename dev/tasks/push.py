@@ -1,11 +1,11 @@
 from git import Repo
 
 from dev.config import load_config
-from dev.messages import error, success
+from dev.messages import error, info, success
 from dev.repo_resolution import configured_repo_targets, resolve_repo_targets
 
 
-def push(targets: str | list[str] | None = None) -> None:
+def push(targets: str | list[str] | None = None, *, dry_run: bool = False) -> int:
     requested_targets = [targets] if isinstance(targets, str) else targets
     if not requested_targets or requested_targets == ["."]:
         config = load_config()
@@ -21,12 +21,18 @@ def push(targets: str | list[str] | None = None) -> None:
     else:
         if "." in requested_targets:
             error("`push .` cannot be combined with other targets.")
-            return
+            return 1
         try:
             repo_targets = resolve_repo_targets(requested_targets, config=load_config())
         except ValueError as ex:
             error(str(ex))
-            return
+            return 1
+
+    if dry_run:
+        info(f"Dry run: would push {len(repo_targets)} repository/repositories")
+        for resolved_target in repo_targets:
+            print(f"  {resolved_target.name}: origin master + tags ({resolved_target.path})")
+        return 0
 
     for resolved_target in repo_targets:
         path = resolved_target.path
@@ -38,3 +44,4 @@ def push(targets: str | list[str] | None = None) -> None:
         repo.git.push(tags=True)
         success(f"Pushed changes for {resolved_target.name}")
         repo.close()
+    return 0

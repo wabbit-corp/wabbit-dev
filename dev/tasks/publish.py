@@ -36,9 +36,8 @@ def determine_publish_target(project: Project) -> PublishTarget:
     return "skip"
 
 
-async def publish_main(projects: str | list[str] | None = None) -> None:
+async def publish_main(projects: str | list[str] | None = None, *, dry_run: bool = False) -> int:
     config = load_config()
-    repo_setup_context = create_repo_setup_context(config, RepoSetupMode.PROD)
 
     all_projects = {name: p for name, p in config.defined_projects.items()}
     requested_projects = [projects] if isinstance(projects, str) else projects
@@ -48,14 +47,26 @@ async def publish_main(projects: str | list[str] | None = None) -> None:
             selected_project_names = resolve_project_ids(config, requested_projects)
         except ValueError as ex:
             error(str(ex))
-            return
+            return 1
 
     order = toposort_projects(all_projects, target_project=selected_project_names)
     if not order:
         error("No projects to publish or cycle in dependencies.")
-        return
+        return 1
 
     success("Topological order of projects to publish:\n  " + ", ".join(order))
+    if dry_run:
+        success("Dry run: planned publish actions:")
+        for name in order:
+            project = all_projects[name]
+            target = determine_publish_target(project)
+            if target == "skip":
+                print(f"  {project.name}: skip")
+            else:
+                print(f"  {project.name}: publish to {target}")
+        return 0
+
+    repo_setup_context = create_repo_setup_context(config, RepoSetupMode.PROD)
     has_jitpack_target = any(determine_publish_target(all_projects[name]) == "jitpack" for name in order)
 
     async with AsyncExitStack() as stack:
@@ -113,13 +124,14 @@ async def publish_main(projects: str | list[str] | None = None) -> None:
                     )
             except PublishError as ex:
                 error(f"{project.name} publish failed: {ex}")
-                break
+                return 1
 
             if not ok:
                 warning(f"Stopped after {project.name} failed.")
-                break
-        else:
-            success("All selected projects published successfully.")
+                return 1
+
+    success("All selected projects published successfully.")
+    return 0
 
 
 __all__ = [

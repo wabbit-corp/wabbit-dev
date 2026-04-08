@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -619,6 +620,12 @@ PREFLIGHT_CHECKS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+DRY_RUN_PREFLIGHT_CHECKS: dict[str, tuple[str, ...]] = {
+    **PREFLIGHT_CHECKS,
+    "publish": ("workspace-root", "root-clj", "root-private-clj", "python-version", "git", "config", "gradle"),
+    "commit": ("workspace-root", "root-clj", "root-private-clj", "python-version", "git", "config"),
+}
+
 
 def collect_doctor_findings(
     *,
@@ -641,13 +648,45 @@ def _emit_finding(finding: DoctorFinding) -> None:
         info(f"Fix: {finding.fix}")
 
 
-def doctor() -> int:
-    findings = collect_doctor_findings()
-    for finding in findings:
-        _emit_finding(finding)
-
+def doctor_payload(findings: list[DoctorFinding], *, ctx: DoctorContext | None = None) -> dict[str, object]:
+    active_ctx = DoctorContext() if ctx is None else ctx
     failures = sum(1 for finding in findings if finding.status == DoctorStatus.FAIL)
     warnings_count = sum(1 for finding in findings if finding.status == DoctorStatus.WARN)
+    passes = sum(1 for finding in findings if finding.status == DoctorStatus.PASS)
+
+    return {
+        "cwd": str(active_ctx.cwd.resolve()),
+        "summary": {
+            "total": len(findings),
+            "pass": passes,
+            "warn": warnings_count,
+            "fail": failures,
+        },
+        "findings": [
+            {
+                "key": finding.key,
+                "label": finding.label,
+                "status": finding.status.value,
+                "detail": finding.detail,
+                "fix": finding.fix,
+            }
+            for finding in findings
+        ],
+    }
+
+
+def doctor(*, json_output: bool = False) -> int:
+    ctx = DoctorContext()
+    findings = collect_doctor_findings(ctx=ctx)
+    failures = sum(1 for finding in findings if finding.status == DoctorStatus.FAIL)
+    warnings_count = sum(1 for finding in findings if finding.status == DoctorStatus.WARN)
+
+    if json_output:
+        print(json.dumps(doctor_payload(findings, ctx=ctx), indent=2))
+        return 1 if failures else 0
+
+    for finding in findings:
+        _emit_finding(finding)
 
     if failures:
         error(f"Doctor found {failures} failing check(s) and {warnings_count} warning(s).")
@@ -660,8 +699,14 @@ def doctor() -> int:
     return 0
 
 
-def preflight_for_command(command_path: str, *, prog: str, projects: tuple[str, ...] | None = None) -> bool:
-    check_ids = PREFLIGHT_CHECKS.get(command_path)
+def preflight_for_command(
+    command_path: str,
+    *,
+    prog: str,
+    projects: tuple[str, ...] | None = None,
+    dry_run: bool = False,
+) -> bool:
+    check_ids = DRY_RUN_PREFLIGHT_CHECKS.get(command_path) if dry_run else PREFLIGHT_CHECKS.get(command_path)
     if check_ids is None:
         return True
 
@@ -686,5 +731,6 @@ __all__ = [
     "DoctorStatus",
     "collect_doctor_findings",
     "doctor",
+    "doctor_payload",
     "preflight_for_command",
 ]

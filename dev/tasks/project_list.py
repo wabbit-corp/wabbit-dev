@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 
 from dev.config import (
@@ -109,6 +110,31 @@ def _dependency_summary(dep: Dependency) -> str:
     return f"{scope}: {dep.name}"
 
 
+def _dependency_payload(dep: Dependency) -> dict[str, str]:
+    scope = dep.scope or "implementation"
+    payload = {
+        "scope": scope,
+        "name": dep.name,
+        "targetType": type(dep.target).__name__.removesuffix("DependencyTarget").lower(),
+    }
+    target = dep.target
+    if hasattr(target, "project"):
+        payload["project"] = target.project
+    if hasattr(target, "artifact") and target.artifact is not None:
+        payload["artifact"] = target.artifact
+    if hasattr(target, "package"):
+        payload["package"] = target.package
+    if hasattr(target, "version"):
+        payload["version"] = target.version
+    if hasattr(target, "path"):
+        payload["path"] = str(target.path.resolve())
+    return payload
+
+
+def _absolute_path(path: Path) -> str:
+    return str(path.resolve())
+
+
 @dataclass(frozen=True)
 class ManagedFileHint:
     path: Path
@@ -147,6 +173,53 @@ def _managed_file_hints(project: Project) -> list[ManagedFileHint]:
         return hints
 
     return hints
+
+
+def project_show_payload(project_id: str, config: Config) -> dict[str, object]:
+    project = require_project(config, project_id)
+    repo_definition = config.defined_repos.get(project.repo_id) if project.repo_id is not None else None
+    payload: dict[str, object] = {
+        "projectId": project.project_id or project.path.as_posix(),
+        "type": _project_type_label(project),
+        "path": _absolute_path(project.path),
+        "repoRoot": _absolute_path(project.effective_repo_root),
+        "repoId": project.repo_id,
+        "managedBySetup": project.managed_by_setup,
+        "publishTarget": _resolved_publish_target(project),
+        "docsSystem": _docs_summary(project),
+        "resolvedDependencies": [_dependency_payload(dep) for dep in project.resolved_dependencies],
+        "generatedFiles": [
+            {
+                "path": _absolute_path(hint.path),
+                "exists": hint.path.exists(),
+                "note": hint.note,
+            }
+            for hint in _managed_file_hints(project)
+        ],
+    }
+
+    if isinstance(project, GradleProject):
+        repo_policy = repo_definition.jvm_policy if repo_definition is not None else None
+        payload["jvmPolicy"] = resolve_project_jvm_policy(
+            project,
+            task_name=None,
+            repo_policy=repo_policy,
+            global_jvm_version=config.jvm_version,
+        )
+        payload["jvmTaskOverrides"] = dict(sorted(project.jvm_task_policies.items()))
+    else:
+        payload["jvmPolicy"] = None
+        payload["jvmTaskOverrides"] = {}
+
+    return payload
+
+
+def project_dependency_payload(project_id: str, config: Config) -> dict[str, object]:
+    project = require_project(config, project_id)
+    return {
+        "projectId": project.project_id or project.path.as_posix(),
+        "resolvedDependencies": [_dependency_payload(dep) for dep in project.resolved_dependencies],
+    }
 
 
 def render_project_show_lines(project_id: str, config: Config, *, colorize: bool = True) -> list[str]:
@@ -237,6 +310,35 @@ def _repo_target_from_project(project: Project, config: Config) -> ResolvedRepoT
     )
 
 
+def project_repo_payload(repo_target: ResolvedRepoTarget, config: Config) -> dict[str, object]:
+    repo_definition = config.defined_repos.get(repo_target.repo_id) if repo_target.repo_id is not None else None
+    if repo_definition is not None:
+        repo_label = repo_definition.repo_id
+        repo_path = repo_definition.path
+        github_repo = repo_definition.github_repo
+        gradle_root_project = repo_definition.gradle_root_project_name
+        docs_project = repo_definition.docs_project_id
+        project_ids = list(repo_definition.project_ids)
+    else:
+        project_ids = list(repo_target.project_ids)
+        representative_project = require_project(config, project_ids[0]) if project_ids else None
+        repo_label = repo_target.name
+        repo_path = repo_target.path
+        github_repo = representative_project.github_repo if representative_project is not None else None
+        gradle_root_project = None
+        docs_project = None
+
+    return {
+        "repo": repo_label,
+        "path": _absolute_path(repo_path),
+        "repoId": repo_target.repo_id,
+        "githubRepo": github_repo,
+        "gradleRootProject": gradle_root_project,
+        "docsProject": docs_project,
+        "projects": project_ids,
+    }
+
+
 def render_project_repo_lines(repo_target: ResolvedRepoTarget, config: Config) -> list[str]:
     repo_definition = config.defined_repos.get(repo_target.repo_id) if repo_target.repo_id is not None else None
     if repo_definition is not None:
@@ -309,9 +411,17 @@ def list_projects(config: Config | None = None) -> None:
         print(line)
 
 
-def show_projects(project_targets: list[str], config: Config | None = None) -> None:
+def show_projects(project_targets: list[str], config: Config | None = None, *, json_output: bool = False) -> None:
     active_config = load_config() if config is None else config
     project_ids = resolve_project_ids(active_config, project_targets)
+    if json_output:
+        print(
+            json.dumps(
+                {"projects": [project_show_payload(project_id, active_config) for project_id in project_ids]},
+                indent=2,
+            )
+        )
+        return
     for index, project_id in enumerate(project_ids):
         if index:
             print()
@@ -319,13 +429,26 @@ def show_projects(project_targets: list[str], config: Config | None = None) -> N
             print(line)
 
 
-def show_project(project_id: str, config: Config | None = None) -> None:
-    show_projects([project_id], config)
+def show_project(project_id: str, config: Config | None = None, *, json_output: bool = False) -> None:
+    show_projects([project_id], config, json_output=json_output)
 
 
-def show_project_dependencies(project_targets: list[str], config: Config | None = None) -> None:
+def show_project_dependencies(
+    project_targets: list[str],
+    config: Config | None = None,
+    *,
+    json_output: bool = False,
+) -> None:
     active_config = load_config() if config is None else config
     project_ids = resolve_project_ids(active_config, project_targets)
+    if json_output:
+        print(
+            json.dumps(
+                {"projects": [project_dependency_payload(project_id, active_config) for project_id in project_ids]},
+                indent=2,
+            )
+        )
+        return
     for index, project_id in enumerate(project_ids):
         if index:
             print()
@@ -333,18 +456,26 @@ def show_project_dependencies(project_targets: list[str], config: Config | None 
             print(line)
 
 
-def show_project_repos(project_targets: list[str], config: Config | None = None) -> None:
+def show_project_repos(project_targets: list[str], config: Config | None = None, *, json_output: bool = False) -> None:
     active_config = load_config() if config is None else config
     project_ids = resolve_project_ids(active_config, project_targets)
     seen_repo_keys: set[Path] = set()
+    repo_targets: list[ResolvedRepoTarget] = []
     for project_id in project_ids:
         project = require_project(active_config, project_id)
         repo_target = _repo_target_from_project(project, active_config)
         repo_key = repo_target.path.resolve()
         if repo_key in seen_repo_keys:
             continue
-        if seen_repo_keys:
-            print()
         seen_repo_keys.add(repo_key)
+        repo_targets.append(repo_target)
+
+    if json_output:
+        print(json.dumps({"repos": [project_repo_payload(repo_target, active_config) for repo_target in repo_targets]}, indent=2))
+        return
+
+    for index, repo_target in enumerate(repo_targets):
+        if index:
+            print()
         for line in render_project_repo_lines(repo_target, active_config):
             print(line)

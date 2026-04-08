@@ -95,7 +95,8 @@ async def test_cli_doctor_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
 
     called: list[str] = []
 
-    def fake_doctor() -> int:
+    def fake_doctor(*, json_output: bool = False) -> int:
+        assert json_output is False
         called.append("called")
         return 0
 
@@ -109,6 +110,45 @@ async def test_cli_doctor_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_cli_doctor_prints_next_steps(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from dev import cli
+    from dev.tasks import doctor as doctor_task
+
+    monkeypatch.setattr(doctor_task, "doctor", lambda *, json_output=False: 0)
+    monkeypatch.setattr("sys.argv", ["dev.py", "doctor"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "Next useful commands:" in output
+    assert "dev.py config check" in output
+
+
+@pytest.mark.asyncio
+async def test_cli_doctor_json_suppresses_next_steps(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+    from dev.tasks import doctor as doctor_task
+
+    def fake_doctor(*, json_output: bool = False) -> int:
+        assert json_output is True
+        print("{}")
+        return 0
+
+    monkeypatch.setattr(doctor_task, "doctor", fake_doctor)
+    monkeypatch.setattr("sys.argv", ["dev.py", "doctor", "--json"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert output.strip() == "{}"
+
+
+@pytest.mark.asyncio
 async def test_cli_contributors_audit_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev import cli
     from dev.tasks import contributors_audit as contributors_audit_task
@@ -116,7 +156,7 @@ async def test_cli_contributors_audit_dispatches(monkeypatch: pytest.MonkeyPatch
 
     called: list[str] = []
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None: True)
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
 
     def fake_audit_contributors() -> int:
         called.append("called")
@@ -139,7 +179,7 @@ async def test_cli_secrets_scan_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
 
     called: list[str] = []
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None: True)
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
 
     def fake_secrets_scan(target: str) -> int:
         called.append(target)

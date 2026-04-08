@@ -178,3 +178,37 @@ def test_commit_without_project_runs_all_projects(tmp_path: Path, monkeypatch: p
         ("alpha", False, True, "test-openai-key", str(alpha_path)),
         ("beta", False, True, "test-openai-key", str(beta_path)),
     ]
+
+
+def test_commit_dry_run_skips_setup_and_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import dev.tasks.commit as commit_module
+
+    alpha_path = tmp_path / "alpha"
+    alpha_path.mkdir(parents=True, exist_ok=True)
+
+    alpha_project = SimpleNamespace(name="alpha", path=alpha_path, quarantine=False)
+    config = SimpleNamespace(
+        defined_projects={"alpha": alpha_project},
+        openai_key=None,
+    )
+
+    setup_calls: list[str] = []
+    commit_calls: list[str] = []
+
+    monkeypatch.setattr(commit_module, "load_config", lambda: config)
+    monkeypatch.setattr(commit_module, "toposort_projects", lambda _projects, target_project=None: ["alpha"])
+    monkeypatch.setattr(commit_module, "setup_project", lambda *args, **kwargs: setup_calls.append("called"))
+    monkeypatch.setattr(commit_module, "commit_repo_changes", lambda *args, **kwargs: commit_calls.append("called"))
+
+    result = commit_module.commit("alpha", dry_run=True)
+
+    assert result == 0
+    assert setup_calls == []
+    assert commit_calls == []
+    output = capsys.readouterr().out
+    assert "Dry run: would run PROD setup for:" in output
+    assert "alpha" in output

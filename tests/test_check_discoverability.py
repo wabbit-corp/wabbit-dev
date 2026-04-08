@@ -34,3 +34,28 @@ def test_describe_check_unknown_name_suggests_close_match() -> None:
 
     with pytest.raises(ValueError, match=r"Did you mean 'SpdxHeaderCheck'"):
         check_task.describe_check("SpdxHeaderChek")
+
+
+def test_list_checks_json_output_is_structured(capsys: pytest.CaptureFixture[str]) -> None:
+    from dev.tasks import check as check_task
+
+    result = check_task.list_checks(json_output=True)
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert '"checks"' in output
+    assert '"name": "SpdxHeaderCheck"' in output
+    assert '"fixable": "yes"' in output
+
+
+def test_describe_check_json_output_is_structured(capsys: pytest.CaptureFixture[str]) -> None:
+    from dev.tasks import check as check_task
+
+    result = check_task.describe_check("SpdxHeaderCheck", json_output=True)
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert '"check"' in output
+    assert '"name": "SpdxHeaderCheck"' in output
+    assert '"suppressionExamples"' in output
+    assert '"rootCljDisable"' in output

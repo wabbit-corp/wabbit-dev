@@ -54,6 +54,73 @@ def _epilog(*, examples: Sequence[str] = (), notes: Sequence[str] = ()) -> str |
     return "\n\n".join(sections)
 
 
+def _guidance_target(args: argparse.Namespace) -> str | None:
+    targets = getattr(args, "targets", None)
+    if isinstance(targets, list) and targets:
+        return targets[0]
+
+    target = getattr(args, "target", None)
+    if isinstance(target, str) and target not in {".", ":root"}:
+        return target
+
+    project_or_dir_or_file = getattr(args, "project_or_dir_or_file", None)
+    if isinstance(project_or_dir_or_file, str) and project_or_dir_or_file not in {".", ":root"}:
+        return project_or_dir_or_file
+
+    return None
+
+
+def _print_next_steps(command_path: str, *, prog: str, args: argparse.Namespace) -> None:
+    if getattr(args, "json", False):
+        return
+
+    target = _guidance_target(args)
+    steps: list[str]
+    match command_path:
+        case "doctor":
+            steps = [
+                f"{prog} config check",
+                f"{prog} project list",
+                f"{prog} doctor --json",
+            ]
+        case "setup":
+            if target is not None:
+                steps = [f"{prog} project show {target}", f"{prog} build {target}", f"{prog} check {target}"]
+            else:
+                steps = [f"{prog} project list", f"{prog} build", f"{prog} check :root"]
+        case "build":
+            if target is not None:
+                steps = [f"{prog} check {target}", f"{prog} status {target}", f"{prog} publish --dry-run {target}"]
+            else:
+                steps = [f"{prog} check :root", f"{prog} project list", f"{prog} publish --dry-run"]
+        case "publish":
+            if getattr(args, "dry_run", False):
+                steps = [f"{prog} publish {target}" if target else f"{prog} publish", f"{prog} status {target}" if target else f"{prog} project list", f"{prog} push --dry-run {target}" if target else f"{prog} push --dry-run"]
+            else:
+                steps = [f"{prog} status {target}" if target else f"{prog} project list", f"{prog} push --dry-run {target}" if target else f"{prog} push --dry-run", f"{prog} push {target}" if target else f"{prog} push"]
+        case "project/show":
+            if target is None:
+                return
+            steps = [f"{prog} project deps {target}", f"{prog} project repo {target}", f"{prog} build {target}"]
+        case "commit":
+            if getattr(args, "dry_run", False):
+                steps = [f"{prog} commit {target}" if target else f"{prog} commit", f"{prog} status {target}" if target else f"{prog} project list", f"{prog} push --dry-run {target}" if target else f"{prog} push --dry-run"]
+            else:
+                steps = [f"{prog} status {target}" if target else f"{prog} project list", f"{prog} push --dry-run {target}" if target else f"{prog} push --dry-run", f"{prog} push {target}" if target else f"{prog} push"]
+        case "push":
+            if getattr(args, "dry_run", False):
+                steps = [f"{prog} push {target}" if target else f"{prog} push", f"{prog} status {target}" if target else f"{prog} project list"]
+            else:
+                steps = [f"{prog} status {target}" if target else f"{prog} project list", f"{prog} project repo {target}" if target else f"{prog} project list"]
+        case _:
+            return
+
+    print()
+    print("Next useful commands:")
+    for step in steps:
+        print(f"  {step}")
+
+
 class Commands:
     def __init__(self, parser: ArgParser) -> None:
         self.root_parser = parser
@@ -242,12 +309,18 @@ async def async_main() -> int:
         ),
         epilog=examples(
             "doctor",
+            "doctor --json",
             notes=[
                 "Use this when a command fails due to missing config, tools, or credentials.",
+                "Use `--json` for scripts, editor integrations, or CI diagnostics.",
             ],
         ),
     ) as cmd:
-        del cmd
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit the doctor report as JSON instead of human-oriented text.",
+        )
 
     with commands(
         "setup",
@@ -404,9 +477,11 @@ async def async_main() -> int:
             "publish",
             "publish app-wabbit-dev",
             "publish jeeves",
+            "publish --dry-run app-wabbit-dev",
             notes=[
                 "Credentials are loaded from root.private.clj and, for some publish flows, environment variables.",
                 "Projects with no publish target are skipped rather than treated as errors.",
+                "`--dry-run` prints the publish order and target for each selected project without uploading anything.",
             ],
         ),
     ) as cmd:
@@ -416,6 +491,11 @@ async def async_main() -> int:
             type=str,
             nargs="*",
             help="Project IDs, repo IDs, or paths. Omit to publish every publishable configured project.",
+        )
+        cmd.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Print the publish plan without uploading artifacts or contacting publish targets.",
         )
 
     with commands(
@@ -663,9 +743,11 @@ async def async_main() -> int:
             "commit",
             "commit app-wabbit-dev",
             "commit jeeves",
+            "commit --dry-run app-wabbit-dev",
             notes=[
                 "This command requires an OpenAI key in root.private.clj.",
                 "The commit message policy is repository-specific and enforced by the commit workflow.",
+                "`--dry-run` shows the setup order and repo commit grouping without modifying files or creating commits.",
             ],
         ),
     ) as cmd:
@@ -675,6 +757,11 @@ async def async_main() -> int:
             type=str,
             nargs="*",
             help="Project IDs, repo IDs, or paths. Omit to process every configured project.",
+        )
+        cmd.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Print the setup and repo commit plan without modifying files or creating commits.",
         )
 
     with commands(
@@ -695,9 +782,11 @@ async def async_main() -> int:
             "push app-wabbit-dev",
             "push jeeves",
             "push ./app-wabbit-dev",
+            "push --dry-run jeeves",
             notes=[
                 "The branch target is currently hard-coded to `master`.",
                 "With no targets, `push` behaves like `push .` and pushes every configured repo once.",
+                "`--dry-run` prints the resolved repo targets without pushing branch or tag updates.",
             ],
         ),
     ) as cmd:
@@ -707,6 +796,11 @@ async def async_main() -> int:
             type=str,
             nargs="*",
             help="Use `.` for all configured repos, or provide repo IDs, project IDs, or paths.",
+        )
+        cmd.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Print which repos would be pushed without sending branch or tag updates.",
         )
 
     with commands(
@@ -748,7 +842,12 @@ async def async_main() -> int:
             generated files that `setup` is expected to manage.
             """
         ),
-        epilog=examples("project show app-wabbit-dev", "project show jeeves", "project show ./jeeves/client"),
+        epilog=examples(
+            "project show app-wabbit-dev",
+            "project show jeeves",
+            "project show ./jeeves/client",
+            "project show app-wabbit-dev --json",
+        ),
     ) as cmd:
         cmd.add_argument(
             "targets",
@@ -756,6 +855,11 @@ async def async_main() -> int:
             type=str,
             nargs="+",
             help="Project IDs, repo IDs, or paths inside configured projects or repos.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit project metadata as JSON.",
         )
 
     with commands(
@@ -769,7 +873,12 @@ async def async_main() -> int:
             inside configured projects or repos.
             """
         ),
-        epilog=examples("project deps app-wabbit-dev", "project deps jeeves", "project deps ./jeeves/client"),
+        epilog=examples(
+            "project deps app-wabbit-dev",
+            "project deps jeeves",
+            "project deps ./jeeves/client",
+            "project deps jeeves --json",
+        ),
     ) as cmd:
         cmd.add_argument(
             "targets",
@@ -777,6 +886,11 @@ async def async_main() -> int:
             type=str,
             nargs="+",
             help="Project IDs, repo IDs, or paths inside configured projects or repos.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit resolved dependencies as JSON.",
         )
 
     with commands(
@@ -791,7 +905,12 @@ async def async_main() -> int:
             projects or repos. Repositories are de-duplicated in the output.
             """
         ),
-        epilog=examples("project repo app-wabbit-dev", "project repo jeeves", "project repo ./jeeves/client"),
+        epilog=examples(
+            "project repo app-wabbit-dev",
+            "project repo jeeves",
+            "project repo ./jeeves/client",
+            "project repo jeeves --json",
+        ),
     ) as cmd:
         cmd.add_argument(
             "targets",
@@ -799,6 +918,11 @@ async def async_main() -> int:
             type=str,
             nargs="+",
             help="Project IDs, repo IDs, or paths inside configured projects or repos.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit repo metadata as JSON.",
         )
 
     with commands(
@@ -818,7 +942,9 @@ async def async_main() -> int:
         ),
         epilog=examples(
             "check --list",
+            "check --list --json",
             "check --describe SpdxHeaderCheck",
+            "check --describe SpdxHeaderCheck --json",
             "check",
             "check app-wabbit-dev/dev/cli.py",
             "check app-wabbit-dev",
@@ -842,6 +968,11 @@ async def async_main() -> int:
             "--describe",
             metavar="CHECK",
             help="Show issue IDs, config commands, and suppression examples for one check.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="When used with `--list` or `--describe`, emit JSON instead of text.",
         )
         cmd.add_argument(
             "project_or_dir_or_file",
@@ -999,15 +1130,21 @@ async def async_main() -> int:
     elif command_path in {"project/show", "project/deps", "project/repo"}:
         selected_projects = tuple(args.targets)
 
-    if not preflight_for_command(command_path, prog=prog, projects=selected_projects):
+    if not preflight_for_command(
+        command_path,
+        prog=prog,
+        projects=selected_projects,
+        dry_run=getattr(args, "dry_run", False),
+    ):
         return 2
 
     try:
+        exit_code = 0
         match command_path:
             case "doctor":
                 from dev.tasks.doctor import doctor
 
-                return doctor()
+                exit_code = doctor(json_output=args.json)
 
             case "config/check":
                 from dev.tasks.check_config import check_config
@@ -1051,7 +1188,7 @@ async def async_main() -> int:
             case "publish":
                 from dev.tasks.publish import publish_main
 
-                await publish_main(args.targets)
+                exit_code = await publish_main(args.targets, dry_run=args.dry_run)
 
             case "build":
                 from dev.tasks.build import build
@@ -1089,12 +1226,12 @@ async def async_main() -> int:
             case "commit":
                 from dev.tasks.commit import commit
 
-                commit(args.targets)
+                exit_code = commit(args.targets, dry_run=args.dry_run)
 
             case "push":
                 from dev.tasks.push import push
 
-                push(args.targets)
+                exit_code = push(args.targets, dry_run=args.dry_run)
 
             case "project/list":
                 from dev.tasks.project_list import list_projects
@@ -1104,17 +1241,17 @@ async def async_main() -> int:
             case "project/show":
                 from dev.tasks.project_list import show_projects
 
-                show_projects(args.targets)
+                show_projects(args.targets, json_output=args.json)
 
             case "project/deps":
                 from dev.tasks.project_list import show_project_dependencies
 
-                show_project_dependencies(args.targets)
+                show_project_dependencies(args.targets, json_output=args.json)
 
             case "project/repo":
                 from dev.tasks.project_list import show_project_repos
 
-                show_project_repos(args.targets)
+                show_project_repos(args.targets, json_output=args.json)
 
             case "check":
                 from dev.tasks.check import check_main, describe_check, list_checks
@@ -1122,12 +1259,17 @@ async def async_main() -> int:
                 if args.list:
                     if args.project_or_dir_or_file != "." or args.checks or args.describe is not None or args.fix:
                         raise ValueError("`check --list` does not accept TARGET, CHECK, --describe, or --fix.")
-                    return list_checks()
+                    exit_code = list_checks(json_output=args.json)
+                    return exit_code
 
                 if args.describe is not None:
                     if args.project_or_dir_or_file != "." or args.checks or args.fix:
                         raise ValueError("`check --describe` does not accept TARGET, CHECK, or --fix.")
-                    return describe_check(args.describe)
+                    exit_code = describe_check(args.describe, json_output=args.json)
+                    return exit_code
+
+                if args.json:
+                    raise ValueError("`check --json` currently requires either `--list` or `--describe`.")
 
                 checks = args.checks
                 if not checks:
@@ -1155,7 +1297,10 @@ async def async_main() -> int:
         print(f"{prog}: error: {ex}", file=sys.stderr)
         return 2
 
-    return 0
+    if command_path in {"doctor", "setup", "build", "publish", "project/show", "commit", "push"}:
+        _print_next_steps(command_path, prog=prog, args=args)
+
+    return exit_code
 
 
 def main() -> None:

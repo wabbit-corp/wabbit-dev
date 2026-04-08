@@ -97,27 +97,27 @@ Every command is documented here and in the MkDocs reference under
 
 | Command | What it does |
 | --- | --- |
-| `doctor` | Diagnoses workspace, toolchain, and credential readiness. |
+| `doctor [--json]` | Diagnoses workspace, toolchain, and credential readiness. |
 | `config check` | Parses and validates `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...]` | Generates or refreshes managed project files from configuration. |
 | `llmcopy PATH ...` | Copies file contents to the clipboard in an LLM-friendly wrapper. |
 | `dep graph [TARGET ...]` | Renders an SVG dependency graph for the workspace or selected configured targets. |
 | `dep updates` | Checks configured Maven libraries for newer upstream versions. |
-| `publish [TARGET ...]` | Publishes configured projects in dependency order. |
+| `publish [TARGET ...] [--dry-run]` | Publishes configured projects in dependency order or prints the publish plan. |
 | `build [TARGET ...]` | Builds configured Gradle projects or syntax-checks Python projects. |
 | `duplicates FOLDER ...` | Finds duplicate files and duplicate directory trees. |
 | `jitpack info GROUP ARTIFACT [VERSION]` | Shows refs, commits, versions, and build info for a JitPack artifact. |
 | `clean [TARGET ...]` | Deletes generated build and cache directories for configured projects. |
 | `cloc [TARGET ...]` | Runs `cloc` for configured targets or arbitrary filesystem paths. |
 | `status TARGET ...` | Shows tracked working-tree changes for configured or direct repo targets. |
-| `commit [TARGET ...]` | Runs PROD setup, stages changes, and creates commits with AI-generated messages. |
-| `push [TARGET ...]` | Pushes `origin/master` and tags for one repo or all configured repos. |
+| `commit [TARGET ...] [--dry-run]` | Runs PROD setup, stages changes, and creates commits, or prints the commit plan. |
+| `push [TARGET ...] [--dry-run]` | Pushes `origin/master` and tags, or prints the push plan. |
 | `project list` | Lists configured projects grouped by repository. |
-| `project show TARGET ...` | Shows detailed metadata for one or more configured projects. |
-| `project deps TARGET ...` | Shows resolved dependencies for one or more configured projects. |
-| `project repo TARGET ...` | Shows repo metadata for one or more configured targets. |
-| `check --list` | Lists the loaded checks with scope, auto-fix support, and summaries. |
-| `check --describe CHECK` | Shows issue IDs, config knobs, and suppression examples for one check. |
+| `project show TARGET ... [--json]` | Shows detailed metadata for one or more configured projects. |
+| `project deps TARGET ... [--json]` | Shows resolved dependencies for one or more configured projects. |
+| `project repo TARGET ... [--json]` | Shows repo metadata for one or more configured targets. |
+| `check --list [--json]` | Lists the loaded checks with scope, auto-fix support, and summaries. |
+| `check --describe CHECK [--json]` | Shows issue IDs, config knobs, and suppression examples for one check. |
 | `check [TARGET] [CHECK ...]` | Runs the loaded check suite against a project, repo, path, or file. |
 | `spdx headers [TARGET] [--fix]` | Runs only the SPDX header check. |
 | `secrets scan [TARGET]` | Runs the internal high-entropy-string secret scan. |
@@ -195,8 +195,11 @@ HOST = "10.0.0.0"  # check:ignore E_HARDCODED_INTERNAL_HOSTNAME_IP value=10.0.0.
 The main target forms are:
 
 - `python3 dev.py doctor`
+- `python3 dev.py doctor --json`
 - `python3 dev.py check --list`
+- `python3 dev.py check --list --json`
 - `python3 dev.py check --describe SpdxHeaderCheck`
+- `python3 dev.py check --describe SpdxHeaderCheck --json`
 - `python3 dev.py check .`
 - `python3 dev.py check path/to/file.py`
 - `python3 dev.py check app-wabbit-dev`
@@ -209,9 +212,18 @@ Inventory commands:
 
 - `python3 dev.py project list`
 - `python3 dev.py project show app-wabbit-dev`
+- `python3 dev.py project show app-wabbit-dev --json`
 - `python3 dev.py project deps jeeves`
+- `python3 dev.py project deps jeeves --json`
 - `python3 dev.py project repo jeeves`
+- `python3 dev.py project repo jeeves --json`
 - `python3 dev.py contributors audit`
+
+Dry-run commands:
+
+- `python3 dev.py publish --dry-run app-wabbit-dev`
+- `python3 dev.py commit --dry-run jeeves`
+- `python3 dev.py push --dry-run .`
 
 ## Documentation
 

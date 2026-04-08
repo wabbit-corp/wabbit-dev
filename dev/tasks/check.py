@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import re
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from collections.abc import Sequence
@@ -215,13 +216,36 @@ def _config_target_choices(config: object | None) -> list[str]:
     return list(dict.fromkeys([*config.defined_projects.keys(), *config.defined_repos.keys()]))
 
 
-def list_checks() -> int:
+def _issue_type_payload(issue_type: IssueType) -> dict[str, str]:
+    return {
+        "id": issue_type.id,
+        "message": issue_type.message,
+        "severity": issue_type.severity.value,
+    }
+
+
+def _check_catalog_payload(entry: CheckCatalogEntry) -> dict[str, object]:
+    return {
+        "name": entry.name,
+        "kind": entry.kind,
+        "summary": entry.summary,
+        "fixable": entry.fixable,
+        "configCommands": list(entry.config_commands),
+        "issueTypes": [_issue_type_payload(issue_type) for issue_type in entry.issue_types],
+    }
+
+
+def list_checks(*, json_output: bool = False) -> int:
     catalog = _catalog(_load_optional_config())
     if not catalog:
         warning("No checks were loaded.")
         return 1
 
     entries = sorted(catalog.values(), key=lambda entry: (entry.kind, entry.name))
+    if json_output:
+        print(json.dumps({"checks": [_check_catalog_payload(entry) for entry in entries]}, indent=2))
+        return 0
+
     name_width = max(len(entry.name) for entry in entries)
     kind_width = max(len(entry.kind) for entry in entries)
     fix_width = max(len(entry.fixable) for entry in entries)
@@ -239,11 +263,27 @@ def list_checks() -> int:
     return 0
 
 
-def describe_check(check_name: str) -> int:
+def describe_check(check_name: str, *, json_output: bool = False) -> int:
     catalog = _catalog(_load_optional_config())
     entry = catalog.get(check_name)
     if entry is None:
         raise ValueError(unknown_name_message("check", check_name, catalog))
+
+    issue_id = entry.issue_types[0].id if entry.issue_types else "E_SOME_ISSUE"
+    payload = {
+        "check": {
+            **_check_catalog_payload(entry),
+            "suppressionExamples": {
+                "rootCljDisable": f'(checks/disable "{issue_id}" "**/*")',
+                "rootCljIgnoreFinding": f'(checks/ignore-finding "{issue_id}" "**/*" "needle")',
+                "inlineIgnore": f"# check:ignore {issue_id}" if entry.kind == "file" else None,
+                "inlineIgnoreValue": f"# check:ignore {issue_id} value=needle" if entry.kind == "file" else None,
+            },
+        }
+    }
+    if json_output:
+        print(json.dumps(payload, indent=2))
+        return 0
 
     print(f"Check: {entry.name}")
     print(f"Kind: {entry.kind}")
@@ -264,7 +304,6 @@ def describe_check(check_name: str) -> int:
         print("Issue types: not detected automatically")
 
     print("Suppression examples:")
-    issue_id = entry.issue_types[0].id if entry.issue_types else "E_SOME_ISSUE"
     print(f'  - root.clj disable: (checks/disable "{issue_id}" "**/*")')
     print(f'  - root.clj ignore finding text: (checks/ignore-finding "{issue_id}" "**/*" "needle")')
     if entry.kind == "file":
@@ -663,15 +702,22 @@ if __name__ == "__main__":
         metavar="CHECK",
         help="Show issue IDs, config commands, and suppression examples for a named check.",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="When used with --list or --describe, emit JSON instead of text.",
+    )
     parser.add_argument("--checks", nargs="+", default=[], help="List of checks to run.")
     parser.add_argument("--fix", action="store_true", help="Fix issues found during checks.")
 
     args = parser.parse_args()
     try:
         if args.list:
-            raise SystemExit(list_checks())
+            raise SystemExit(list_checks(json_output=args.json))
         if args.describe is not None:
-            raise SystemExit(describe_check(args.describe))
+            raise SystemExit(describe_check(args.describe, json_output=args.json))
+        if args.json:
+            raise ValueError("`--json` currently requires either `--list` or `--describe`.")
         raise SystemExit(check_main(args.project_or_dir_or_file, args.checks, args.fix))
     except ValueError as ex:
         parser.exit(2, f"{parser.prog}: error: {ex}\n")

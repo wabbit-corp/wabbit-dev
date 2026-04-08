@@ -16,6 +16,9 @@ from dev.config import (
     Version,
 )
 from dev.tasks.project_list import (
+    project_dependency_payload,
+    project_repo_payload,
+    project_show_payload,
     render_project_dependency_lines,
     render_project_list_lines,
     render_project_repo_lines,
@@ -248,6 +251,99 @@ def test_render_project_repo_lines_show_repo_metadata() -> None:
     assert "  - jeeves/client" in lines
 
 
+def test_project_show_payload_includes_structured_metadata() -> None:
+    config = _empty_config()
+    repo_root = Path("./jeeves")
+    project = _gradle_project(
+        repo_root / "client",
+        project_id="jeeves/client",
+        build_model="kmp",
+        repo_id="jeeves",
+        repo_root=repo_root,
+    )
+    project.publish_target = "maven-central"
+    project.docs_enabled = True
+    project.docs_system = "dokka"
+    project.jvm_policy = "android-agp-21"
+    project.jvm_task_policies = {"compileKotlinJvm": "jvm-21"}
+    project.resolved_dependencies = [
+        Dependency(scope="api", target=ProjectDependencyTarget("jeeves/api")),
+    ]
+    config.defined_projects = OrderedDict([("jeeves/client", project)])
+
+    payload = project_show_payload("jeeves/client", config)
+
+    assert payload["projectId"] == "jeeves/client"
+    assert payload["type"] == "kotlin/kmp"
+    assert payload["publishTarget"] == "maven-central"
+    assert payload["docsSystem"] == "dokka"
+    assert payload["jvmPolicy"] == "android-agp-21"
+    assert payload["jvmTaskOverrides"] == {"compileKotlinJvm": "jvm-21"}
+    assert payload["resolvedDependencies"] == [
+        {
+            "scope": "api",
+            "name": "jeeves/api",
+            "targetType": "project",
+            "project": "jeeves/api",
+        }
+    ]
+    assert any(file["path"].endswith("settings.local.gradle.kts") for file in payload["generatedFiles"])
+
+
+def test_project_dependency_payload_is_machine_readable() -> None:
+    config = _empty_config()
+    project = _python_project(Path("./app-wabbit-dev"), project_id="app-wabbit-dev")
+    project.resolved_dependencies = [
+        Dependency(scope="implementation", target=ProjectDependencyTarget("kotlin-base58")),
+    ]
+    config.defined_projects = OrderedDict([("app-wabbit-dev", project)])
+
+    payload = project_dependency_payload("app-wabbit-dev", config)
+
+    assert payload == {
+        "projectId": "app-wabbit-dev",
+        "resolvedDependencies": [
+            {
+                "scope": "implementation",
+                "name": "kotlin-base58",
+                "targetType": "project",
+                "project": "kotlin-base58",
+            }
+        ],
+    }
+
+
+def test_project_repo_payload_is_machine_readable() -> None:
+    config = _empty_config()
+    repo_root = Path("./jeeves")
+    config.defined_repos["jeeves"] = RepoDefinition(
+        repo_id="jeeves",
+        path=repo_root,
+        github_repo="wabbit-corp/jeeves",
+        gradle_root_project_name="jeeves",
+        jvm_policy="jvm-21",
+        docs_project_id="jeeves/api",
+        project_ids=["jeeves/api", "jeeves/client"],
+    )
+
+    from dev.repo_resolution import ResolvedRepoTarget
+
+    payload = project_repo_payload(
+        ResolvedRepoTarget(name="jeeves", path=repo_root, repo_id="jeeves", project_ids=("jeeves/api", "jeeves/client")),
+        config,
+    )
+
+    assert payload == {
+        "repo": "jeeves",
+        "path": str(repo_root.resolve()),
+        "repoId": "jeeves",
+        "githubRepo": "wabbit-corp/jeeves",
+        "gradleRootProject": "jeeves",
+        "docsProject": "jeeves/api",
+        "projects": ["jeeves/api", "jeeves/client"],
+    }
+
+
 @pytest.mark.asyncio
 async def test_cli_project_list_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev import cli
@@ -256,7 +352,7 @@ async def test_cli_project_list_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
 
     called: list[str] = []
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None: True)
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
 
     def fake_list_projects() -> None:
         called.append("called")
@@ -278,9 +374,10 @@ async def test_cli_project_show_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
 
     called: list[list[str]] = []
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None: True)
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
 
-    def fake_show_projects(project_ids: list[str]) -> None:
+    def fake_show_projects(project_ids: list[str], *, json_output: bool = False) -> None:
+        assert json_output is False
         called.append(project_ids)
 
     monkeypatch.setattr(project_list, "show_projects", fake_show_projects)
@@ -300,9 +397,10 @@ async def test_cli_project_deps_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
 
     called: list[list[str]] = []
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None: True)
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
 
-    def fake_show_project_dependencies(project_ids: list[str]) -> None:
+    def fake_show_project_dependencies(project_ids: list[str], *, json_output: bool = False) -> None:
+        assert json_output is False
         called.append(project_ids)
 
     monkeypatch.setattr(project_list, "show_project_dependencies", fake_show_project_dependencies)
@@ -322,9 +420,10 @@ async def test_cli_project_repo_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
 
     called: list[list[str]] = []
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None: True)
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
 
-    def fake_show_project_repos(project_ids: list[str]) -> None:
+    def fake_show_project_repos(project_ids: list[str], *, json_output: bool = False) -> None:
+        assert json_output is False
         called.append(project_ids)
 
     monkeypatch.setattr(project_list, "show_project_repos", fake_show_project_repos)
@@ -355,7 +454,7 @@ async def test_cli_project_show_suggests_close_project_id(
         ]
     )
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None: True)
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
     monkeypatch.setattr(project_list, "load_config", lambda: config)
     monkeypatch.setattr("sys.argv", ["dev.py", "project", "show", "app-wabbit-de"])
 

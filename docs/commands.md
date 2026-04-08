@@ -40,27 +40,27 @@ configured projects that belong to that repo.
 
 | Command | Summary |
 | --- | --- |
-| `doctor` | Diagnose workspace, toolchain, and credential readiness. |
+| `doctor [--json]` | Diagnose workspace, toolchain, and credential readiness. |
 | `config check` | Parse and validate `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...]` | Generate or refresh managed project files. |
 | `llmcopy PATH ...` | Copy file contents to the clipboard in an LLM-friendly wrapper. |
 | `dep graph [TARGET ...]` | Render an SVG dependency graph. |
 | `dep updates` | Check configured Maven libraries for newer versions. |
-| `publish [TARGET ...]` | Publish configured projects in dependency order. |
+| `publish [TARGET ...] [--dry-run]` | Publish configured projects in dependency order or print the publish plan. |
 | `build [TARGET ...]` | Build Gradle projects or syntax-check Python projects. |
 | `duplicates FOLDER ...` | Find duplicate files and duplicate directory trees. |
 | `jitpack info GROUP ARTIFACT [VERSION]` | Show refs, commits, versions, and build info from JitPack. |
 | `clean [TARGET ...]` | Remove generated build and cache directories. |
 | `cloc [TARGET ...]` | Run `cloc` for configured targets or direct paths. |
 | `status TARGET ...` | Show tracked working-tree changes for repo targets. |
-| `commit [TARGET ...]` | Run PROD setup, stage changes, and create commits. |
-| `push [TARGET ...]` | Push `origin/master` and tags. |
+| `commit [TARGET ...] [--dry-run]` | Run PROD setup, stage changes, and create commits, or print the commit plan. |
+| `push [TARGET ...] [--dry-run]` | Push `origin/master` and tags, or print the push plan. |
 | `project list` | List configured projects grouped by repository. |
-| `project show TARGET ...` | Show detailed metadata for one or more configured projects. |
-| `project deps TARGET ...` | Show resolved dependencies for one or more configured projects. |
-| `project repo TARGET ...` | Show repo metadata for one or more configured targets. |
-| `check --list` | List the loaded checks and what they do. |
-| `check --describe CHECK` | Show issue IDs, config knobs, and suppression examples for one check. |
+| `project show TARGET ... [--json]` | Show detailed metadata for one or more configured projects. |
+| `project deps TARGET ... [--json]` | Show resolved dependencies for one or more configured projects. |
+| `project repo TARGET ... [--json]` | Show repo metadata for one or more configured targets. |
+| `check --list [--json]` | List the loaded checks and what they do. |
+| `check --describe CHECK [--json]` | Show issue IDs, config knobs, and suppression examples for one check. |
 | `check [TARGET] [CHECK ...]` | Run the configured check suite. |
 | `spdx headers [TARGET] [--fix]` | Run only the SPDX header check. |
 | `secrets scan [TARGET]` | Run the internal high-entropy-string secret scan. |
@@ -72,6 +72,7 @@ configured projects that belong to that repo.
 
 ```bash
 wabbit-dev doctor
+wabbit-dev doctor --json
 ```
 
 Runs an environment and workspace readiness check covering:
@@ -88,6 +89,9 @@ Runs an environment and workspace readiness check covering:
 The CLI also reuses a subset of these checks as preflight for commands such as
 `setup`, `build`, `publish`, `commit`, `project ...`, `dep ...`, and
 `contributors audit`.
+
+Use `--json` when you want a machine-readable report for editor integrations,
+scripts, or CI diagnostics.
 
 ## Configuration and Inventory
 
@@ -121,6 +125,7 @@ detected project type such as `python`, `kotlin/jvm`, or `kotlin/kmp`.
 
 ```bash
 wabbit-dev project show TARGET ...
+wabbit-dev project show TARGET ... --json
 ```
 
 Prints the resolved metadata for one or more configured projects, including:
@@ -138,12 +143,14 @@ Example:
 ```bash
 wabbit-dev project show app-wabbit-dev
 wabbit-dev project show jeeves
+wabbit-dev project show app-wabbit-dev --json
 ```
 
 ### `project deps`
 
 ```bash
 wabbit-dev project deps TARGET ...
+wabbit-dev project deps TARGET ... --json
 ```
 
 Prints just the resolved dependency list for one or more configured projects.
@@ -155,12 +162,14 @@ Examples:
 ```bash
 wabbit-dev project deps app-wabbit-dev
 wabbit-dev project deps jeeves
+wabbit-dev project deps jeeves --json
 ```
 
 ### `project repo`
 
 ```bash
 wabbit-dev project repo TARGET ...
+wabbit-dev project repo TARGET ... --json
 ```
 
 Prints repo-level metadata for the repos associated with one or more configured
@@ -181,6 +190,7 @@ Examples:
 ```bash
 wabbit-dev project repo app-wabbit-dev
 wabbit-dev project repo jeeves
+wabbit-dev project repo jeeves --json
 ```
 
 ## Generation, Build, and Maintenance
@@ -352,6 +362,7 @@ Prints JitPack metadata for an artifact, including:
 
 ```bash
 wabbit-dev publish [TARGET ...]
+wabbit-dev publish [TARGET ...] --dry-run
 ```
 
 Publishes configured projects in dependency order.
@@ -369,13 +380,18 @@ variables.
 
 Projects that do not declare a publish target are skipped.
 
+Use `--dry-run` to inspect the topological publish order and resolved publish
+targets without uploading artifacts or contacting remote publish services.
+
 ## Quality and Security
 
 ### `check`
 
 ```bash
 wabbit-dev check --list
+wabbit-dev check --list --json
 wabbit-dev check --describe SpdxHeaderCheck
+wabbit-dev check --describe SpdxHeaderCheck --json
 wabbit-dev check [TARGET] [CHECK ...] [--fix]
 ```
 
@@ -390,6 +406,7 @@ Discovery helpers:
 
 - `--list`: show every loaded check with its scope and whether it advertises auto-fix support
 - `--describe CHECK`: show issue IDs, config commands, and suppression examples for one check
+- `--json`: with `--list` or `--describe`, emit structured output instead of text
 
 Examples:
 
@@ -478,6 +495,7 @@ tree. It does not list untracked files.
 
 ```bash
 wabbit-dev commit [TARGET ...]
+wabbit-dev commit [TARGET ...] --dry-run
 ```
 
 Runs PROD setup for the selected projects, groups them by repository, stages
@@ -488,10 +506,14 @@ Requirements:
 - valid workspace configuration
 - an OpenAI key in `root.private.clj`
 
+Use `--dry-run` to print the PROD setup order and repository commit plan without
+modifying files or creating commits.
+
 ### `push`
 
 ```bash
 wabbit-dev push [TARGET ...]
+wabbit-dev push [TARGET ...] --dry-run
 ```
 
 Pushes `origin/master` and tags.
@@ -504,6 +526,9 @@ Target behavior:
 - filesystem path: resolve the repo containing that path
 
 Current caveat: the branch target is hard-coded to `master`.
+
+Use `--dry-run` to print the resolved repositories before pushing branch or tag
+updates.
 
 ## Standalone Helper
 
