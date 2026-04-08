@@ -38,7 +38,7 @@ def test_completion_reply_lists_project_subcommands() -> None:
 
     reply = get_completion_reply(["wabbit-dev", "project", ""], 2)
 
-    assert reply.candidates == ("list", "show", "deps", "repo")
+    assert reply.candidates == ("list", "show", "deps", "repo", "targets")
     assert reply.allow_files is False
 
 

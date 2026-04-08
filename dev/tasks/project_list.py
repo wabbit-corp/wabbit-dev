@@ -58,6 +58,20 @@ def _project_type_color(project_type: str) -> str:
     return "cyan"
 
 
+def _target_platform_color(platform: str) -> str:
+    if platform == "jvm":
+        return "blue"
+    if platform == "android":
+        return "green"
+    if platform.startswith("ios"):
+        return "magenta"
+    if platform.startswith("macos"):
+        return "cyan"
+    if platform.startswith("linux") or platform.startswith("mingw"):
+        return "yellow"
+    return "white"
+
+
 def _project_display_name(project: Project) -> str:
     project_id = project.project_id
     if not project.is_repo_managed:
@@ -222,6 +236,20 @@ def project_dependency_payload(project_id: str, config: Config) -> dict[str, obj
     }
 
 
+def _kmp_project_payload(project_id: str, config: Config) -> dict[str, object]:
+    project = require_project(config, project_id)
+    if not isinstance(project, GradleProject) or not project.is_kmp:
+        raise ValueError(f"Project {project_id!r} is not a Kotlin Multiplatform project.")
+    return {
+        "projectId": project.project_id or project.path.as_posix(),
+        "type": _project_type_label(project),
+        "path": _absolute_path(project.path),
+        "repoId": project.repo_id,
+        "platforms": list(project.platforms),
+        "targetKinds": [target.kind for target in project.targets],
+    }
+
+
 def render_project_show_lines(project_id: str, config: Config, *, colorize: bool = True) -> list[str]:
     project = require_project(config, project_id)
     project_type = _project_type_label(project)
@@ -289,6 +317,25 @@ def render_project_dependency_lines(project_id: str, config: Config) -> list[str
         lines.extend(f"  - {_dependency_summary(dep)}" for dep in project.resolved_dependencies)
     else:
         lines.append("Resolved dependencies: none")
+    return lines
+
+
+def render_project_target_lines(project_id: str, config: Config, *, colorize: bool = True) -> list[str]:
+    project = require_project(config, project_id)
+    if not isinstance(project, GradleProject) or not project.is_kmp:
+        raise ValueError(f"Project {project_id!r} is not a Kotlin Multiplatform project.")
+
+    project_type = _project_type_label(project)
+    rendered_type = project_type
+    if colorize:
+        rendered_type = _colored(project_type, _project_type_color(project_type), attrs=("bold",))
+
+    lines = [f"{project.project_id or project.path.as_posix()}  {rendered_type}"]
+    for platform in project.platforms:
+        rendered_platform = platform
+        if colorize:
+            rendered_platform = _colored(platform, _target_platform_color(platform), attrs=("bold",))
+        lines.append(f"  {rendered_platform}")
     return lines
 
 
@@ -478,4 +525,38 @@ def show_project_repos(project_targets: list[str], config: Config | None = None,
         if index:
             print()
         for line in render_project_repo_lines(repo_target, active_config):
+            print(line)
+
+
+def show_project_targets(
+    project_targets: list[str] | None = None,
+    config: Config | None = None,
+    *,
+    json_output: bool = False,
+) -> None:
+    active_config = load_config() if config is None else config
+    resolved_project_ids = (
+        resolve_project_ids(active_config, project_targets)
+        if project_targets
+        else list(active_config.defined_projects.keys())
+    )
+    kmp_project_ids = [
+        project_id
+        for project_id in resolved_project_ids
+        if isinstance(active_config.defined_projects[project_id], GradleProject)
+        and active_config.defined_projects[project_id].is_kmp
+    ]
+
+    if json_output:
+        print(json.dumps({"projects": [_kmp_project_payload(project_id, active_config) for project_id in kmp_project_ids]}, indent=2))
+        return
+
+    if not kmp_project_ids:
+        print("No Kotlin Multiplatform projects matched the selected targets.")
+        return
+
+    for index, project_id in enumerate(kmp_project_ids):
+        if index:
+            print()
+        for line in render_project_target_lines(project_id, active_config):
             print(line)

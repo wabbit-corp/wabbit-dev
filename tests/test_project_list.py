@@ -19,10 +19,12 @@ from dev.tasks.project_list import (
     project_dependency_payload,
     project_repo_payload,
     project_show_payload,
+    render_project_target_lines,
     render_project_dependency_lines,
     render_project_list_lines,
     render_project_repo_lines,
     render_project_show_lines,
+    show_project_targets,
 )
 
 
@@ -202,6 +204,40 @@ def test_render_project_dependency_lines_show_resolved_dependencies() -> None:
     ]
 
 
+def test_render_project_target_lines_show_kmp_platforms() -> None:
+    config = _empty_config()
+    project = _gradle_project(
+        Path("./kotlin-filesystem"),
+        project_id="kotlin-filesystem",
+        build_model="kmp",
+    )
+    project.platforms = [
+        "jvm",
+        "android",
+        "linuxX64",
+        "mingwX64",
+        "macosX64",
+        "macosArm64",
+        "iosArm64",
+        "iosSimulatorArm64",
+    ]
+    config.defined_projects = OrderedDict([("kotlin-filesystem", project)])
+
+    lines = render_project_target_lines("kotlin-filesystem", config, colorize=False)
+
+    assert lines == [
+        "kotlin-filesystem  kotlin/kmp",
+        "  jvm",
+        "  android",
+        "  linuxX64",
+        "  mingwX64",
+        "  macosX64",
+        "  macosArm64",
+        "  iosArm64",
+        "  iosSimulatorArm64",
+    ]
+
+
 def test_render_project_repo_lines_show_repo_metadata() -> None:
     config = _empty_config()
     repo_root = Path("./jeeves")
@@ -249,6 +285,29 @@ def test_render_project_repo_lines_show_repo_metadata() -> None:
     assert "Projects (2):" in lines
     assert "  - jeeves/api" in lines
     assert "  - jeeves/client" in lines
+
+
+def test_show_project_targets_json_filters_to_kmp_projects(capsys) -> None:
+    config = _empty_config()
+    config.defined_projects = OrderedDict(
+        [
+            (
+                "kotlin-filesystem",
+                _gradle_project(Path("./kotlin-filesystem"), project_id="kotlin-filesystem", build_model="kmp"),
+            ),
+            (
+                "kotlin-base58",
+                _gradle_project(Path("./kotlin-base58"), project_id="kotlin-base58", build_model="jvm"),
+            ),
+        ]
+    )
+
+    show_project_targets(None, config, json_output=True)
+
+    payload = capsys.readouterr().out
+    assert '"projectId": "kotlin-filesystem"' in payload
+    assert '"platforms": [' in payload
+    assert '"kotlin-base58"' not in payload
 
 
 def test_project_show_payload_includes_structured_metadata() -> None:

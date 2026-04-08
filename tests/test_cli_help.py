@@ -87,6 +87,7 @@ async def test_project_parent_help_lists_new_subcommands(
     assert "show" in output
     assert "deps" in output
     assert "repo" in output
+    assert "targets" in output
 
 
 @pytest.mark.asyncio

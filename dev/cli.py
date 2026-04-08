@@ -116,7 +116,7 @@ def _print_next_steps(command_path: str, *, prog: str, args: argparse.Namespace)
         case "project/show":
             if target is None:
                 return
-            steps = [f"{prog} project deps {target}", f"{prog} project repo {target}", f"{prog} build {target}"]
+            steps = [f"{prog} project deps {target}", f"{prog} project targets {target}", f"{prog} build {target}"]
         case "commit":
             if getattr(args, "dry_run", False):
                 steps = [f"{prog} commit {target}" if target else f"{prog} commit", f"{prog} status {target}" if target else f"{prog} project list", f"{prog} push --dry-run {target}" if target else f"{prog} push --dry-run"]
@@ -954,7 +954,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             are grouped under their parent repositories.
             """
         ),
-        epilog=examples("project list", "project show app-wabbit-dev", "project deps jeeves", "project repo jeeves"),
+        epilog=examples(
+            "project list",
+            "project show app-wabbit-dev",
+            "project deps jeeves",
+            "project repo jeeves",
+            "project targets",
+        ),
     ) as cmd:
         del cmd
 
@@ -1074,6 +1080,43 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "--json",
             action="store_true",
             help="Emit repo metadata as JSON.",
+        )
+
+    with commands(
+        "project/targets",
+        help="Show Kotlin Multiplatform target platforms for configured projects.",
+        description=_doc(
+            """
+            Print the declared Kotlin Multiplatform target platforms for one or
+            more configured projects.
+
+            With no targets, this lists every configured KMP project in
+            declaration order. Explicit targets can be project IDs, repo IDs, or
+            paths inside configured projects or repos; non-KMP projects are
+            ignored.
+            """
+        ),
+        epilog=examples(
+            "project targets",
+            "project targets kotlin-filesystem",
+            "project targets jeeves",
+            "project targets kotlin-filesystem --json",
+        ),
+    ) as cmd:
+        _add_argument(
+            cmd,
+            "targets",
+            metavar="TARGET",
+            type=str,
+            nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
+            help="Project IDs, repo IDs, or paths inside configured projects or repos. Omit to list every KMP project.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit KMP target platform data as JSON.",
         )
 
     with commands(
@@ -1309,7 +1352,7 @@ async def async_main() -> int:
     selected_projects: tuple[str, ...] | None = None
     if command_path in {"setup", "build", "publish", "commit", "clean", "dep/graph"} and args.targets:
         selected_projects = tuple(args.targets)
-    elif command_path in {"project/show", "project/deps", "project/repo"}:
+    elif command_path in {"project/show", "project/deps", "project/repo", "project/targets"}:
         selected_projects = tuple(args.targets)
 
     if not preflight_for_command(
@@ -1449,6 +1492,11 @@ async def async_main() -> int:
                 from dev.tasks.project_list import show_project_repos
 
                 show_project_repos(args.targets, json_output=args.json)
+
+            case "project/targets":
+                from dev.tasks.project_list import show_project_targets
+
+                show_project_targets(args.targets, json_output=args.json)
 
             case "check":
                 from dev.tasks.check import check_main, describe_check, list_checks

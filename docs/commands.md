@@ -60,6 +60,7 @@ configured projects that belong to that repo.
 | `project show TARGET ... [--json]` | Show detailed metadata for one or more configured projects. |
 | `project deps TARGET ... [--json]` | Show resolved dependencies for one or more configured projects. |
 | `project repo TARGET ... [--json]` | Show repo metadata for one or more configured targets. |
+| `project targets [TARGET ...] [--json]` | Show Kotlin Multiplatform target platforms for matching configured projects. |
 | `check --list [--json]` | List the loaded checks and what they do. |
 | `check --describe CHECK [--json]` | Show issue IDs, config knobs, and suppression examples for one check. |
 | `check [TARGET] [CHECK ...]` | Run the configured check suite. |
@@ -238,6 +239,35 @@ Examples:
 wabbit-dev project repo app-wabbit-dev
 wabbit-dev project repo jeeves
 wabbit-dev project repo jeeves --json
+```
+
+### `project targets`
+
+```bash
+wabbit-dev project targets [TARGET ...]
+wabbit-dev project targets [TARGET ...] --json
+```
+
+Prints the declared Kotlin Multiplatform target platforms for matching
+configured projects.
+
+Behavior:
+
+- with no targets, lists every configured KMP project in declaration order
+- with explicit targets, resolves project IDs, repo IDs, or paths inside configured projects or repos
+- non-KMP projects are skipped rather than treated as errors
+
+The human-readable output is grouped by project and styled similarly to
+`project list`. The JSON output includes both the user-facing `platforms` list
+and the raw Gradle `targetKinds`.
+
+Examples:
+
+```bash
+wabbit-dev project targets
+wabbit-dev project targets jeeves
+wabbit-dev project targets ./jeeves/client
+wabbit-dev project targets jeeves --json
 ```
 
 ## Generation, Build, and Maintenance

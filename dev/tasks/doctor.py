@@ -609,6 +609,7 @@ PREFLIGHT_CHECKS: dict[str, tuple[str, ...]] = {
     "project/show": ("workspace-root", "root-clj", "root-private-clj", "config"),
     "project/deps": ("workspace-root", "root-clj", "root-private-clj", "config"),
     "project/repo": ("workspace-root", "root-clj", "root-private-clj", "config"),
+    "project/targets": ("workspace-root", "root-clj", "root-private-clj", "config"),
     "dep/graph": ("workspace-root", "root-clj", "root-private-clj", "config"),
     "dep/updates": ("workspace-root", "root-clj", "root-private-clj", "config"),
     "contributors/audit": (
@@ -647,6 +648,7 @@ DOCTOR_ONLY_GROUPS: dict[str, tuple[str, ...]] = {
             *PREFLIGHT_CHECKS["project/show"],
             *PREFLIGHT_CHECKS["project/deps"],
             *PREFLIGHT_CHECKS["project/repo"],
+            *PREFLIGHT_CHECKS["project/targets"],
         )
     ),
     "dep": _ordered_unique((*PREFLIGHT_CHECKS["dep/graph"], *PREFLIGHT_CHECKS["dep/updates"])),
