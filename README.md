@@ -105,19 +105,19 @@ Every command is documented here and in the MkDocs reference under
 | Command | What it does |
 | --- | --- |
 | `completion bash` / `completion zsh` | Prints shell completion scripts with dynamic command, target, and check-name completion. |
-| `doctor [--json]` | Diagnoses workspace, toolchain, and credential readiness. |
+| `doctor [TARGET ...] [--only CHECK_OR_COMMAND] [--json]` | Diagnoses workspace, toolchain, and credential readiness, optionally scoped to selected checks or targets. |
 | `config check` | Parses and validates `root.clj` and `root.private.clj`. |
-| `setup [TARGET ...]` | Generates or refreshes managed project files from configuration. |
+| `setup [TARGET ...] [--json]` | Generates or refreshes managed project files from configuration. |
 | `llmcopy PATH ...` | Copies file contents to the clipboard in an LLM-friendly wrapper. |
 | `dep graph [TARGET ...]` | Renders an SVG dependency graph for the workspace or selected configured targets. |
 | `dep updates` | Checks configured Maven libraries for newer upstream versions. |
 | `publish [TARGET ...] [--dry-run]` | Publishes configured projects in dependency order or prints the publish plan. |
-| `build [TARGET ...]` | Builds configured Gradle projects or syntax-checks Python projects. |
+| `build [TARGET ...] [--json]` | Builds configured Gradle projects or syntax-checks Python projects. |
 | `duplicates FOLDER ...` | Finds duplicate files and duplicate directory trees. |
 | `jitpack info GROUP ARTIFACT [VERSION]` | Shows refs, commits, versions, and build info for a JitPack artifact. |
 | `clean [TARGET ...]` | Deletes generated build and cache directories for configured projects. |
 | `cloc [TARGET ...]` | Runs `cloc` for configured targets or arbitrary filesystem paths. |
-| `status TARGET ...` | Shows tracked working-tree changes for configured or direct repo targets. |
+| `status TARGET ... [--json]` | Shows tracked working-tree changes for configured or direct repo targets. |
 | `commit [TARGET ...] [--dry-run]` | Runs PROD setup, stages changes, and creates commits, or prints the commit plan. |
 | `push [TARGET ...] [--dry-run]` | Pushes `origin/master` and tags, or prints the push plan. |
 | `project list` | Lists configured projects grouped by repository. |
@@ -203,7 +203,11 @@ HOST = "10.0.0.0"  # check:ignore E_HARDCODED_INTERNAL_HOSTNAME_IP value=10.0.0.
 The main target forms are:
 
 - `python3 dev.py doctor`
+- `python3 dev.py doctor --only publish app-wabbit-dev`
 - `python3 dev.py doctor --json`
+- `python3 dev.py build app-wabbit-dev --json`
+- `python3 dev.py setup app-wabbit-dev --json`
+- `python3 dev.py status app-wabbit-dev --json`
 - `python3 dev.py check --list`
 - `python3 dev.py check --list --json`
 - `python3 dev.py check --describe SpdxHeaderCheck`

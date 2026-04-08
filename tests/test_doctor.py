@@ -56,7 +56,19 @@ def test_preflight_for_command_prints_doctor_hint(monkeypatch: pytest.MonkeyPatc
     assert ok is False
     output = capsys.readouterr().out
     assert "Preflight checks failed for `build`." in output
-    assert "Run `dev.py doctor` for a full environment check." in output
+    assert "Run `dev.py doctor --only build` for targeted diagnostics" in output
+
+
+def test_resolve_doctor_check_ids_expands_command_groups() -> None:
+    from dev.tasks.doctor import resolve_doctor_check_ids
+
+    check_ids = resolve_doctor_check_ids(["publish", "gradle"])
+
+    assert "gradle" in check_ids
+    assert "publish-pypi" in check_ids
+    assert "publish-maven-central" in check_ids
+    assert "publish-intellij" in check_ids
+    assert "publish-jitpack" in check_ids
 
 
 def test_doctor_json_output_includes_summary(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -86,7 +98,39 @@ def test_doctor_json_output_includes_summary(monkeypatch: pytest.MonkeyPatch, ca
 
     assert result == 0
     output = capsys.readouterr().out
+    assert '"selectedTargets": []' in output
+    assert '"resolvedChecks"' in output
     assert '"summary"' in output
     assert '"pass": 1' in output
     assert '"warn": 1' in output
     assert '"findings"' in output
+
+
+def test_doctor_json_output_includes_only_and_targets(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import dev.tasks.doctor as doctor_task
+    from dev.tasks.doctor import DoctorFinding, DoctorStatus
+
+    monkeypatch.setattr(
+        doctor_task,
+        "collect_doctor_findings",
+        lambda *, check_ids, ctx=None: [
+            DoctorFinding(
+                key=check_ids[0],
+                label="Gradle",
+                status=DoctorStatus.PASS,
+                detail="Found Gradle.",
+            )
+        ],
+    )
+
+    result = doctor_task.doctor(json_output=True, only=["build"], targets=["app-wabbit-dev"])
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert '"requestedOnly": [' in output
+    assert '"build"' in output
+    assert '"selectedTargets": [' in output
+    assert '"app-wabbit-dev"' in output

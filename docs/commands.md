@@ -41,19 +41,19 @@ configured projects that belong to that repo.
 | Command | Summary |
 | --- | --- |
 | `completion bash` / `completion zsh` | Print shell completion scripts with dynamic command, target, and check-name completion. |
-| `doctor [--json]` | Diagnose workspace, toolchain, and credential readiness. |
+| `doctor [TARGET ...] [--only CHECK_OR_COMMAND] [--json]` | Diagnose workspace, toolchain, and credential readiness. |
 | `config check` | Parse and validate `root.clj` and `root.private.clj`. |
-| `setup [TARGET ...]` | Generate or refresh managed project files. |
+| `setup [TARGET ...] [--json]` | Generate or refresh managed project files. |
 | `llmcopy PATH ...` | Copy file contents to the clipboard in an LLM-friendly wrapper. |
 | `dep graph [TARGET ...]` | Render an SVG dependency graph. |
 | `dep updates` | Check configured Maven libraries for newer versions. |
 | `publish [TARGET ...] [--dry-run]` | Publish configured projects in dependency order or print the publish plan. |
-| `build [TARGET ...]` | Build Gradle projects or syntax-check Python projects. |
+| `build [TARGET ...] [--json]` | Build Gradle projects or syntax-check Python projects. |
 | `duplicates FOLDER ...` | Find duplicate files and duplicate directory trees. |
 | `jitpack info GROUP ARTIFACT [VERSION]` | Show refs, commits, versions, and build info from JitPack. |
 | `clean [TARGET ...]` | Remove generated build and cache directories. |
 | `cloc [TARGET ...]` | Run `cloc` for configured targets or direct paths. |
-| `status TARGET ...` | Show tracked working-tree changes for repo targets. |
+| `status TARGET ... [--json]` | Show tracked working-tree changes for repo targets. |
 | `commit [TARGET ...] [--dry-run]` | Run PROD setup, stage changes, and create commits, or print the commit plan. |
 | `push [TARGET ...] [--dry-run]` | Push `origin/master` and tags, or print the push plan. |
 | `project list` | List configured projects grouped by repository. |
@@ -109,6 +109,8 @@ they can complete:
 
 ```bash
 wabbit-dev doctor
+wabbit-dev doctor app-wabbit-dev
+wabbit-dev doctor --only publish app-wabbit-dev
 wabbit-dev doctor --json
 ```
 
@@ -129,6 +131,14 @@ The CLI also reuses a subset of these checks as preflight for commands such as
 
 Use `--json` when you want a machine-readable report for editor integrations,
 scripts, or CI diagnostics.
+
+Use `--only` to narrow the report to either:
+
+- one or more raw check IDs such as `gradle`, `config`, or `publish-pypi`
+- one or more command readiness groups such as `build`, `publish`, or `commit`
+
+Optional targets scope project- and publish-related checks to the selected
+project closure.
 
 ## Configuration and Inventory
 
@@ -235,7 +245,7 @@ wabbit-dev project repo jeeves --json
 ### `setup`
 
 ```bash
-wabbit-dev setup [--dev] [--local] [TARGET ...]
+wabbit-dev setup [--dev] [--local] [--json] [TARGET ...]
 ```
 
 Generates or refreshes managed files from configuration.
@@ -248,6 +258,7 @@ Behavior:
 - in default mode, runs PROD setup
 - with `--dev`, switches to DEV mode
 - with `--local`, switches to LOCAL mode and writes local dependency overlays
+- with `--json`, emits a machine-readable summary while progress logs go to stderr
 
 Typical uses:
 
@@ -256,12 +267,13 @@ wabbit-dev setup
 wabbit-dev setup app-wabbit-dev
 wabbit-dev setup jeeves
 wabbit-dev setup --local app-datatron
+wabbit-dev setup app-wabbit-dev --json
 ```
 
 ### `build`
 
 ```bash
-wabbit-dev build [TARGET ...]
+wabbit-dev build [TARGET ...] [--json]
 ```
 
 Builds configured projects in topological dependency order.
@@ -272,6 +284,9 @@ Project type behavior:
 - Python projects: syntax-check discovered `.py` files with `py_compile`
 
 Only Gradle and Python projects are buildable through this command.
+
+Use `--json` to emit the resolved targets, topological build order, per-project
+results, and a summary count.
 
 ### `clean`
 
@@ -516,7 +531,7 @@ loaded workspace config.
 ### `status`
 
 ```bash
-wabbit-dev status TARGET ...
+wabbit-dev status TARGET ... [--json]
 ```
 
 Shows tracked working-tree changes for:
@@ -527,6 +542,9 @@ Shows tracked working-tree changes for:
 
 This command reports tracked files that differ between the index and working
 tree. It does not list untracked files.
+
+Use `--json` to emit a per-repo list of tracked changes for scripts or editor
+integrations.
 
 ### `commit`
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -121,3 +122,55 @@ def test_build_publishes_local_compiler_plugin_before_build(tmp_path: Path, monk
             ["gradle", "--no-daemon", "build"],
         ),
     ]
+
+
+def test_build_json_output_reports_python_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    from mu.parser import parse
+
+    import dev.tasks.build as build_module
+    from dev.config import Config, OwnershipType, PythonProject
+
+    project_path = tmp_path / "alpha"
+    project_path.mkdir()
+    (project_path / "main.py").write_text("print('ok')\n", encoding="utf-8")
+
+    project = PythonProject(
+        path=project_path,
+        name="alpha",
+        version=None,
+        description=None,
+        authors=[],
+        license=None,
+        github_repo=None,
+        requires_python=None,
+        dependencies=[],
+        dev_dependencies=[],
+        scripts=[],
+        application=None,
+        homepage=None,
+        repository=None,
+        keywords=[],
+        classifiers=[],
+        quarantine=False,
+        publish=False,
+        ownership=OwnershipType.WABBIT,
+        project_id="alpha",
+    )
+
+    config = Config(raw=parse("()"))
+    config.defined_projects["alpha"] = project
+
+    monkeypatch.setattr(build_module, "load_config", lambda: config)
+    monkeypatch.setattr(build_module, "resolve_project_ids", lambda _config, targets: ["alpha"])
+    monkeypatch.setattr(build_module, "toposort_projects", lambda _projects, target_project=None: ["alpha"])
+
+    result = build_module.build(["alpha"], json_output=True)
+
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["requestedTargets"] == ["alpha"]
+    assert payload["resolvedTargets"] == ["alpha"]
+    assert payload["topologicalOrder"] == ["alpha"]
+    assert payload["results"][0]["projectId"] == "alpha"
+    assert payload["results"][0]["status"] == "success"
+    assert payload["results"][0]["sourceCount"] == 1

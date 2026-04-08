@@ -4,13 +4,14 @@ import json
 import os
 import shutil
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dev.config import GradleProject, IntellijPlugin, PythonProject, load_config
+from dev.discoverability import unknown_name_message
 from dev.messages import error, info, success, warning
 from dev.repo_resolution import resolve_project_ids
 
@@ -627,6 +628,52 @@ DRY_RUN_PREFLIGHT_CHECKS: dict[str, tuple[str, ...]] = {
 }
 
 
+def _ordered_unique(values: Sequence[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return tuple(result)
+
+
+DOCTOR_ONLY_GROUPS: dict[str, tuple[str, ...]] = {
+    **PREFLIGHT_CHECKS,
+    "project": _ordered_unique(
+        (
+            *PREFLIGHT_CHECKS["project/list"],
+            *PREFLIGHT_CHECKS["project/show"],
+            *PREFLIGHT_CHECKS["project/deps"],
+            *PREFLIGHT_CHECKS["project/repo"],
+        )
+    ),
+    "dep": _ordered_unique((*PREFLIGHT_CHECKS["dep/graph"], *PREFLIGHT_CHECKS["dep/updates"])),
+}
+
+
+def doctor_only_choices() -> tuple[str, ...]:
+    return tuple(sorted({*CHECKS, *DOCTOR_ONLY_GROUPS}))
+
+
+def resolve_doctor_check_ids(only: Sequence[str] | None = None) -> tuple[str, ...]:
+    if not only:
+        return FULL_CHECK_ORDER
+
+    resolved: list[str] = []
+    choices = doctor_only_choices()
+    for value in only:
+        if value in CHECKS:
+            resolved.append(value)
+            continue
+        if value in DOCTOR_ONLY_GROUPS:
+            resolved.extend(DOCTOR_ONLY_GROUPS[value])
+            continue
+        raise ValueError(unknown_name_message("doctor check or command", value, choices))
+    return _ordered_unique(resolved)
+
+
 def collect_doctor_findings(
     *,
     check_ids: tuple[str, ...] = FULL_CHECK_ORDER,
@@ -648,7 +695,13 @@ def _emit_finding(finding: DoctorFinding) -> None:
         info(f"Fix: {finding.fix}")
 
 
-def doctor_payload(findings: list[DoctorFinding], *, ctx: DoctorContext | None = None) -> dict[str, object]:
+def doctor_payload(
+    findings: list[DoctorFinding],
+    *,
+    ctx: DoctorContext | None = None,
+    check_ids: Sequence[str] | None = None,
+    requested_only: Sequence[str] | None = None,
+) -> dict[str, object]:
     active_ctx = DoctorContext() if ctx is None else ctx
     failures = sum(1 for finding in findings if finding.status == DoctorStatus.FAIL)
     warnings_count = sum(1 for finding in findings if finding.status == DoctorStatus.WARN)
@@ -656,6 +709,9 @@ def doctor_payload(findings: list[DoctorFinding], *, ctx: DoctorContext | None =
 
     return {
         "cwd": str(active_ctx.cwd.resolve()),
+        "selectedTargets": list(active_ctx.selected_targets or ()),
+        "requestedOnly": list(requested_only or ()),
+        "resolvedChecks": list(check_ids or FULL_CHECK_ORDER),
         "summary": {
             "total": len(findings),
             "pass": passes,
@@ -675,14 +731,30 @@ def doctor_payload(findings: list[DoctorFinding], *, ctx: DoctorContext | None =
     }
 
 
-def doctor(*, json_output: bool = False) -> int:
-    ctx = DoctorContext()
-    findings = collect_doctor_findings(ctx=ctx)
+def doctor(
+    *,
+    json_output: bool = False,
+    only: Sequence[str] | None = None,
+    targets: Sequence[str] | None = None,
+) -> int:
+    check_ids = resolve_doctor_check_ids(only)
+    ctx = DoctorContext(selected_targets=tuple(targets) if targets else None)
+    findings = collect_doctor_findings(check_ids=check_ids, ctx=ctx)
     failures = sum(1 for finding in findings if finding.status == DoctorStatus.FAIL)
     warnings_count = sum(1 for finding in findings if finding.status == DoctorStatus.WARN)
 
     if json_output:
-        print(json.dumps(doctor_payload(findings, ctx=ctx), indent=2))
+        print(
+            json.dumps(
+                doctor_payload(
+                    findings,
+                    ctx=ctx,
+                    check_ids=check_ids,
+                    requested_only=only,
+                ),
+                indent=2,
+            )
+        )
         return 1 if failures else 0
 
     for finding in findings:
@@ -721,7 +793,11 @@ def preflight_for_command(
     error(f"Preflight checks failed for `{command_path}`.")
     for finding in failures:
         _emit_finding(finding)
-    info(f"Run `{prog} doctor` for a full environment check.")
+    target_suffix = f" {' '.join(projects)}" if projects else ""
+    info(
+        f"Run `{prog} doctor --only {command_path}{target_suffix}` for targeted diagnostics, "
+        f"or `{prog} doctor` for a full environment check."
+    )
     return False
 
 
@@ -731,6 +807,8 @@ __all__ = [
     "DoctorStatus",
     "collect_doctor_findings",
     "doctor",
+    "doctor_only_choices",
     "doctor_payload",
     "preflight_for_command",
+    "resolve_doctor_check_ids",
 ]

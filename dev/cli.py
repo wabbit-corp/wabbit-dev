@@ -380,13 +380,36 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         ),
         epilog=examples(
             "doctor",
+            "doctor app-wabbit-dev",
+            "doctor --only publish app-wabbit-dev",
+            "doctor --only gradle --only config",
             "doctor --json",
             notes=[
                 "Use this when a command fails due to missing config, tools, or credentials.",
+                "Targets scope project- and publish-related checks to the selected project closure.",
+                "`--only` accepts either raw check IDs such as `gradle` or command groups such as `build`, `publish`, or `commit`.",
                 "Use `--json` for scripts, editor integrations, or CI diagnostics.",
             ],
         ),
     ) as cmd:
+        _add_argument(
+            cmd,
+            "targets",
+            metavar="TARGET",
+            type=str,
+            nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
+            help="Optional project IDs, repo IDs, or paths used to scope project-related checks.",
+        )
+        _add_argument(
+            cmd,
+            "--only",
+            action="append",
+            metavar="CHECK_OR_COMMAND",
+            completion_kind="doctor-only",
+            help="Limit the report to one check ID or command readiness group. Repeatable.",
+        )
         cmd.add_argument(
             "--json",
             action="store_true",
@@ -439,6 +462,11 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "--local",
             action="store_true",
             help="Run setup in LOCAL mode and generate local dependency overlays.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit a machine-readable setup summary instead of human-oriented progress output.",
         )
 
     with commands(
@@ -613,6 +641,11 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             completion_kind="project-target",
             completion_allow_files=True,
             help="Project IDs, repo IDs, or paths. Omit to build every buildable configured project.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit a machine-readable build report instead of human-oriented progress output.",
         )
 
     with commands(
@@ -825,6 +858,11 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             completion_kind="repo-target",
             completion_allow_files=True,
             help="Repo IDs, project IDs, or paths inside git repositories.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit repo status details as JSON instead of human-oriented text.",
         )
 
     with commands(
@@ -1303,7 +1341,7 @@ async def async_main() -> int:
             case "doctor":
                 from dev.tasks.doctor import doctor
 
-                exit_code = doctor(json_output=args.json)
+                exit_code = doctor(json_output=args.json, only=args.only, targets=args.targets)
 
             case "config/check":
                 from dev.tasks.check_config import check_config
@@ -1319,7 +1357,7 @@ async def async_main() -> int:
                     mode = RepoSetupMode.DEV
                 else:
                     mode = RepoSetupMode.PROD
-                setup(mode, projects=args.targets)
+                exit_code = setup(mode, projects=args.targets, json_output=args.json)
 
             case "llmcopy":
                 from dev.tasks.llmcopy import llmcopy
@@ -1352,7 +1390,7 @@ async def async_main() -> int:
             case "build":
                 from dev.tasks.build import build
 
-                build(args.targets)
+                exit_code = build(args.targets, json_output=args.json)
 
             case "duplicates":
                 from dev.tasks.duplicates import check_for_duplicates
@@ -1380,7 +1418,7 @@ async def async_main() -> int:
             case "status":
                 from dev.tasks.status import status
 
-                status(args.targets)
+                exit_code = status(args.targets, json_output=args.json)
 
             case "commit":
                 from dev.tasks.commit import commit

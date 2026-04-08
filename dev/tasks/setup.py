@@ -1,6 +1,9 @@
 import dataclasses
 import io
+import json
 import os
+import sys
+from contextlib import nullcontext, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1223,152 +1226,204 @@ def setup(
     interactive: bool = True,
     project: str | None = None,
     projects: list[str] | None = None,
-) -> None:
-    config = load_config()
-    ctx = create_repo_setup_context(config, mode)
-
+    json_output: bool = False,
+) -> int:
     selected_projects_input = projects if projects is not None else ([project] if project is not None else None)
     if selected_projects_input == []:
         selected_projects_input = None
 
-    if selected_projects_input is None:
-        selected_project_names = list(config.defined_projects.keys())
-    else:
-        from dev.repo_resolution import resolve_project_ids
+    payload: dict[str, object] = {
+        "mode": mode.value,
+        "requestedTargets": list(selected_projects_input or []),
+        "selectedProjectIds": [],
+        "projects": [],
+        "workspaceGradleRootWritten": False,
+        "repoGradleRootsWritten": [],
+        "localOverlayRootsWritten": [],
+        "localOverlayRootsRemoved": [],
+        "unexpectedDirectories": [],
+    }
 
-        try:
-            resolved_project_ids = resolve_project_ids(config, selected_projects_input)
-        except ValueError as ex:
-            error(str(ex))
-            return
-        selected_project_names = toposort_projects(config.defined_projects, target_project=resolved_project_ids)
+    def project_payload(project_item: Project | object) -> dict[str, object]:
+        path = getattr(project_item, "path", None)
+        project_id = getattr(project_item, "project_id", None)
+        return {
+            "projectId": project_id or getattr(project_item, "name", str(path)),
+            "path": str(path.resolve()) if isinstance(path, Path) else None,
+            "repoId": getattr(project_item, "repo_id", None),
+            "type": type(project_item).__name__.removesuffix("Project").lower(),
+        }
 
-    selected_projects = [config.defined_projects[name] for name in selected_project_names]
+    def run() -> int:
+        config = load_config()
+        ctx = create_repo_setup_context(config, mode)
 
-    if selected_projects_input is None:
-        info(f"Setting up projects in {mode.value} mode")
-    else:
-        if len(selected_projects_input) == 1:
-            target_label = selected_projects_input[0]
-        else:
-            target_label = ", ".join(selected_projects_input)
-        info(f"Setting up {target_label} and its dependencies in {mode.value} mode")
-
-    gradle_projects = [project_item for project_item in selected_projects if isinstance(project_item, GradleProject)]
-    if gradle_projects:
         if selected_projects_input is None:
-            workspace_seed_projects = gradle_projects
-            workspace_root_name = config.default_maven_project_group or "workspace"
-            _write_gradle_root_files(
+            selected_project_names = list(config.defined_projects.keys())
+        else:
+            from dev.repo_resolution import resolve_project_ids
+
+            try:
+                resolved_project_ids = resolve_project_ids(config, selected_projects_input)
+            except ValueError as ex:
+                payload["error"] = str(ex)
+                error(str(ex))
+                return 1
+            selected_project_names = toposort_projects(config.defined_projects, target_project=resolved_project_ids)
+
+        payload["selectedProjectIds"] = list(selected_project_names)
+        selected_projects = [config.defined_projects[name] for name in selected_project_names]
+        payload["projects"] = [project_payload(project_item) for project_item in selected_projects]
+
+        if selected_projects_input is None:
+            info(f"Setting up projects in {mode.value} mode")
+        else:
+            if len(selected_projects_input) == 1:
+                target_label = selected_projects_input[0]
+            else:
+                target_label = ", ".join(selected_projects_input)
+            info(f"Setting up {target_label} and its dependencies in {mode.value} mode")
+
+        gradle_projects = [project_item for project_item in selected_projects if isinstance(project_item, GradleProject)]
+        if gradle_projects:
+            if selected_projects_input is None:
+                workspace_seed_projects = gradle_projects
+                workspace_root_name = config.default_maven_project_group or "workspace"
+                payload["workspaceGradleRootWritten"] = True
+                _write_gradle_root_files(
+                    ctx,
+                    root_path=Path("."),
+                    root_project_name=workspace_root_name,
+                    seed_projects=workspace_seed_projects,
+                    write_wrapper=False,
+                    write_build=True,
+                    include_external_dependencies=mode == RepoSetupMode.LOCAL,
+                    write_dependency_substitutions=mode == RepoSetupMode.LOCAL,
+                )
+
+            repo_ids_to_write = {
+                project_item.repo_id
+                for project_item in gradle_projects
+                if project_item.repo_id is not None and project_item.effective_gradle_root != Path(".")
+            }
+            repo_gradle_roots_written: list[str] = []
+            for repo_id in sorted(repo_ids_to_write):
+                representative_project = next(
+                    (
+                        defined_project
+                        for defined_project in config.defined_projects.values()
+                        if isinstance(defined_project, GradleProject) and defined_project.repo_id == repo_id
+                    ),
+                    None,
+                )
+                if representative_project is None:
+                    continue
+                repo_gradle_roots_written.append(str(representative_project.effective_gradle_root.resolve()))
+                setup_gradle_repo_root(ctx, representative_project)
+            payload["repoGradleRootsWritten"] = repo_gradle_roots_written
+
+        for setup_project_item in selected_projects:
+            setup_project(
                 ctx,
-                root_path=Path("."),
-                root_project_name=workspace_root_name,
-                seed_projects=workspace_seed_projects,
-                write_wrapper=False,
-                write_build=True,
-                include_external_dependencies=mode == RepoSetupMode.LOCAL,
-                write_dependency_substitutions=mode == RepoSetupMode.LOCAL,
+                setup_project_item,
+                interactive=interactive,
+                commit_changes=False,
+                allow_push=False,
             )
 
-        repo_ids_to_write = {
-            project_item.repo_id
-            for project_item in gradle_projects
-            if project_item.repo_id is not None and project_item.effective_gradle_root != Path(".")
-        }
-        for repo_id in sorted(repo_ids_to_write):
-            representative_project = next(
-                (
+        if mode == RepoSetupMode.LOCAL:
+            local_overlay_roots_written: list[str] = []
+            repo_ids_to_overlay = {
+                project_item.repo_id
+                for project_item in gradle_projects
+                if project_item.repo_id is not None and project_item.effective_gradle_root != Path(".")
+            }
+            for repo_id in sorted(repo_ids_to_overlay):
+                repo_definition = config.defined_repos.get(repo_id)
+                if repo_definition is None:
+                    continue
+                repo_gradle_projects = [
                     defined_project
                     for defined_project in config.defined_projects.values()
                     if isinstance(defined_project, GradleProject) and defined_project.repo_id == repo_id
-                ),
-                None,
-            )
-            if representative_project is None:
-                continue
-            setup_gradle_repo_root(ctx, representative_project)
+                ]
+                if not repo_gradle_projects:
+                    continue
+                local_overlay_roots_written.append(str(repo_definition.path.resolve()))
+                _write_gradle_local_overlay(
+                    ctx,
+                    root_path=repo_definition.path,
+                    seed_projects=repo_gradle_projects,
+                )
 
-    for setup_project_item in selected_projects:
-        setup_project(
-            ctx,
-            setup_project_item,
-            interactive=interactive,
-            commit_changes=False,
-            allow_push=False,
-        )
-
-    if mode == RepoSetupMode.LOCAL:
-        repo_ids_to_overlay = {
-            project_item.repo_id
-            for project_item in gradle_projects
-            if project_item.repo_id is not None and project_item.effective_gradle_root != Path(".")
-        }
-        for repo_id in sorted(repo_ids_to_overlay):
-            repo_definition = config.defined_repos.get(repo_id)
-            if repo_definition is None:
-                continue
-            repo_gradle_projects = [
-                defined_project
-                for defined_project in config.defined_projects.values()
-                if isinstance(defined_project, GradleProject) and defined_project.repo_id == repo_id
+            standalone_gradle_projects = [
+                project_item
+                for project_item in selected_projects
+                if isinstance(project_item, GradleProject) and project_item.effective_gradle_root == project_item.path
             ]
-            if not repo_gradle_projects:
-                continue
-            _write_gradle_local_overlay(
-                ctx,
-                root_path=repo_definition.path,
-                seed_projects=repo_gradle_projects,
-            )
+            for standalone_project in standalone_gradle_projects:
+                local_overlay_roots_written.append(str(standalone_project.path.resolve()))
+                _write_gradle_local_overlay(
+                    ctx,
+                    root_path=standalone_project.path,
+                    seed_projects=[standalone_project],
+                )
+            payload["localOverlayRootsWritten"] = local_overlay_roots_written
+        else:
+            overlay_roots: set[Path] = set()
+            if selected_projects_input is None and gradle_projects:
+                overlay_roots.add(Path("."))
+            overlay_roots.update(project_item.effective_gradle_root for project_item in gradle_projects)
+            payload["localOverlayRootsRemoved"] = [str(overlay_root.resolve()) for overlay_root in sorted(overlay_roots)]
+            for overlay_root in sorted(overlay_roots):
+                _delete_gradle_local_overlay(root_path=overlay_root)
 
-        standalone_gradle_projects = [
-            project_item
-            for project_item in selected_projects
-            if isinstance(project_item, GradleProject) and project_item.effective_gradle_root == project_item.path
-        ]
-        for standalone_project in standalone_gradle_projects:
-            _write_gradle_local_overlay(
-                ctx,
-                root_path=standalone_project.path,
-                seed_projects=[standalone_project],
-            )
-    else:
-        overlay_roots: set[Path] = set()
-        if selected_projects_input is None and gradle_projects:
-            overlay_roots.add(Path("."))
-        overlay_roots.update(project_item.effective_gradle_root for project_item in gradle_projects)
-        for overlay_root in sorted(overlay_roots):
-            _delete_gradle_local_overlay(root_path=overlay_root)
+        if selected_projects_input is None:
+            project_dirs: list[str] = []
+            for project_item in selected_projects:
+                relative_parts = project_item.path.parts
+                if relative_parts and relative_parts[0] == ".":
+                    relative_parts = relative_parts[1:]
+                if relative_parts:
+                    project_dirs.append(relative_parts[0])
+            ignored_dirs = [
+                "build",
+                ".gradle",
+                "gradle",
+                ".idea",
+                ".git",
+                ".idea",
+                ".vscode",
+                ".venv",
+                ".llm",
+                ".kotlin",
+                ".ipynb_checkpoints",
+            ]
 
-    if selected_projects_input is None:
-        project_dirs: list[str] = []
-        for project_item in selected_projects:
-            relative_parts = project_item.path.parts
-            if relative_parts and relative_parts[0] == ".":
-                relative_parts = relative_parts[1:]
-            if relative_parts:
-                project_dirs.append(relative_parts[0])
-        ignored_dirs = [
-            "build",
-            ".gradle",
-            "gradle",
-            ".idea",
-            ".git",
-            ".idea",
-            ".vscode",
-            ".venv",
-            ".llm",
-            ".kotlin",
-            ".ipynb_checkpoints",
-        ]
+            def is_ignored_dir(dir: Path) -> bool:
+                return dir.name in ignored_dirs or dir.name.startswith("tmp.")
 
-        def is_ignored_dir(dir: Path) -> bool:
-            return dir.name in ignored_dirs or dir.name.startswith("tmp.")
+            unexpected_directories: list[str] = []
+            for dir in sorted(Path(".").iterdir()):
+                if dir.is_dir() and dir.name not in project_dirs and not is_ignored_dir(dir):
+                    unexpected_directories.append(str(dir.resolve()))
+                    warning(f"Found unexpected directory: {dir}")
+            payload["unexpectedDirectories"] = unexpected_directories
 
-        for dir in sorted(Path(".").iterdir()):
-            if dir.is_dir() and dir.name not in project_dirs and not is_ignored_dir(dir):
-                warning(f"Found unexpected directory: {dir}")
+        payload["summary"] = {
+            "selectedProjectCount": len(selected_project_names),
+            "gradleProjectCount": len(gradle_projects),
+        }
+        info("All projects set up complete.")
+        return 0
 
-    info("All projects set up complete.")
+    output_context = redirect_stdout(sys.stderr) if json_output else nullcontext()
+    with output_context:
+        exit_code = run()
+
+    if json_output:
+        print(json.dumps(payload, indent=2))
+    return exit_code
 
 
 __all__ = [

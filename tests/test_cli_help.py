@@ -115,8 +115,10 @@ async def test_cli_doctor_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
 
     called: list[str] = []
 
-    def fake_doctor(*, json_output: bool = False) -> int:
+    def fake_doctor(*, json_output: bool = False, only=None, targets=None) -> int:
         assert json_output is False
+        assert only is None
+        assert targets == []
         called.append("called")
         return 0
 
@@ -127,6 +129,27 @@ async def test_cli_doctor_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result == 0
     assert called == ["called"]
+
+
+@pytest.mark.asyncio
+async def test_cli_doctor_dispatches_only_and_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import doctor as doctor_task
+
+    called: list[tuple[list[str] | None, list[str] | None]] = []
+
+    def fake_doctor(*, json_output: bool = False, only=None, targets=None) -> int:
+        assert json_output is False
+        called.append((only, targets))
+        return 0
+
+    monkeypatch.setattr(doctor_task, "doctor", fake_doctor)
+    monkeypatch.setattr("sys.argv", ["dev.py", "doctor", "--only", "publish", "app-wabbit-dev"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [(["publish"], ["app-wabbit-dev"])]
 
 
 @pytest.mark.asyncio
@@ -151,7 +174,7 @@ async def test_cli_doctor_prints_next_steps(monkeypatch: pytest.MonkeyPatch, cap
     from dev import cli
     from dev.tasks import doctor as doctor_task
 
-    monkeypatch.setattr(doctor_task, "doctor", lambda *, json_output=False: 0)
+    monkeypatch.setattr(doctor_task, "doctor", lambda *, json_output=False, only=None, targets=None: 0)
     monkeypatch.setattr("sys.argv", ["dev.py", "doctor"])
 
     result = await cli.async_main()
@@ -170,7 +193,7 @@ async def test_cli_doctor_json_suppresses_next_steps(
     from dev import cli
     from dev.tasks import doctor as doctor_task
 
-    def fake_doctor(*, json_output: bool = False) -> int:
+    def fake_doctor(*, json_output: bool = False, only=None, targets=None) -> int:
         assert json_output is True
         print("{}")
         return 0

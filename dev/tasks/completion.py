@@ -9,6 +9,7 @@ from pathlib import Path
 from dev.cli import build_parser
 from dev.config import Config, load_config
 from dev.tasks.check import list_check_names
+from dev.tasks.doctor import doctor_only_choices
 
 _ALLOW_FILES_PREFIX = "__wabbit_dev_allow_files__="
 
@@ -74,6 +75,8 @@ def _candidates_for_kind(kind: str | None, config: Config | None) -> tuple[str, 
         return _check_target_candidates(config)
     if kind == "check-name":
         return tuple(list_check_names(config))
+    if kind == "doctor-only":
+        return doctor_only_choices()
     return ()
 
 

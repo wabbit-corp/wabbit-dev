@@ -113,3 +113,14 @@ def test_completion_reply_suggests_push_targets_and_dot(monkeypatch) -> None:
 
     assert reply.allow_files is True
     assert reply.candidates == (".", "app-wabbit-dev", "jeeves")
+
+
+def test_completion_reply_suggests_doctor_only_values(monkeypatch) -> None:
+    import dev.tasks.completion as completion_task
+
+    monkeypatch.setattr(completion_task, "doctor_only_choices", lambda: ("build", "gradle", "publish"))
+
+    reply = completion_task.get_completion_reply(["wabbit-dev", "doctor", "--only", ""], 3)
+
+    assert reply.allow_files is False
+    assert reply.candidates == ("build", "gradle", "publish")
