@@ -270,6 +270,55 @@ def test_render_python_pyproject_ignores_gitignored_packages(tmp_path: Path) -> 
     assert "scratch" not in rendered
 
 
+def test_render_python_pyproject_includes_standard_sdist_policy(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    from dev.tasks.setup import render_python_pyproject
+
+    project_path = tmp_path / "demo"
+    project_path.mkdir(parents=True, exist_ok=True)
+    (project_path / "README.md").write_text("# demo\n", encoding="utf-8")
+    (project_path / "CHANGELOG.md").write_text("# changelog\n", encoding="utf-8")
+    (project_path / ".codespell-ignore-words.txt").write_text("codex\n", encoding="utf-8")
+    (project_path / "docs").mkdir()
+    (project_path / "scripts").mkdir()
+    (project_path / "tests").mkdir()
+    (project_path / "demo").mkdir(parents=True, exist_ok=True)
+    (project_path / "demo" / "__init__.py").write_text("", encoding="utf-8")
+
+    project = _make_python_project_for_render(project_path)
+    rendered = render_python_pyproject(
+        _make_render_context(
+            '[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n'
+            "{% if packages_toml %}packages = {{ packages_toml }}\n{% endif %}"
+            "include = {{ include_toml }}\n"
+            "exclude = {{ exclude_toml }}\n"
+            "[tool.check-manifest]\n"
+            "ignore = {{ check_manifest_ignore_toml }}\n"
+            '[tool.poetry.dependencies]\npython = "{{ python_version }}"\n'
+        ),
+        project,
+    )
+
+    parsed = tomllib.loads(rendered)
+    include_paths = {entry["path"] for entry in parsed["tool"]["poetry"]["include"]}
+    exclude_patterns = set(parsed["tool"]["poetry"]["exclude"])
+    check_manifest_ignore = set(parsed["tool"]["check-manifest"]["ignore"])
+
+    assert "README.md" in include_paths
+    assert "CHANGELOG.md" in include_paths
+    assert ".codespell-ignore-words.txt" in include_paths
+    assert "docs" in include_paths
+    assert "scripts" in include_paths
+    assert "tests" in include_paths
+    assert ".llm/**" in exclude_patterns
+    assert "docs-research/**" in exclude_patterns
+    assert ".github/**" in check_manifest_ignore
+    assert ".gitignore" in check_manifest_ignore
+    assert "docs-research/**" in check_manifest_ignore
+
+
 def test_default_deptry_map_includes_common_python_package_aliases(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))

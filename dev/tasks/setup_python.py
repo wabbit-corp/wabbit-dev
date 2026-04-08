@@ -21,6 +21,11 @@ from dev.config import Config, PythonProject
 from dev.generated_files import is_setup_managed_file, prepend_generated_comment, stamp_managed_text
 from dev.licenses import canonicalize_license_key, python_spdx_for_license
 from dev.messages import warning
+from dev.python_sdist_policy import (
+    python_check_manifest_ignore_patterns,
+    python_sdist_exclude_patterns,
+    python_sdist_include_entries,
+)
 from dev.tasks.setup_common import (
     clean_text,
     render_template,
@@ -261,6 +266,36 @@ def _toml_inline_table_list_map(map_data: dict[str, list[str]]) -> str:
         return "{}"
     parts = [f'"{key}" = {_toml_list(map_data[key])}' for key in map_data.keys()]
     return "{ " + ", ".join(parts) + " }"
+
+
+def _toml_inline_table_array(entries: list[dict[str, object]]) -> str:
+    if not entries:
+        return "[]"
+
+    lines = ["["]
+    for entry in entries:
+        parts: list[str] = []
+        for key, value in entry.items():
+            if isinstance(value, str):
+                parts.append(f'{key} = "{value}"')
+            elif isinstance(value, list):
+                assert all(isinstance(item, str) for item in value)
+                parts.append(f"{key} = {_toml_list(list(value))}")
+            else:
+                raise TypeError(f"Unsupported TOML inline table value: {type(value).__name__}")
+        lines.append("    { " + ", ".join(parts) + " },")
+    lines.append("]")
+    return "\n".join(lines)
+
+
+def _toml_string_array(items: list[str]) -> str:
+    if not items:
+        return "[]"
+    lines = ["["]
+    for item in items:
+        lines.append(f'    "{item}",')
+    lines.append("]")
+    return "\n".join(lines)
 
 
 def _format_toml_key(key: str) -> str:
@@ -564,6 +599,14 @@ def render_python_pyproject(ctx: PythonSetupContext, project: PythonProject) -> 
     if packages:
         package_entries = ", ".join([f'{{ include = "{name}" }}' for name in packages])
         packages_toml = f"[{package_entries}]"
+    sdist_include_entries = [
+        {
+            "path": entry.path,
+            "format": list(entry.formats),
+        }
+        for entry in python_sdist_include_entries(project.path)
+    ]
+    sdist_exclude_patterns = python_sdist_exclude_patterns(project.path)
 
     test_paths = _discover_test_paths(project.path)
     if not test_paths:
@@ -665,6 +708,9 @@ def render_python_pyproject(ctx: PythonSetupContext, project: PythonProject) -> 
         "keywords_toml": _toml_list(keywords) if keywords else "",
         "classifiers_toml": _toml_list(classifiers),
         "packages_toml": packages_toml,
+        "include_toml": _toml_inline_table_array(sdist_include_entries),
+        "exclude_toml": _toml_string_array(sdist_exclude_patterns),
+        "check_manifest_ignore_toml": _toml_string_array(python_check_manifest_ignore_patterns(project.path)),
         "python_version": requires_python,
         "dependencies_block": "\n".join(dependencies_lines),
         "dev_dependencies_block": "\n".join(dev_dependencies_lines),

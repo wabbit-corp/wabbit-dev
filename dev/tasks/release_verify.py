@@ -11,11 +11,14 @@ import zipfile
 from contextlib import nullcontext, redirect_stdout
 from email import policy
 from email.parser import BytesParser
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 
 from dev.build_order import toposort_projects
 from dev.config import (
     DataProject,
+    Dependency,
+    DependencyTarget,
     GradleProject,
     PremakeProject,
     Project,
@@ -24,9 +27,13 @@ from dev.config import (
     load_config,
 )
 from dev.failure_context import contextualize_failure
+from dev.maven import MavenMetadata
 from dev.messages import error, info, success, warning
+from dev.python_sdist_policy import python_check_manifest_ignore_patterns
 from dev.repo_resolution import inferred_project_targets, resolve_project_ids
 from dev.tasks.publish import determine_publish_target
+
+MAVEN_CENTRAL_BASE_URL = "https://repo1.maven.org/maven2/"  # check:ignore E_HARDCODED_URL value=https://repo1.maven.org/maven2/
 
 
 class ReleaseVerifyError(Exception):
@@ -54,6 +61,194 @@ def _gradle_task_name(project: GradleProject, task_name: str) -> str:
     if project.effective_gradle_root != project.path:
         return f":{project.effective_gradle_project_name}:{task_name}"
     return task_name
+
+
+def _iter_project_dependencies(project: GradleProject) -> list[Dependency]:
+    dependencies = list(project.resolved_dependencies)
+    for source_set_dependencies in project.source_set_dependencies.values():
+        dependencies.extend(source_set_dependencies)
+    return dependencies
+
+
+def _direct_gradle_dependency_projects(config: object, project: GradleProject) -> list[GradleProject]:
+    dependency_projects: list[GradleProject] = []
+    seen: set[str] = set()
+    defined_projects = getattr(config, "defined_projects", {})
+
+    for dependency in _iter_project_dependencies(project):
+        target = dependency.target
+        if not isinstance(target, DependencyTarget.Project):
+            continue
+        dependency_project = defined_projects.get(target.project)
+        if not isinstance(dependency_project, GradleProject):
+            continue
+        dependency_key = dependency_project.project_id or dependency_project.name
+        if dependency_key in seen:
+            continue
+        seen.add(dependency_key)
+        dependency_projects.append(dependency_project)
+    return dependency_projects
+
+
+def _reachable_gradle_dependency_projects(config: object, project: GradleProject) -> list[GradleProject]:
+    reachable: list[GradleProject] = []
+    seen: set[str] = set()
+    queue = _direct_gradle_dependency_projects(config, project)
+
+    while queue:
+        dependency_project = queue.pop(0)
+        dependency_key = dependency_project.project_id or dependency_project.name
+        if dependency_key in seen:
+            continue
+        seen.add(dependency_key)
+        reachable.append(dependency_project)
+        queue.extend(_direct_gradle_dependency_projects(config, dependency_project))
+    return reachable
+
+
+def _dependency_coordinate_on_maven_central(project: GradleProject) -> tuple[str, str, str] | None:
+    version = project.version
+    if version is None:
+        return None
+    return project.group_name, project.effective_artifact_id, str(version)
+
+
+def _http_status_code(ex: Exception) -> int | None:
+    response = getattr(ex, "response", None)
+    status_code = getattr(response, "status_code", None)
+    return status_code if isinstance(status_code, int) else None
+
+
+def _cross_repo_gradle_dependencies_for_prod(config: object, project: GradleProject) -> list[GradleProject]:
+    current_repo_root = project.effective_repo_root.resolve()
+    return [
+        dependency_project
+        for dependency_project in _reachable_gradle_dependency_projects(config, project)
+        if dependency_project.effective_repo_root.resolve() != current_repo_root
+    ]
+
+
+@lru_cache(maxsize=256)
+def _fetch_maven_central_metadata(group_id: str, artifact_id: str) -> MavenMetadata:
+    import requests
+
+    url = f"{MAVEN_CENTRAL_BASE_URL}{group_id.replace('.', '/')}/{artifact_id}/maven-metadata.xml"
+    response = requests.get(url, timeout=5)
+    response.raise_for_status()
+    return MavenMetadata.parse(response.text)
+
+
+def _maven_central_preflight_for_gradle_project(config: object, project: GradleProject) -> dict[str, object]:
+    checked: list[dict[str, object]] = []
+    missing: list[dict[str, object]] = []
+    unavailable: list[dict[str, object]] = []
+
+    for dependency_project in _cross_repo_gradle_dependencies_for_prod(config, project):
+        project_id = dependency_project.project_id or dependency_project.name
+        publish_target = determine_publish_target(dependency_project)
+        coordinate = _dependency_coordinate_on_maven_central(dependency_project)
+
+        base_entry: dict[str, object] = {
+            "projectId": project_id,
+            "path": str(dependency_project.path.resolve()),
+            "publishTarget": publish_target,
+        }
+
+        if dependency_project.github_repo is None:
+            missing.append(
+                {
+                    **base_entry,
+                    "reason": "cross-repo dependency has no github_repo and cannot resolve as a published artifact",
+                }
+            )
+            continue
+
+        if coordinate is None:
+            missing.append(
+                {
+                    **base_entry,
+                    "reason": "cross-repo dependency has no publishable Maven coordinate",
+                }
+            )
+            continue
+
+        group_id, artifact_id, version = coordinate
+        entry = {
+            **base_entry,
+            "coordinate": f"{group_id}:{artifact_id}:{version}",
+        }
+
+        try:
+            metadata = _fetch_maven_central_metadata(group_id, artifact_id)
+        except Exception as ex:
+            status_code = _http_status_code(ex)
+            if status_code == 404:
+                missing.append(
+                    {
+                        **entry,
+                        "reason": "artifact is not present on Maven Central",
+                    }
+                )
+            else:
+                unavailable.append(
+                    {
+                        **entry,
+                        "reason": f"could not query Maven Central metadata: {ex}",
+                    }
+                )
+            continue
+
+        available = version in metadata.versions
+        checked.append(
+            {
+                **entry,
+                "available": available,
+            }
+        )
+        if not available:
+            missing.append(
+                {
+                    **entry,
+                    "reason": "artifact version is not present on Maven Central",
+                }
+            )
+
+    status = "pass"
+    if missing:
+        status = "missing"
+    elif unavailable:
+        status = "unknown"
+
+    return {
+        "status": status,
+        "checked": checked,
+        "missing": missing,
+        "unavailable": unavailable,
+    }
+
+
+def _disable_local_overlay(gradle_root: Path) -> tuple[Path, Path] | None:
+    overlay_path = gradle_root / "settings.local.gradle.kts"
+    if not overlay_path.exists():
+        return None
+
+    backup_path = gradle_root / ".settings.local.gradle.kts.release-verify.backup"
+    suffix = 1
+    while backup_path.exists():
+        backup_path = gradle_root / f".settings.local.gradle.kts.release-verify.backup.{suffix}"
+        suffix += 1
+    overlay_path.rename(backup_path)
+    return overlay_path, backup_path
+
+
+def _restore_local_overlay(overlay_state: tuple[Path, Path] | None) -> None:
+    if overlay_state is None:
+        return
+    overlay_path, backup_path = overlay_state
+    if overlay_path.exists():
+        overlay_path.unlink()
+    if backup_path.exists():
+        backup_path.rename(overlay_path)
 
 
 def _run_python_module(
@@ -300,7 +495,10 @@ def _verify_python_project(
         )
         _run_python_module(
             "check_manifest",
-            [],
+            [
+                "--ignore",
+                ",".join(python_check_manifest_ignore_patterns(project.path)),
+            ],
             cwd=project.path,
             redirect_output=redirect_output,
         )
@@ -311,6 +509,7 @@ def _verify_python_project(
 
 
 def _verify_gradle_project(
+    config: object,
     project: GradleProject,
     *,
     redirect_output: bool,
@@ -336,6 +535,14 @@ def _verify_gradle_project(
         result["reason"] = "unsupported-publish-target"
         return result
 
+    preflight = _maven_central_preflight_for_gradle_project(config, project)
+    result["preflight"] = {"mavenCentral": preflight}
+    if preflight["status"] == "missing":
+        result["status"] = "skipped"
+        result["reason"] = "external-project-dependencies-missing-from-maven-central"
+        result["missingDependencies"] = preflight["missing"]
+        return result
+
     tasks = [_gradle_task_name(project, "build")]
     if publish_target == "maven-central":
         tasks.append(_gradle_task_name(project, "publishToMavenLocal"))
@@ -347,11 +554,18 @@ def _verify_gradle_project(
     result["command"] = command
     result["gradleRoot"] = str(gradle_root.resolve())
 
+    overlay_state = _disable_local_overlay(gradle_root)
+    result["localOverlayPresentBeforeVerify"] = overlay_state is not None
+
     run_kwargs: dict[str, object] = {}
     if redirect_output:
         run_kwargs["stdout"] = sys.stderr
         run_kwargs["stderr"] = sys.stderr
-    subprocess.run(command, cwd=gradle_root, check=True, **run_kwargs)
+
+    try:
+        subprocess.run(command, cwd=gradle_root, check=True, **run_kwargs)
+    finally:
+        _restore_local_overlay(overlay_state)
 
     result["status"] = "success"
     return result
@@ -431,7 +645,7 @@ def release_verify(projects: str | list[str] | None = None, *, json_output: bool
                     case PythonProject():
                         result = _verify_python_project(project, redirect_output=json_output)
                     case GradleProject():
-                        result = _verify_gradle_project(project, redirect_output=json_output)
+                        result = _verify_gradle_project(config, project, redirect_output=json_output)
                     case PurescriptProject() | PremakeProject() | DataProject():
                         result = {
                             "projectId": project.project_id or project.name,
