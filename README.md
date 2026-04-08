@@ -103,6 +103,12 @@ Build a configured project:
 dev build app-datatron
 ```
 
+Verify release readiness without publishing:
+
+```bash
+dev release verify app-wabbit-dev
+```
+
 ## Command Reference
 
 Every command is documented here and in the MkDocs reference under
@@ -119,6 +125,7 @@ Every command is documented here and in the MkDocs reference under
 | `dep graph [TARGET ...]` | Renders an SVG dependency graph for the workspace or selected configured targets. |
 | `dep updates` | Checks configured Maven libraries for newer upstream versions. |
 | `publish [TARGET ...] [--dry-run]` | Publishes configured projects in dependency order or prints the publish plan. |
+| `release verify [TARGET ...] [--json]` | Verifies publishable Python and Gradle projects without uploading artifacts. |
 | `build [TARGET ...] [--json]` | Builds configured Gradle projects or syntax-checks Python projects. |
 | `duplicates FOLDER ...` | Finds duplicate files and duplicate directory trees. |
 | `jitpack info GROUP ARTIFACT [VERSION]` | Shows refs, commits, versions, and build info for a JitPack artifact. |

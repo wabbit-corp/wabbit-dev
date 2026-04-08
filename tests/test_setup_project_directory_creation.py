@@ -297,6 +297,7 @@ def test_setup_python_project_generates_docs_and_workflows(tmp_path: Path, monke
     assert "coverage>=7.0.0,<8.0.0" in requirements_dev
     assert "build>=1.2.0,<2.0.0" in requirements_dev
     assert "twine>=5.0.0,<6.0.0" in requirements_dev
+    assert "check-manifest>=0.51,<1.0.0" in requirements_dev
     assert "pyinstaller>=6.9.0,<7.0.0" not in requirements_dev
 
 

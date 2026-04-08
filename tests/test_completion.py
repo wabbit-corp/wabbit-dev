@@ -30,6 +30,7 @@ def test_completion_reply_lists_top_level_commands() -> None:
 
     assert "completion" in reply.candidates
     assert "doctor" in reply.candidates
+    assert "release" in reply.candidates
     assert reply.allow_files is False
 
 

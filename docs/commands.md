@@ -20,7 +20,7 @@ the CLI inferred from the current directory.
 
 Many commands now share the same target conventions.
 
-- Project-oriented commands such as `setup`, `build`, `publish`, `clean`,
+- Project-oriented commands such as `setup`, `release verify`, `build`, `publish`, `clean`,
   `commit`, `dep graph`, `project show`, and `project deps` accept:
   - a configured project ID
   - a configured repo ID
@@ -57,6 +57,7 @@ commands from the workspace root.
 | `dep graph [TARGET ...]` | Render an SVG dependency graph. |
 | `dep updates` | Check configured Maven libraries for newer versions. |
 | `publish [TARGET ...] [--dry-run]` | Publish configured projects in dependency order or print the publish plan. |
+| `release verify [TARGET ...] [--json]` | Verify publishable Python and Gradle projects without uploading them. |
 | `build [TARGET ...] [--json]` | Build Gradle projects or syntax-check Python projects. |
 | `duplicates FOLDER ...` | Find duplicate files and duplicate directory trees. |
 | `jitpack info GROUP ARTIFACT [VERSION]` | Show refs, commits, versions, and build info from JitPack. |
@@ -136,7 +137,7 @@ Runs an environment and workspace readiness check covering:
 - commit and publish credentials
 
 The CLI also reuses a subset of these checks as preflight for commands such as
-`setup`, `build`, `publish`, `commit`, `project ...`, `dep ...`, and
+`setup`, `release verify`, `build`, `publish`, `commit`, `project ...`, `dep ...`, and
 `contributors audit`.
 
 Use `--json` when you want a machine-readable report for editor integrations,
@@ -361,6 +362,42 @@ Only Gradle and Python projects are buildable through this command.
 
 Use `--json` to emit the resolved targets, topological build order, per-project
 results, and a summary count.
+
+### `release verify`
+
+```bash
+dev release verify [TARGET ...] [--json]
+```
+
+Verifies release readiness for publishable projects in topological dependency
+order without uploading artifacts.
+
+Current backends:
+
+- Python projects published to PyPI:
+  - build wheel and sdist artifacts
+  - run `twine check`
+  - run `check-manifest`
+  - inspect artifact metadata and packaged files
+- Gradle projects:
+  - Maven Central targets run `build` and `publishToMavenLocal`
+  - JetBrains Marketplace targets run `verifyPlugin` and `buildPlugin`
+  - JitPack targets currently run `build`
+
+Projects that are quarantined, publish-disabled, or not yet supported by
+release verification are reported explicitly instead of crashing the command.
+
+Use `--json` to emit the resolved targets, topological verification order,
+per-project results, and summary counts.
+
+Examples:
+
+```bash
+dev release verify
+dev release verify app-wabbit-dev
+dev release verify jeeves
+dev release verify --json app-wabbit-dev
+```
 
 ### `clean`
 

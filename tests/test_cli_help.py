@@ -26,6 +26,8 @@ async def test_root_help_includes_command_summaries(
     assert "Show the workspace, repo, and project context inferred" in output
     assert "config" in output
     assert "Validate workspace configuration files." in output
+    assert "release" in output
+    assert "Verify release readiness for publishable projects." in output
     assert "project" in output
     assert "Inspect the configured project inventory." in output
     assert "check" in output
@@ -52,6 +54,23 @@ async def test_parent_command_without_subcommand_prints_help(
     assert "Analyze the dependency metadata loaded from root.clj." in output
     assert "graph     Render an SVG graph of project dependencies." in output
     assert "updates   Check configured libraries for newer upstream versions." in output
+
+
+@pytest.mark.asyncio
+async def test_release_parent_help_lists_verify(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "release"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "verify" in output
+    assert "Verify publishable Python and Gradle projects" in output
 
 
 @pytest.mark.asyncio
@@ -151,6 +170,26 @@ async def test_cli_doctor_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result == 0
     assert called == ["called"]
+
+
+@pytest.mark.asyncio
+async def test_cli_release_verify_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import release_verify as release_verify_task
+
+    called: list[tuple[list[str], bool]] = []
+
+    def fake_release_verify(targets=None, *, json_output: bool = False) -> int:
+        called.append((targets, json_output))
+        return 0
+
+    monkeypatch.setattr(release_verify_task, "release_verify", fake_release_verify)
+    monkeypatch.setattr("sys.argv", ["dev.py", "release", "verify", "--json", "app-wabbit-dev"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [(["app-wabbit-dev"], True)]
 
 
 @pytest.mark.asyncio

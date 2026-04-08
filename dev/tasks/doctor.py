@@ -583,6 +583,7 @@ FULL_CHECK_ORDER = (
 
 PREFLIGHT_CHECKS: dict[str, tuple[str, ...]] = {
     "setup": ("workspace-root", "root-clj", "root-private-clj", "python-version", "config"),
+    "release/verify": ("workspace-root", "root-clj", "root-private-clj", "python-version", "git", "config", "gradle"),
     "build": ("workspace-root", "root-clj", "root-private-clj", "python-version", "config", "gradle"),
     "publish": (
         "workspace-root",
@@ -636,6 +637,7 @@ def _ordered_unique(values: Sequence[str]) -> tuple[str, ...]:
 
 DOCTOR_ONLY_GROUPS: dict[str, tuple[str, ...]] = {
     **PREFLIGHT_CHECKS,
+    "release": PREFLIGHT_CHECKS["release/verify"],
     "project": _ordered_unique(
         (
             *PREFLIGHT_CHECKS["project/list"],

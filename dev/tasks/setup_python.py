@@ -394,6 +394,7 @@ def _python_generated_dev_dependencies(project: PythonProject) -> list[str]:
         "coverage>=7.0.0,<8.0.0",
         "build>=1.2.0,<2.0.0",
         "twine>=5.0.0,<6.0.0",
+        "check-manifest>=0.51,<1.0.0",
     ]
     app_dev_dependencies = ["pyinstaller>=6.9.0,<7.0.0"] if project.application is not None else []
     return _merge_requirements(base_dev_dependencies + app_dev_dependencies, project.dev_dependencies)

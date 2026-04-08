@@ -25,6 +25,7 @@ _CONFIG_CONTEXT_COMMANDS = {
     "config/check",
     "doctor",
     "setup",
+    "release/verify",
     "dep/graph",
     "dep/updates",
     "publish",
@@ -168,6 +169,12 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
                 tokens.append("--dev")
             if args.local:
                 tokens.append("--local")
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "release/verify":
+            tokens = ["release", "verify"]
             if args.json:
                 tokens.append("--json")
             tokens.extend(args.targets or [])
@@ -352,6 +359,7 @@ def _apply_context_defaults(command_path: str, args: argparse.Namespace) -> None
     if command_path in {
         "setup",
         "build",
+        "release/verify",
         "clean",
         "cloc",
         "dep/graph",
@@ -411,6 +419,11 @@ def _print_next_steps(command_path: str, *, prog: str, args: argparse.Namespace)
                 steps = [f"{prog} project show {target}", f"{prog} build {target}", f"{prog} check {target}"]
             else:
                 steps = [f"{prog} project list", f"{prog} build", f"{prog} check :root"]
+        case "release/verify":
+            if target is not None:
+                steps = [f"{prog} publish --dry-run {target}", f"{prog} publish {target}", f"{prog} status {target}"]
+            else:
+                steps = [f"{prog} publish --dry-run", f"{prog} project list", f"{prog} status"]
         case "build":
             if target is not None:
                 steps = [f"{prog} check {target}", f"{prog} status {target}", f"{prog} publish --dry-run {target}"]
@@ -815,6 +828,64 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "--json",
             action="store_true",
             help="Emit a machine-readable setup summary instead of human-oriented progress output.",
+        )
+
+    with commands(
+        "release",
+        help="Verify release readiness for publishable projects.",
+        description=_doc(
+            """
+            Run release-oriented verification for publishable projects.
+
+            `release verify` uses project-type-specific verification backends to
+            confirm that selected artifacts can be built and pass their
+            publish-facing sanity checks without actually uploading them.
+            """
+        ),
+        epilog=examples("release verify", "release verify app-wabbit-dev", "release verify --json jeeves"),
+    ) as cmd:
+        del cmd
+
+    with commands(
+        "release",
+        "verify",
+        help="Verify publishable Python and Gradle projects without uploading them.",
+        description=_doc(
+            """
+            Verify release readiness in dependency order for the selected targets.
+
+            Python projects build wheel and sdist artifacts, run `twine check`,
+            run `check-manifest`, and inspect artifact metadata and packaged
+            files. Gradle projects run publication-oriented verification tasks
+            based on their publish target.
+            """
+        ),
+        epilog=examples(
+            "release verify",
+            "release verify app-wabbit-dev",
+            "release verify jeeves",
+            "release verify --json app-wabbit-dev",
+            notes=[
+                "Targets can be project IDs, repo IDs, or paths inside configured projects or repos.",
+                "With no targets from inside a configured project or repo, release verify defaults to that current project or repo.",
+                "Projects that are quarantined, publish-disabled, or not yet supported by release verification are reported instead of crashing the command.",
+            ],
+        ),
+    ) as cmd:
+        _add_argument(
+            cmd,
+            "targets",
+            metavar="TARGET",
+            type=str,
+            nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
+            help="Project IDs, repo IDs, or paths. Omit to verify the current inferred project or repo, or the full workspace from root.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit a machine-readable release verification report instead of human-oriented progress output.",
         )
 
     with commands(
@@ -1758,7 +1829,7 @@ async def async_main() -> int:
     from dev.tasks.doctor import preflight_for_command
 
     selected_projects: tuple[str, ...] | None = None
-    if command_path in {"setup", "build", "publish", "commit", "clean", "dep/graph"} and args.targets:
+    if command_path in {"setup", "release/verify", "build", "publish", "commit", "clean", "dep/graph"} and args.targets:
         selected_projects = tuple(args.targets)
     elif command_path in {"project/show", "project/deps", "project/repo", "project/targets"}:
         selected_projects = tuple(args.targets)
@@ -1815,6 +1886,11 @@ async def async_main() -> int:
                 else:
                     mode = RepoSetupMode.PROD
                 exit_code = setup(mode, projects=args.targets, json_output=args.json)
+
+            case "release/verify":
+                from dev.tasks.release_verify import release_verify
+
+                exit_code = release_verify(args.targets, json_output=args.json)
 
             case "llmcopy":
                 from dev.tasks.llmcopy import llmcopy
@@ -1961,7 +2037,7 @@ async def async_main() -> int:
         _print_failure_context(command_path, args=args)
         return 2
 
-    if command_path in {"doctor", "setup", "build", "publish", "project/show", "commit", "push"}:
+    if command_path in {"doctor", "setup", "release/verify", "build", "publish", "project/show", "commit", "push"}:
         _print_next_steps(command_path, prog=prog, args=args)
 
     return exit_code
