@@ -94,10 +94,10 @@ def test_workspace_legal_templates_render_without_unresolved_placeholders(tmp_pa
 
     generated_paths = [
         tmp_path / "LICENSE.md",
-        tmp_path / "CLA.md",
-        tmp_path / "CLA_EXPLANATIONS.md",
-        tmp_path / "CONTRIBUTOR_PRIVACY.md",
-        tmp_path / "CODE_OF_CONDUCT.md",
+        tmp_path / "legal" / "cla" / "v1.0.0" / "CLA.md",
+        tmp_path / "legal" / "cla" / "v1.0.0" / "CLA_EXPLANATIONS.md",
+        tmp_path / "legal" / "contributor-privacy" / "v1.0.0" / "CONTRIBUTOR_PRIVACY.md",
+        tmp_path / "legal" / "code-of-conduct" / "v1.0.0" / "CODE_OF_CONDUCT.md",
     ]
     disallowed_fragments = (
         "{{",
@@ -113,14 +113,18 @@ def test_workspace_legal_templates_render_without_unresolved_placeholders(tmp_pa
         for fragment in disallowed_fragments:
             assert fragment not in text, f"{path} still contains {fragment!r}"
 
-    assert "MIT License (MIT)" in (tmp_path / "CLA.md").read_text(encoding="utf-8")
-    assert "Example Legal Co" in (tmp_path / "CLA.md").read_text(encoding="utf-8")
-    assert "Example Co" in (tmp_path / "CLA.md").read_text(encoding="utf-8")
-    assert "Example Legal Co" in (tmp_path / "CONTRIBUTOR_PRIVACY.md").read_text(encoding="utf-8")
-    assert "Example Co" in (tmp_path / "CONTRIBUTOR_PRIVACY.md").read_text(encoding="utf-8")
-    assert "legal@example.com" in (tmp_path / "CLA.md").read_text(encoding="utf-8")
-    assert "legal@example.com" in (tmp_path / "CONTRIBUTOR_PRIVACY.md").read_text(encoding="utf-8")
-    assert "legal@example.com" in (tmp_path / "CODE_OF_CONDUCT.md").read_text(encoding="utf-8")
+    cla_path = tmp_path / "legal" / "cla" / "v1.0.0" / "CLA.md"
+    privacy_path = tmp_path / "legal" / "contributor-privacy" / "v1.0.0" / "CONTRIBUTOR_PRIVACY.md"
+    conduct_path = tmp_path / "legal" / "code-of-conduct" / "v1.0.0" / "CODE_OF_CONDUCT.md"
+
+    assert "MIT License (MIT)" in cla_path.read_text(encoding="utf-8")
+    assert "Example Legal Co" in cla_path.read_text(encoding="utf-8")
+    assert "Example Co" in cla_path.read_text(encoding="utf-8")
+    assert "Example Legal Co" in privacy_path.read_text(encoding="utf-8")
+    assert "Example Co" in privacy_path.read_text(encoding="utf-8")
+    assert "legal@example.com" in cla_path.read_text(encoding="utf-8")
+    assert "legal@example.com" in privacy_path.read_text(encoding="utf-8")
+    assert "legal@example.com" in conduct_path.read_text(encoding="utf-8")
 
 
 def test_workspace_license_templates_include_public_test_license_keys() -> None:

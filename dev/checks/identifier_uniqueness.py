@@ -3,11 +3,7 @@
 """
 
 import re
-from dataclasses import dataclass, field
-from functools import cached_property
 from pathlib import Path
-
-import pathspec
 
 # Import necessary components from your new system
 from dev.checks.base import (
@@ -24,6 +20,7 @@ from dev.config import Project
 # Assuming get_expected_file_properties exists and helps identify text files
 # If not, we might need a simpler text file check.
 from dev.file_properties import get_expected_file_properties
+from dev.ignore_files import IgnoreMatcher
 from dev.intrangeset import IntRangeSet
 
 # Assuming a walk_files utility exists or we implement one
@@ -109,33 +106,6 @@ E_DUPLICATE_IDENTIFIER = IssueType("E_DUPLICATE_IDENTIFIER", "Duplicate identifi
 # --- The Check ---
 
 
-@dataclass(frozen=True)
-class IgnoreContext:
-    root: Path
-    ignore: list[str] = field(default_factory=list)
-
-    def with_ignore(self, ignore: list[str]) -> "IgnoreContext":
-        return IgnoreContext(
-            root=self.root,
-            ignore=self.ignore + ignore,
-        )
-
-    @cached_property
-    def spec(self) -> pathspec.PathSpec:
-        from pathspec import PathSpec
-        from pathspec.patterns.gitwildmatch import GitWildMatchPattern
-
-        return PathSpec.from_lines(
-            GitWildMatchPattern,
-            self.ignore,
-        )
-
-
-def read_ignore_patterns(path: Path) -> list[str]:
-    with path.open("rt", encoding="utf-8", errors="replace") as f:
-        return [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
-
-
 class UniqueIdentifiersCheck(ProjectCheck):
     """
     Checks for duplicate UUIDs and ULIDs (enclosed in double quotes) across
@@ -176,13 +146,6 @@ class UniqueIdentifiersCheck(ProjectCheck):
 
         return False
 
-    def _is_pathspec_ignored(self, path: Path, ignore_ctx: IgnoreContext) -> bool:
-        try:
-            rel_path = path.relative_to(ignore_ctx.root)
-        except ValueError:
-            return False
-        return ignore_ctx.spec.match_file(str(rel_path))
-
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         """
         Scans the project at the given path for duplicate identifiers.
@@ -200,11 +163,12 @@ class UniqueIdentifiersCheck(ProjectCheck):
         seen_ulids: dict[str, FileLocation] = {}
         seen_uuids: dict[str, FileLocation] = {}
         issues = IssueList()  # Use IssueList for potential merging later if needed
+        ignore_matcher = IgnoreMatcher(path)
 
-        def scan_file(file_path: Path, ignore_ctx: IgnoreContext | None) -> None:
+        def scan_file(file_path: Path) -> None:
             if self._is_locally_ignored(file_path, path):
                 return
-            if ignore_ctx is not None and self._is_pathspec_ignored(file_path, ignore_ctx):
+            if ignore_matcher.matches(file_path, is_dir=False):
                 return
 
             # Check file extension - Skip non-source/text files
@@ -278,39 +242,19 @@ class UniqueIdentifiersCheck(ProjectCheck):
             except OSError:
                 return
 
-        def walk_dir(dir_path: Path, ignore_ctx: IgnoreContext | None) -> None:
+        def walk_dir(dir_path: Path) -> None:
             if self._is_locally_ignored(dir_path, path):
                 return
-            if ignore_ctx is not None and self._is_pathspec_ignored(dir_path, ignore_ctx):
+            if dir_path != path and ignore_matcher.matches(dir_path, is_dir=True):
                 return
-
-            next_ctx = ignore_ctx
-            if (dir_path / ".git").exists():
-                next_ctx = IgnoreContext(
-                    root=dir_path,
-                    ignore=["/.git"],
-                )
-
-            gitignore_path = dir_path / ".gitignore"
-            if gitignore_path.exists() and next_ctx is not None:
-                next_ctx = next_ctx.with_ignore(read_ignore_patterns(gitignore_path))
-
-            checkignore_path = dir_path / ".checkignore"
-            if checkignore_path.exists():
-                if next_ctx is None:
-                    next_ctx = IgnoreContext(
-                        root=dir_path,
-                        ignore=["/.git"],
-                    )
-                next_ctx = next_ctx.with_ignore(read_ignore_patterns(checkignore_path))
 
             for child in sorted(dir_path.iterdir()):
                 if child.is_dir():
-                    walk_dir(child, next_ctx)
+                    walk_dir(child)
                 elif child.is_file():
-                    scan_file(child, next_ctx)
+                    scan_file(child)
 
-        walk_dir(path, None)
+        walk_dir(path)
 
         return issues.issues  # Return the raw list of issues
 

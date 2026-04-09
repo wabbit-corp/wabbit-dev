@@ -4,9 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _SDIST_INCLUDED_DIR_NAMES = {
+    "LICENSES",
     "docs",
     "examples",
     "example",
+    "legal",
     "release-checklist",
     "scripts",
     "test",

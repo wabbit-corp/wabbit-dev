@@ -290,10 +290,11 @@ def test_setup_gradle_project_cleans_stale_standalone_legal_files_for_nested_rep
     stale_paths = [
         project.path / ".banner.png",
         project.path / "LICENSE.md",
-        project.path / "CLA.md",
-        project.path / "CLA_EXPLANATIONS.md",
-        project.path / "CONTRIBUTOR_PRIVACY.md",
-        project.path / "CODE_OF_CONDUCT.md",
+        project.path / "NOTICE.md",
+        project.path / "legal" / "cla" / "v1.0.0" / "CLA.md",
+        project.path / "legal" / "cla" / "v1.0.0" / "CLA_EXPLANATIONS.md",
+        project.path / "legal" / "contributor-privacy" / "v1.0.0" / "CONTRIBUTOR_PRIVACY.md",
+        project.path / "legal" / "code-of-conduct" / "v1.0.0" / "CODE_OF_CONDUCT.md",
         project.path / "settings.gradle.kts",
         project.path / "settings.local.gradle.kts",
         project.path / "gradlew",
@@ -354,7 +355,8 @@ def test_setup_gradle_project_keeps_module_license_when_repo_licenses_differ(
     sibling.license = "MIT"
     project.path.mkdir(parents=True, exist_ok=True)
     (project.path / "LICENSE.md").write_text("stale\n", encoding="utf-8")
-    (project.path / "CLA.md").write_text("stale\n", encoding="utf-8")
+    (project.path / "legal" / "cla" / "v1.0.0").mkdir(parents=True, exist_ok=True)
+    (project.path / "legal" / "cla" / "v1.0.0" / "CLA.md").write_text("stale\n", encoding="utf-8")
 
     ctx = _make_context(
         tmp_path,
@@ -379,7 +381,7 @@ def test_setup_gradle_project_keeps_module_license_when_repo_licenses_differ(
     setup_gradle_project(ctx, project, interactive=False)
 
     assert (project.path / "LICENSE.md").is_file()
-    assert not (project.path / "CLA.md").exists()
+    assert not (project.path / "legal").exists()
 
 
 def test_setup_gradle_project_uses_kmp_template_and_renders_source_set_deps_and_runs(
@@ -863,8 +865,8 @@ def test_setup_gradle_project_renders_desktop_native_targets_and_apple_framework
     assert "[linuxX64:]" in build_text
     assert "[mingwX64:]" in build_text
     assert "[macosX64:]" in build_text
-    assert "[macosArm64:clientNative]" in build_text
-    assert "frameworks=[iosArm64][macosX64][clientNative]" in build_text
+    assert "[macosArm64:]" in build_text
+    assert "frameworks=[iosArm64][macosX64][macosArm64]" in build_text
 
 
 def test_render_dependency_keeps_same_repo_project_dependency_in_prod_mode(tmp_path: Path) -> None:

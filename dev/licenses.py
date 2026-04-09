@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-import re
 from typing import Protocol
 
 import jinja2
@@ -72,6 +72,8 @@ _LICENSE_ALIASES: dict[str, str] = {
     "gpl-3.0": "GPLv3",
     "gpl-3.0-only": "GPLv3",
     "gpl-3.0-or-later": "GPLv3",
+    "licenseref-wabbit-public-test-license": "LicenseRef-Wabbit-Public-Test-License-1.1",
+    "wabbit-public-tests-license": "LicenseRef-Wabbit-Public-Test-License-1.1",
 }
 
 
@@ -146,6 +148,7 @@ def load_license_texts(licenses_dir: Path) -> dict[str, str]:
         loaded.setdefault(path.stem, template_text)
         if path.stem == "Wabbit-Public-Tests-License":
             loaded.setdefault("LicenseRef-Wabbit-Public-Test-License", template_text)
+            loaded.setdefault("LicenseRef-Wabbit-Public-Test-License-1.1", template_text)
         for spdx_identifier in _spdx_identifiers_from_text(template_text):
             loaded.setdefault(spdx_identifier, template_text)
 

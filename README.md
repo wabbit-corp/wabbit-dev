@@ -375,9 +375,12 @@ rest of the file alone. Keep any human-authored instructions outside that block.
 
 This project is licensed under the [AGPL](LICENSE.md) for open source use.
 
+Additional license notices and custom license texts, when needed, live in
+`NOTICE.md` and `LICENSES/`.
+
 For commercial use, contact Wabbit Consulting Corporation at `wabbit@wabbit.one`.
 
 ## Contributing
 
 Before contributions can be accepted, contributors must agree to the
-[Contributor License Agreement](CLA.md).
+[Contributor License Agreement](legal/cla/v1.0.0/CLA.md).

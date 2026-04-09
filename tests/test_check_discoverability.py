@@ -12,6 +12,7 @@ def test_list_checks_includes_spdx_and_fixability(capsys: pytest.CaptureFixture[
     output = capsys.readouterr().out
     assert "SpdxHeaderCheck" in output
     assert "ManagedGeneratedFileIntegrityCheck" in output
+    assert "RepoLegalLayoutMigrationCheck" in output
     assert "GitignoreWithoutRepoCheck" in output
     assert "KmpTargetExpansionCheck" in output
     assert "fix:yes" in output
@@ -54,6 +55,18 @@ def test_describe_gitignore_without_repo_check_mentions_root_issue(
     assert result == 0
     output = capsys.readouterr().out
     assert "E_GITIGNORE_WITHOUT_REPO" in output
+
+
+def test_describe_repo_legal_layout_migration_check_mentions_misplaced_legal_issue(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev.tasks import check as check_task
+
+    result = check_task.describe_check("RepoLegalLayoutMigrationCheck")
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "E_MISPLACED_LEGAL_FILE" in output
 
 
 def test_describe_kmp_target_expansion_check_mentions_possible_target_issue(

@@ -27,6 +27,11 @@ from dev.licenses import (
     render_project_license,
 )
 from dev.messages import error, warning
+from dev.project_layout import (
+    cleanup_misplaced_legal_files,
+    discover_test_license_roots,
+    expected_test_license_copy_paths,
+)
 
 
 class RepoSetupMode(Enum):
@@ -144,6 +149,13 @@ def _license_lookup_candidates(license_key: str | None) -> list[str]:
                 stripped = candidate.removeprefix("LicenseRef-")
                 if stripped not in candidates:
                     candidates.append(stripped)
+    if normalized == "LicenseRef-Wabbit-Public-Test-License-1.1":
+        for compatibility_candidate in [
+            "LicenseRef-Wabbit-Public-Test-License",
+            "Wabbit-Public-Tests-License",
+        ]:
+            if compatibility_candidate not in candidates:
+                candidates.append(compatibility_candidate)
     return candidates
 
 
@@ -165,7 +177,7 @@ def _license_heading_from_text(template_text: str) -> str | None:
 
 def _license_reference_label(licenses: dict[str, str], license_key: str | None) -> str:
     display_name = license_display_name(license_key)
-    if display_name is not None:
+    if display_name is not None and not display_name.startswith("LicenseRef-"):
         return display_name
     template_text = _resolve_license_text(licenses, license_key)
     heading = _license_heading_from_text(template_text) if template_text is not None else None
@@ -193,45 +205,100 @@ def _test_license_paths(project: Project) -> list[str]:
     return ["test/**", "tests/**"]
 
 
-def _render_mixed_license_file(
+def _legal_root(project: Project) -> Path:
+    return project.path / "legal"
+
+
+def _cla_path(project: Project) -> Path:
+    return _legal_root(project) / "cla" / "v1.0.0" / "CLA.md"
+
+
+def _cla_explanations_path(project: Project) -> Path:
+    return _legal_root(project) / "cla" / "v1.0.0" / "CLA_EXPLANATIONS.md"
+
+
+def _contributor_privacy_path(project: Project) -> Path:
+    return _legal_root(project) / "contributor-privacy" / "v1.0.0" / "CONTRIBUTOR_PRIVACY.md"
+
+
+def _code_of_conduct_path(project: Project) -> Path:
+    return _legal_root(project) / "code-of-conduct" / "v1.0.0" / "CODE_OF_CONDUCT.md"
+
+
+def _license_notice_path(project: Project) -> Path:
+    return project.path / "NOTICE.md"
+
+
+def _extra_license_dir(project: Project) -> Path:
+    return project.path / "LICENSES"
+
+
+def _extra_license_filename(license_key: str) -> str:
+    normalized = canonicalize_license_key(license_key) or license_key
+    safe_name = normalized.replace("/", "-").replace("\\", "-")
+    return f"{safe_name}.md"
+
+
+def _extra_license_path(project: Project, license_key: str) -> Path:
+    return _extra_license_dir(project) / _extra_license_filename(license_key)
+
+
+def _legacy_root_legal_paths(project: Project) -> list[Path]:
+    return [
+        project.path / "CLA.md",
+        project.path / "CLA_EXPLANATIONS.md",
+        project.path / "CONTRIBUTOR_PRIVACY.md",
+        project.path / "CODE_OF_CONDUCT.md",
+    ]
+
+
+def _cleanup_legacy_root_legal_paths(project: Project) -> None:
+    for path in _legacy_root_legal_paths(project):
+        dev.io.delete_if_exists(path)
+
+
+def _cleanup_test_license_outputs(project: Project) -> None:
+    for candidate in [
+        "LicenseRef-Wabbit-Public-Test-License",
+        "LicenseRef-Wabbit-Public-Test-License-1.1",
+    ]:
+        dev.io.delete_if_exists(_extra_license_path(project, candidate))
+    licenses_dir = _extra_license_dir(project)
+    if licenses_dir.is_dir() and not any(licenses_dir.iterdir()):
+        dev.io.delete_if_exists(licenses_dir)
+
+
+def _cleanup_test_license_copies(project: Project) -> None:
+    for path in expected_test_license_copy_paths(project):
+        dev.io.delete_if_exists(path)
+
+
+def _write_test_license_copies(project: Project, rendered_test_license_text: str) -> None:
+    for root in discover_test_license_roots(project):
+        dev.io.write_text_file(root / "LICENSE.md", rendered_test_license_text)
+
+
+def _render_license_notice_file(
     *,
     project: Project,
     primary_license_reference: str,
-    primary_license_text: str,
     test_license_reference: str,
-    test_license_text: str,
+    test_license_path: Path,
 ) -> str:
     test_paths = "\n".join(f"- `{path}`" for path in _test_license_paths(project))
     return clean_text(
-        f"""# Licensing
+        f"""# Notices
 
 This repository contains materials under multiple licenses.
 
-## Primary License
-
-Unless otherwise noted, the production source code and other non-test project materials are licensed under {primary_license_reference}.
-
-## Test License
-
-Test suites, test fixtures, test data, benchmark code, and test-only helper code under the following repository path conventions are licensed under {test_license_reference}:
+- Production source code and other non-test project materials are licensed under [{primary_license_reference}](LICENSE.md).
+- Test suites, test fixtures, test data, benchmark code, and test-only helper code under the following repository path conventions are licensed under [{test_license_reference}]({test_license_path.relative_to(project.path).as_posix()}):
 
 {test_paths}
 
 If a file carries a different SPDX header, that file-level notice controls.
 
 Published artifacts must not include files covered by the test license.
-
----
-
-## Primary License Text
-
-{primary_license_text.rstrip()}
-
----
-
-## Test License Text
-
-{test_license_text.rstrip()}
 """
     )
 
@@ -242,18 +309,19 @@ def write_wabbit_legal_documents(ctx: CommonSetupContext, project: Project) -> N
         return
 
     dev.io.write_text_file(
-        project.path / "CLA.md",
+        _cla_path(project),
         render_template(ctx.cla, **legal_template_context),
     )
     dev.io.write_text_file(
-        project.path / "CLA_EXPLANATIONS.md",
+        _cla_explanations_path(project),
         render_template(ctx.cla_explanations, **legal_template_context),
     )
     dev.io.write_text_file(
-        project.path / "CONTRIBUTOR_PRIVACY.md",
+        _contributor_privacy_path(project),
         render_template(ctx.contributor_privacy_policy, **legal_template_context),
     )
-    dev.io.write_text_file(project.path / "CODE_OF_CONDUCT.md", render_template(ctx.coc, **legal_template_context))
+    dev.io.write_text_file(_code_of_conduct_path(project), render_template(ctx.coc, **legal_template_context))
+    _cleanup_legacy_root_legal_paths(project)
 
 
 def write_wabbit_legal_files(ctx: CommonSetupContext, project: Project) -> None:
@@ -262,7 +330,8 @@ def write_wabbit_legal_files(ctx: CommonSetupContext, project: Project) -> None:
 
     project_license = canonicalize_license_key(project.license)
     test_license = canonicalize_license_key(project.test_license)
-    if project_license is not None:
+    write_root_legal_files = project.path == project.effective_repo_root
+    if project_license is not None and write_root_legal_files:
         license_text = _resolve_license_text(ctx.licenses, project_license)
         if license_text is None:
             supported = ", ".join(sorted(ctx.licenses))
@@ -271,6 +340,7 @@ def write_wabbit_legal_files(ctx: CommonSetupContext, project: Project) -> None:
             return
 
         rendered_license_text = render_project_license(license_text, project)
+        dev.io.write_text_file(project.path / "LICENSE.md", rendered_license_text)
         if test_license is not None:
             test_license_text = _resolve_license_text(ctx.licenses, test_license)
             if test_license_text is None:
@@ -278,21 +348,40 @@ def write_wabbit_legal_files(ctx: CommonSetupContext, project: Project) -> None:
                 error(f"Unknown test license key: {test_license}. Supported keys: {supported}")
                 write_wabbit_legal_documents(ctx, project)
                 return
+            _cleanup_test_license_outputs(project)
             rendered_test_license_text = render_project_license(test_license_text, project)
+            test_license_path = _extra_license_path(project, test_license)
+            dev.io.write_text_file(test_license_path, rendered_test_license_text)
             dev.io.write_text_file(
-                project.path / "LICENSE.md",
-                _render_mixed_license_file(
+                _license_notice_path(project),
+                _render_license_notice_file(
                     project=project,
                     primary_license_reference=cla_primary_license_reference(project_license),
-                    primary_license_text=rendered_license_text,
                     test_license_reference=_license_reference_label(ctx.licenses, test_license),
-                    test_license_text=rendered_test_license_text,
+                    test_license_path=test_license_path,
                 ),
             )
         else:
-            dev.io.write_text_file(project.path / "LICENSE.md", rendered_license_text)
+            dev.io.delete_if_exists(_license_notice_path(project))
+            _cleanup_test_license_outputs(project)
+    elif write_root_legal_files:
+        dev.io.delete_if_exists(project.path / "LICENSE.md")
+        dev.io.delete_if_exists(_license_notice_path(project))
+        _cleanup_test_license_outputs(project)
 
-    write_wabbit_legal_documents(ctx, project)
+    if test_license is not None:
+        test_license_text = _resolve_license_text(ctx.licenses, test_license)
+        if test_license_text is None:
+            supported = ", ".join(sorted(ctx.licenses))
+            error(f"Unknown test license key: {test_license}. Supported keys: {supported}")
+            return
+        _write_test_license_copies(project, render_project_license(test_license_text, project))
+    else:
+        _cleanup_test_license_copies(project)
+
+    if write_root_legal_files:
+        write_wabbit_legal_documents(ctx, project)
+        cleanup_misplaced_legal_files(project.path, [project])
 
 
 def write_banner(ctx: CommonSetupContext, project: Project) -> None:

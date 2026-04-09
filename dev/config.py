@@ -1277,6 +1277,8 @@ CANONICAL_KMP_SOURCE_SET_REQUIREMENTS: dict[str, str] = {
     "iosSimulatorArm64Test": "iosSimulatorArm64",
     "macosX64Main": "macosX64",
     "macosX64Test": "macosX64",
+    "macosArm64Main": "macosArm64",
+    "macosArm64Test": "macosArm64",
     "clientNativeMain": "macosArm64",
     "clientNativeTest": "macosArm64",
     "linuxX64Main": "linuxX64",
@@ -1482,7 +1484,7 @@ def _legacy_targets_from_platforms(
                 targets.append(GradleTargetSpec(kind="android-application"))
             continue
         if platform == "macosArm64":
-            targets.append(GradleTargetSpec(kind="macosArm64", name="clientNative"))
+            targets.append(GradleTargetSpec(kind="macosArm64"))
             continue
         if platform == "macosX64":
             targets.append(GradleTargetSpec(kind="macosX64"))
@@ -1989,8 +1991,8 @@ def load_config(start: Path | None = None) -> Config:
             }
         if platform == "macosArm64":
             return {
-                "clientNativeMain": ["commonMain"],
-                "clientNativeTest": ["commonTest"],
+                "macosArm64Main": ["commonMain"],
+                "macosArm64Test": ["commonTest"],
             }
         return {}
 

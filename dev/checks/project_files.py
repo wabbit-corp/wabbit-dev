@@ -85,9 +85,9 @@ class GenericProjectStructureCheck(ProjectCheck):
 
         if not (path / "LICENSE").exists() and not (path / "LICENSE.md").exists():
             issues.append(E_MISSING_LICENSE.at(path))
-        if not (path / "CLA.md").exists():
+        if not (path / "legal" / "cla" / "v1.0.0" / "CLA.md").exists():
             issues.append(E_MISSING_CLA.at(path))
-        if not (path / "CLA_EXPLANATIONS.md").exists():
+        if not (path / "legal" / "cla" / "v1.0.0" / "CLA_EXPLANATIONS.md").exists():
             issues.append(E_MISSING_CLA_SIMPLE.at(path))
         if not (path / ".gitignore").exists():
             issues.append(E_MISSING_GITIGNORE.at(path))

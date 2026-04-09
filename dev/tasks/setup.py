@@ -37,6 +37,7 @@ from dev.generated_files import is_setup_managed_file, prepend_generated_comment
 from dev.git_changes import ChangeType, FileDiff, FileType, compute_repo_diffs
 from dev.licenses import canonicalize_license_key, load_license_texts
 from dev.messages import ask, error, info, warning
+from dev.project_layout import cleanup_misplaced_legal_files
 from dev.repo_metadata import build_repo_metadata_plan
 from dev.repo_resolution import inferred_project_targets
 from dev.tasks import setup_common, setup_kotlin, setup_python
@@ -361,12 +362,15 @@ def _write_repo_root_wabbit_legal_documents(
             test_license=shared_test_license,
         )
         setup_common.write_wabbit_legal_files(ctx, repo_root_project)
+        cleanup_misplaced_legal_files(repo_root_path, repo_projects)
         return
 
     repo_root_project = dataclasses.replace(representative_project, path=repo_root_path)
     setup_common.write_wabbit_legal_documents(ctx, repo_root_project)
     dev.io.delete_if_exists(repo_root_path / "LICENSE.md")
     dev.io.delete_if_exists(repo_root_path / "LICENSES")
+    dev.io.delete_if_exists(repo_root_path / "NOTICE.md")
+    cleanup_misplaced_legal_files(repo_root_path, repo_projects)
 
 
 def _write_repo_agents_files(ctx: RepoSetupContext, projects: list[Project]) -> list[str]:

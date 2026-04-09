@@ -1345,7 +1345,7 @@ def test_setup_repo_root_license_keeps_shared_test_license_when_some_repo_projec
 
     assert len(written_projects) == 1
     assert written_projects[0].path == repo_root
-    assert written_projects[0].test_license == "LicenseRef-Wabbit-Public-Test-License"
+    assert written_projects[0].test_license == "LicenseRef-Wabbit-Public-Test-License-1.1"
 
 
 def test_setup_does_not_commit_or_push_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

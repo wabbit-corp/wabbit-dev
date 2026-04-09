@@ -23,7 +23,7 @@ _DIRECT_SOURCE_SETS_BY_PLATFORM: dict[str, tuple[str, str]] = {
     "iosArm64": ("iosArm64Main", "iosArm64Test"),
     "iosSimulatorArm64": ("iosSimulatorArm64Main", "iosSimulatorArm64Test"),
     "macosX64": ("macosX64Main", "macosX64Test"),
-    "macosArm64": ("clientNativeMain", "clientNativeTest"),
+    "macosArm64": ("macosArm64Main", "macosArm64Test"),
     "linuxX64": ("linuxX64Main", "linuxX64Test"),
     "mingwX64": ("mingwX64Main", "mingwX64Test"),
 }
@@ -69,8 +69,8 @@ def _default_source_set_parents_for_platform(platform: str) -> dict[str, list[st
         }
     if platform == "macosArm64":
         return {
-            "clientNativeMain": ["commonMain"],
-            "clientNativeTest": ["commonTest"],
+            "macosArm64Main": ["commonMain"],
+            "macosArm64Test": ["commonTest"],
         }
     if platform == "macosX64":
         return {
@@ -113,7 +113,7 @@ def _source_set_base_required_platforms(source_set_name: str, platforms: list[st
         return {"iosSimulatorArm64"} if "iosSimulatorArm64" in platforms else set()
     if source_set_name in {"macosX64Main", "macosX64Test"}:
         return {"macosX64"} if "macosX64" in platforms else set()
-    if source_set_name in {"clientNativeMain", "clientNativeTest"}:
+    if source_set_name in {"macosArm64Main", "macosArm64Test", "clientNativeMain", "clientNativeTest"}:
         return {"macosArm64"} if "macosArm64" in platforms else set()
     if source_set_name in {"linuxX64Main", "linuxX64Test"}:
         return {"linuxX64"} if "linuxX64" in platforms else set()
@@ -173,6 +173,8 @@ def _source_set_required_platforms(project: GradleProject, source_set_name: str,
             "iosSimulatorArm64Test",
             "macosX64Main",
             "macosX64Test",
+            "macosArm64Main",
+            "macosArm64Test",
             "clientNativeMain",
             "clientNativeTest",
             "linuxX64Main",

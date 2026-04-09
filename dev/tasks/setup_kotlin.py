@@ -645,7 +645,7 @@ def _effective_targets(project: GradleProject) -> list[GradleTargetSpec]:
             else:
                 targets.append(GradleTargetSpec(kind="android-application"))
         elif platform == "macosArm64":
-            targets.append(GradleTargetSpec(kind="macosArm64", name="clientNative"))
+            targets.append(GradleTargetSpec(kind="macosArm64"))
         elif platform == "macosX64":
             targets.append(GradleTargetSpec(kind="macosX64"))
         else:
@@ -1466,6 +1466,8 @@ def _cleanup_nested_gradle_project_files(project: GradleProject) -> None:
     dev.io.delete_if_exists(project.path / "CLA_EXPLANATIONS.md")
     dev.io.delete_if_exists(project.path / "CONTRIBUTOR_PRIVACY.md")
     dev.io.delete_if_exists(project.path / "CODE_OF_CONDUCT.md")
+    dev.io.delete_if_exists(project.path / "legal")
+    dev.io.delete_if_exists(project.path / "NOTICE.md")
     dev.io.delete_if_exists(project.path / ".is-local-mode")
     dev.io.delete_if_exists(project.path / ".is-ij-mode")
     dev.io.delete_if_exists(project.path / ".is-dev-mode")
@@ -1831,6 +1833,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
         if not _nested_gradle_project_keeps_license(ctx, project):
             dev.io.delete_if_exists(project.path / "LICENSE.md")
             dev.io.delete_if_exists(project.path / "LICENSES")
+            dev.io.delete_if_exists(project.path / "NOTICE.md")
     else:
         dev.io.write_text_file(
             project.path / "settings.gradle.kts",
