@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 import re
+import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -292,7 +293,7 @@ def list_checks(*, json_output: bool = False) -> int:
             f"{entry.summary}"
         )
     print()
-    print(f"Run `{command_text('check --describe <check>')}` for issue IDs, config knobs, and suppression examples.")
+    print(f"Run `{command_text('check describe <check>')}` for issue IDs, config knobs, and suppression examples.")
     return 0
 
 
@@ -806,6 +807,14 @@ def check_main(
 
 
 if __name__ == "__main__":
+    raw_argv = sys.argv[1:]
+    if not raw_argv:
+        normalized_argv = ["run"]
+    elif raw_argv[0] in {"run", "list", "describe"}:
+        normalized_argv = raw_argv
+    else:
+        normalized_argv = ["run", *raw_argv]
+
     parser = ArgumentParser(
         description=(
             "Run the loaded repository, project, directory, and file checks "
@@ -813,43 +822,41 @@ if __name__ == "__main__":
         ),
         epilog=(
             "Examples:\n"
-            "  check.py --list\n"
-            "  check.py --describe SpdxHeaderCheck\n"
+            "  check.py list\n"
+            "  check.py describe SpdxHeaderCheck\n"
             "  check.py .\n"
             "  check.py :root --fix\n"
             "  check.py app-wabbit-dev/dev/cli.py --checks SpdxHeaderCheck"
         ),
         formatter_class=ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="command")
+
+    run_parser = subparsers.add_parser("run", help="Run the configured check suite.")
+    run_parser.add_argument(
         "project_or_dir_or_file",
         type=str,
         nargs="?",
         default=".",
         help="Project or directory or file to check.",
     )
-    parser.add_argument("--list", action="store_true", help="List all loaded checks and a short summary for each.")
-    parser.add_argument(
-        "--describe",
-        metavar="CHECK",
-        help="Show issue IDs, config commands, and suppression examples for a named check.",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="When used with --list or --describe, emit JSON instead of text.",
-    )
-    parser.add_argument("--checks", nargs="+", default=[], help="List of checks to run.")
-    parser.add_argument("--fix", action="store_true", help="Fix issues found during checks.")
+    run_parser.add_argument("--checks", nargs="+", default=[], help="List of checks to run.")
+    run_parser.add_argument("--fix", action="store_true", help="Fix issues found during checks.")
 
-    args = parser.parse_args()
+    list_parser = subparsers.add_parser("list", help="List all loaded checks.")
+    list_parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
+
+    describe_parser = subparsers.add_parser("describe", help="Describe one loaded check.")
+    describe_parser.add_argument("check", help="Check class name to describe.")
+    describe_parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
+
+    args = parser.parse_args(normalized_argv)
     try:
-        if args.list:
+        command = args.command or "run"
+        if command == "list":
             raise SystemExit(list_checks(json_output=args.json))
-        if args.describe is not None:
-            raise SystemExit(describe_check(args.describe, json_output=args.json))
-        if args.json:
-            raise ValueError("`--json` currently requires either `--list` or `--describe`.")
+        if command == "describe":
+            raise SystemExit(describe_check(args.check, json_output=args.json))
         raise SystemExit(check_main(args.project_or_dir_or_file, args.checks, args.fix))
     except ValueError as ex:
         parser.exit(2, f"{parser.prog}: error: {ex}\n")

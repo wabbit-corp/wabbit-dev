@@ -120,7 +120,7 @@ Every command is documented here and in the MkDocs reference under
 | `completion bash` / `completion zsh` | Prints shell completion scripts with dynamic command, target, and check-name completion. |
 | `doctor [TARGET ...] [--only CHECK_OR_COMMAND] [--json]` | Diagnoses workspace, toolchain, and credential readiness, optionally scoped to selected checks or targets. |
 | `docs check [TARGET ...] [--semantic] [--json]` | Validates docs links, sections, snippets, hooks, and optional semantic quality. |
-| `docs snippets [TARGET ...] [--python-hook] [--gradle-build] [--json]` | Validates fenced docs snippets, with optional Python hook execution and coarse Gradle build verification. |
+| `docs snippets [TARGET ...] [--verify] [--json]` | Validates fenced docs snippets, with optional deeper project-specific verification. |
 | `where [--json]` | Shows the workspace, repo, and project context inferred from the current directory. |
 | `config check` | Parses and validates `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...] [--json]` | Generates or refreshes managed project files from configuration. |
@@ -134,7 +134,7 @@ Every command is documented here and in the MkDocs reference under
 | `jitpack info GROUP ARTIFACT [VERSION]` | Shows refs, commits, versions, and build info for a JitPack artifact. |
 | `clean [TARGET ...]` | Deletes generated build and cache directories for configured projects. |
 | `cloc [TARGET ...]` | Runs `cloc` for configured targets or arbitrary filesystem paths. |
-| `status [TARGET ...] [--json]` | Shows tracked working-tree changes for the current or selected repo targets. |
+| `status [TARGET ...] [--json]` | Shows staged, unstaged, and untracked repo status for the current or selected targets. |
 | `commit [TARGET ...] [--dry-run]` | Runs PROD setup, stages changes, and creates commits, or prints the commit plan. |
 | `push [TARGET ...] [--dry-run]` | Pushes `origin/master` and tags, or prints the push plan. |
 | `project list` | Lists configured projects grouped by repository. |
@@ -142,8 +142,8 @@ Every command is documented here and in the MkDocs reference under
 | `project deps [TARGET ...] [--json]` | Shows resolved dependencies for one or more configured projects. |
 | `project repo [TARGET ...] [--json]` | Shows repo metadata for one or more configured targets. |
 | `project targets [TARGET ...] [--json]` | Shows Kotlin Multiplatform target platforms for matching configured projects. |
-| `check --list [--json]` | Lists the loaded checks with scope, auto-fix support, and summaries. |
-| `check --describe CHECK [--json]` | Shows issue IDs, config knobs, and suppression examples for one check. |
+| `check list [--json]` | Lists the loaded checks with scope, auto-fix support, and summaries. |
+| `check describe CHECK [--json]` | Shows issue IDs, config knobs, and suppression examples for one check. |
 | `check [TARGET] [CHECK ...]` | Runs the loaded check suite against a project, repo, path, or file. |
 | `spdx headers [TARGET] [--fix]` | Runs only the SPDX header check. |
 | `secrets scan [TARGET]` | Runs the internal high-entropy-string secret scan. |
@@ -237,10 +237,10 @@ The main target forms are:
 - `dev build app-wabbit-dev --json`
 - `dev setup app-wabbit-dev --json`
 - `dev status app-wabbit-dev --json`
-- `dev check --list`
-- `dev check --list --json`
-- `dev check --describe SpdxHeaderCheck`
-- `dev check --describe SpdxHeaderCheck --json`
+- `dev check list`
+- `dev check list --json`
+- `dev check describe SpdxHeaderCheck`
+- `dev check describe SpdxHeaderCheck --json`
 - `dev check .`
 - `dev check path/to/file.py`
 - `dev check app-wabbit-dev`

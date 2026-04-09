@@ -126,6 +126,18 @@ def _resolve_active_parser(parser: argparse.ArgumentParser, words: list[str]) ->
         index += 1
 
 
+def _normalize_completion_words(words: list[str], cword: int) -> tuple[list[str], int]:
+    if len(words) < 2 or words[1] != "check":
+        return words, cword
+    if len(words) == 2:
+        return words, cword
+    if len(words) > 2 and words[2] in {"run", "list", "describe"}:
+        return words, cword
+    normalized = words[:2] + ["run"] + words[2:]
+    adjusted_cword = cword + 1 if cword >= 2 else cword
+    return normalized, adjusted_cword
+
+
 def _action_expects_value(action: argparse.Action) -> bool:
     if not action.option_strings:
         return False
@@ -170,6 +182,18 @@ def _current_positional_action(actions: list[argparse.Action], consumed_count: i
 
 
 def get_completion_reply(words: list[str], cword: int) -> CompletionReply:
+    if len(words) >= 2 and words[1] == "check" and cword == 2:
+        config = _safe_load_config()
+        return CompletionReply(
+            (
+                "list",
+                "describe",
+                *_check_target_candidates(config),
+            ),
+            allow_files=True,
+        )
+
+    words, cword = _normalize_completion_words(words, cword)
     parser, _commands = build_parser()
     config = _safe_load_config()
     active_parser, arg_start = _resolve_active_parser(parser, words)

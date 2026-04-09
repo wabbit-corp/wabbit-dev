@@ -33,7 +33,7 @@ async def test_root_help_includes_command_summaries(
     assert "project" in output
     assert "Inspect the configured project inventory." in output
     assert "check" in output
-    assert "Run repository and source checks." in output
+    assert "Run repository and source checks, or inspect the loaded" in output
     assert "contributors" in output
     assert "secrets" in output
     assert "trufflehog" not in output
@@ -239,28 +239,27 @@ async def test_cli_docs_snippets_dispatches(monkeypatch: pytest.MonkeyPatch) -> 
     from dev import cli
     from dev.tasks import docs_check as docs_check_task
 
-    called: list[tuple[list[str], bool, bool, bool]] = []
+    called: list[tuple[list[str], bool, bool]] = []
 
     def fake_docs_snippets(
         targets=None,
         *,
-        run_python_hook: bool = False,
-        gradle_build: bool = False,
+        verify: bool = False,
         json_output: bool = False,
     ) -> int:
-        called.append((targets, run_python_hook, gradle_build, json_output))
+        called.append((targets, verify, json_output))
         return 0
 
     monkeypatch.setattr(docs_check_task, "docs_snippets", fake_docs_snippets)
     monkeypatch.setattr(
         "sys.argv",
-        ["dev.py", "docs", "snippets", "--python-hook", "--gradle-build", "--json", "app-wabbit-dev"],
+        ["dev.py", "docs", "snippets", "--verify", "--json", "app-wabbit-dev"],
     )
 
     result = await cli.async_main()
 
     assert result == 0
-    assert called == [(["app-wabbit-dev"], True, True, True)]
+    assert called == [(["app-wabbit-dev"], True, True)]
 
 
 @pytest.mark.asyncio
@@ -332,11 +331,11 @@ async def test_cli_check_describe_does_not_infer_target(monkeypatch: pytest.Monk
     monkeypatch.setattr(cli, "_load_workspace_config", lambda: object())
 
     def fail_infer(*_args, **_kwargs):
-        raise AssertionError("check --describe should not infer a target")
+        raise AssertionError("check describe should not infer a target")
 
     monkeypatch.setattr(repo_resolution, "inferred_project_targets", fail_infer)
     monkeypatch.setattr(check_task, "describe_check", lambda name, json_output=False: called.append(name) or 0)
-    monkeypatch.setattr("sys.argv", ["dev.py", "check", "--describe", "SpdxHeaderCheck"])
+    monkeypatch.setattr("sys.argv", ["dev.py", "check", "describe", "SpdxHeaderCheck"])
 
     result = await cli.async_main()
 

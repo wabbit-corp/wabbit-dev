@@ -108,6 +108,14 @@ def _normalize_cli_argv(raw_argv: Sequence[str], commands: "Commands") -> list[s
     if not argv:
         return []
 
+    if argv[0] == "check":
+        if len(argv) == 1:
+            return ["check", "run"]
+        second = argv[1]
+        if second in {"run", "list", "describe"}:
+            return argv
+        return ["check", "run", *argv[1:]]
+
     valid_paths = set(commands.parsers) | set(commands.subparsers)
     normalized: list[str] = []
     current_parts: list[str] = []
@@ -175,10 +183,8 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
             return tokens
         case "docs/snippets":
             tokens = ["docs", "snippets"]
-            if args.python_hook:
-                tokens.append("--python-hook")
-            if args.gradle_build:
-                tokens.append("--gradle-build")
+            if args.verify:
+                tokens.append("--verify")
             if args.json:
                 tokens.append("--json")
             tokens.extend(args.targets or [])
@@ -271,22 +277,23 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
                 tokens.append("--json")
             tokens.extend(args.targets or [])
             return tokens
-        case "check":
+        case "check/run":
             tokens = ["check"]
-            if args.list:
-                tokens.append("--list")
-                if args.json:
-                    tokens.append("--json")
-            elif args.describe is not None:
-                tokens.extend(["--describe", args.describe])
-                if args.json:
-                    tokens.append("--json")
-            else:
-                if args.fix:
-                    tokens.append("--fix")
-                if args.project_or_dir_or_file is not None:
-                    tokens.append(args.project_or_dir_or_file)
-                tokens.extend(args.checks or [])
+            if args.fix:
+                tokens.append("--fix")
+            if args.project_or_dir_or_file is not None:
+                tokens.append(args.project_or_dir_or_file)
+            tokens.extend(args.checks or [])
+            return tokens
+        case "check/list":
+            tokens = ["check", "list"]
+            if args.json:
+                tokens.append("--json")
+            return tokens
+        case "check/describe":
+            tokens = ["check", "describe", args.check]
+            if args.json:
+                tokens.append("--json")
             return tokens
         case "spdx/headers":
             tokens = ["spdx", "headers"]
@@ -378,6 +385,7 @@ def _apply_context_defaults(command_path: str, args: argparse.Namespace) -> None
 
     if command_path in {
         "docs/check",
+        "docs/snippets",
         "setup",
         "build",
         "release/verify",
@@ -401,12 +409,7 @@ def _apply_context_defaults(command_path: str, args: argparse.Namespace) -> None
             if inferred_targets is not None:
                 args.targets = inferred_targets
 
-    if (
-        command_path == "check"
-        and getattr(args, "project_or_dir_or_file", None) is None
-        and not getattr(args, "list", False)
-        and getattr(args, "describe", None) is None
-    ):
+    if command_path == "check/run" and getattr(args, "project_or_dir_or_file", None) is None:
         inferred_targets = inferred_project_targets(config)
         if inferred_targets is not None:
             args.project_or_dir_or_file = inferred_targets[0]
@@ -870,23 +873,21 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
 
             By default this command stays fast: it syntax-checks or parses
             supported snippet languages such as Python, shell, JSON, TOML, and
-            YAML. Optional flags enable deeper project-level verification:
-            `--python-hook` runs `pytest -q tests/test_docs_snippets.py` for
-            Python projects when that hook exists, and `--gradle-build` runs a
-            single coarse Gradle build for Gradle projects that actually contain
-            JVM-oriented snippets.
+            YAML. `--verify` enables deeper project-level verification when the
+            project type supports it, such as project-specific Python snippet
+            tests or a single coarse Gradle verification build.
             """
         ),
         epilog=examples(
             "docs snippets",
             "docs snippets app-wabbit-dev",
-            "docs snippets --python-hook python-lang-mu",
-            "docs snippets --gradle-build kotlin-data",
+            "docs snippets --verify python-lang-mu",
+            "docs snippets --verify kotlin-data",
             "docs snippets --json jeeves",
             notes=[
                 "Targets can be project IDs, repo IDs, or paths inside configured projects or repos.",
                 "The default mode is intentionally cheap and syntax-oriented.",
-                "`--gradle-build` validates the project build as a whole, not each Kotlin snippet individually.",
+                "`--verify` enables deeper project-specific snippet verification when the project type supports it.",
             ],
         ),
     ) as cmd:
@@ -901,14 +902,9 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             help="Project IDs, repo IDs, or paths. Omit to inspect the current inferred project or repo, or the full workspace from root.",
         )
         cmd.add_argument(
-            "--python-hook",
+            "--verify",
             action="store_true",
-            help="For Python projects, run pytest -q tests/test_docs_snippets.py when that hook file exists.",
-        )
-        cmd.add_argument(
-            "--gradle-build",
-            action="store_true",
-            help="For Gradle projects with JVM-oriented snippets, run one coarse project build as an additional signal.",
+            help="Enable deeper project-specific snippet verification beyond the default syntax checks.",
         )
         cmd.add_argument(
             "--json",
@@ -1414,14 +1410,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
 
     with commands(
         "status",
-        help="Show tracked working-tree changes for repo targets.",
+        help="Show repo status for selected targets.",
         description=_doc(
             """
-            Print the tracked files that differ between the git index and working
-            tree.
+            Print a repo status summary similar to `git status --short`.
 
-            This is closest to the unstaged portion of `git status` for one or
-            more resolved repository targets.
+            The output includes staged changes, unstaged changes, and untracked
+            files for one or more resolved repository targets.
             """
         ),
         epilog=examples(
@@ -1431,7 +1426,6 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "status ./app-wabbit-dev",
             "status app-wabbit-dev jeeves/client",
             notes=[
-                "The command reports tracked working-tree changes. Untracked files are not shown.",
                 "With no targets from inside a configured project or repo, status defaults to that current repo.",
                 "From the workspace root, omitting targets inspects every configured repo.",
             ],
@@ -1450,7 +1444,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         cmd.add_argument(
             "--json",
             action="store_true",
-            help="Emit repo status details as JSON instead of human-oriented text.",
+            help="Emit staged, unstaged, and untracked repo status details as JSON.",
         )
 
     with commands(
@@ -1734,24 +1728,16 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
 
     with commands(
         "check",
-        help="Run repository and source checks.",
+        help="Run repository and source checks, or inspect the loaded check catalog.",
         description=_doc(
             """
             Run the configured check suite against a project, directory, or file.
 
-            Targets can be:
-
-            - a filesystem path
-            - a bare project ID or repo ID
-            - a project or repo ID prefixed with `:`
-            - `:root` to check every configured project path
+            Use bare `check` to execute checks, `check list` to browse the
+            loaded catalog, and `check describe` to inspect one check in detail.
             """
         ),
         epilog=examples(
-            "check --list",
-            "check --list --json",
-            "check --describe SpdxHeaderCheck",
-            "check --describe SpdxHeaderCheck --json",
             "check",
             "check app-wabbit-dev/dev/cli.py",
             "check app-wabbit-dev",
@@ -1759,34 +1745,38 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "check jeeves",
             "check :root --fix",
             "check . SpdxHeaderCheck",
+            "check list",
+            "check list --json",
+            "check describe SpdxHeaderCheck",
+            "check describe SpdxHeaderCheck --json",
             notes=[
                 "When TARGET is omitted from inside a configured project or repo, the command defaults to that current project or repo.",
-                "Use `--list` to browse loaded checks and `--describe <check>` for issue IDs and suppression examples.",
+                "Use `check list` to browse loaded checks and `check describe <check>` for issue IDs and suppression examples.",
                 "Explicit check names use the Python class names registered by the check modules.",
                 "Checks honor `.gitignore`, `.checkignore`, and suppressions configured in root.clj.",
             ],
         ),
     ) as cmd:
-        _add_argument(
-            cmd,
-            "--list",
-            action="store_true",
-            completion_blocks_positionals=True,
-            help="List all loaded checks with their scope, auto-fix support, and short summary.",
-        )
-        _add_argument(
-            cmd,
-            "--describe",
-            metavar="CHECK",
-            completion_kind="check-name",
-            completion_blocks_positionals=True,
-            help="Show issue IDs, config commands, and suppression examples for one check.",
-        )
-        cmd.add_argument(
-            "--json",
-            action="store_true",
-            help="When used with `--list` or `--describe`, emit JSON instead of text.",
-        )
+        del cmd
+
+    with commands(
+        "check",
+        "run",
+        help=argparse.SUPPRESS,
+        description=_doc(
+            """
+            Run the configured check suite against a project, directory, or file.
+            """
+        ),
+        epilog=examples(
+            "check",
+            "check app-wabbit-dev/dev/cli.py",
+            "check app-wabbit-dev",
+            "check :root --fix",
+            "check . SpdxHeaderCheck",
+        ),
+    ) as cmd:
+        cmd._completion_hidden = True
         _add_argument(
             cmd,
             "project_or_dir_or_file",
@@ -1811,6 +1801,50 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "--fix",
             action="store_true",
             help="Apply fixes for issues that provide an automatic fix callback.",
+        )
+
+    with commands(
+        "check",
+        "list",
+        help="List the loaded checks with scope, fixability, and summaries.",
+        description=_doc(
+            """
+            List the checks currently loaded from the workspace and check modules.
+            """
+        ),
+        epilog=examples("check list", "check list --json"),
+    ) as cmd:
+        _add_argument(
+            cmd,
+            "--json",
+            action="store_true",
+            help="Emit the check catalog as JSON instead of text.",
+        )
+
+    with commands(
+        "check",
+        "describe",
+        help="Show issue IDs, config knobs, and suppression examples for one check.",
+        description=_doc(
+            """
+            Print detailed information about one loaded check, including issue
+            IDs, typed config commands, and suppression examples.
+            """
+        ),
+        epilog=examples("check describe SpdxHeaderCheck", "check describe SpdxHeaderCheck --json"),
+    ) as cmd:
+        _add_argument(
+            cmd,
+            "check",
+            metavar="CHECK",
+            type=str,
+            completion_kind="check-name",
+            help="The loaded check class name to inspect.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit the detailed check description as JSON instead of text.",
         )
 
     with commands(
@@ -1974,7 +2008,7 @@ async def async_main() -> int:
     from dev.tasks.doctor import preflight_for_command
 
     selected_projects: tuple[str, ...] | None = None
-    if command_path in {"docs/check", "setup", "release/verify", "build", "publish", "commit", "clean", "dep/graph"} and args.targets:
+    if command_path in {"docs/check", "docs/snippets", "setup", "release/verify", "build", "publish", "commit", "clean", "dep/graph"} and args.targets:
         selected_projects = tuple(args.targets)
     elif command_path in {"project/show", "project/deps", "project/repo", "project/targets"}:
         selected_projects = tuple(args.targets)
@@ -2026,8 +2060,7 @@ async def async_main() -> int:
 
                 exit_code = docs_snippets(
                     args.targets,
-                    run_python_hook=args.python_hook,
-                    gradle_build=args.gradle_build,
+                    verify=args.verify,
                     json_output=args.json,
                 )
 
@@ -2148,28 +2181,23 @@ async def async_main() -> int:
 
                 show_project_targets(args.targets, json_output=args.json)
 
-            case "check":
-                from dev.tasks.check import check_main, describe_check, list_checks
-
-                if args.list:
-                    if args.project_or_dir_or_file is not None or args.checks or args.describe is not None or args.fix:
-                        raise ValueError("`check --list` does not accept TARGET, CHECK, --describe, or --fix.")
-                    exit_code = list_checks(json_output=args.json)
-                    return exit_code
-
-                if args.describe is not None:
-                    if args.project_or_dir_or_file is not None or args.checks or args.fix:
-                        raise ValueError("`check --describe` does not accept TARGET, CHECK, or --fix.")
-                    exit_code = describe_check(args.describe, json_output=args.json)
-                    return exit_code
-
-                if args.json:
-                    raise ValueError("`check --json` currently requires either `--list` or `--describe`.")
+            case "check/run":
+                from dev.tasks.check import check_main
 
                 checks = args.checks
                 if not checks:
                     checks = None
                 return check_main(args.project_or_dir_or_file, checks, args.fix)
+
+            case "check/list":
+                from dev.tasks.check import list_checks
+
+                return list_checks(json_output=args.json)
+
+            case "check/describe":
+                from dev.tasks.check import describe_check
+
+                return describe_check(args.check, json_output=args.json)
 
             case "spdx/headers":
                 from dev.tasks.spdx_headers import spdx_headers

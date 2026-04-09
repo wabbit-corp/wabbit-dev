@@ -15,7 +15,7 @@ def test_list_checks_includes_spdx_and_fixability(capsys: pytest.CaptureFixture[
     assert "GitignoreWithoutRepoCheck" in output
     assert "KmpTargetExpansionCheck" in output
     assert "fix:yes" in output
-    assert "Run `check --describe <check>`" in output
+    assert "Run `check describe <check>`" in output
 
 
 def test_describe_check_includes_issue_ids_and_suppressions(capsys: pytest.CaptureFixture[str]) -> None:

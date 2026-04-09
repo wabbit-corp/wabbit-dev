@@ -54,18 +54,16 @@ def test_setup_json_output_reports_selected_projects(tmp_path: Path, monkeypatch
     assert payload["summary"]["selectedProjectCount"] == 1
 
 
-def test_status_json_output_reports_tracked_changes(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_status_json_output_reports_repo_status(tmp_path: Path, monkeypatch, capsys) -> None:
     import dev.tasks.status as status_task
 
     repo_target = SimpleNamespace(name="alpha", path=tmp_path)
 
     class FakeRepo:
         def __init__(self, *_args, **_kwargs) -> None:
-            self.index = SimpleNamespace(
-                diff=lambda _other: [
-                    SimpleNamespace(a_path="src/main.py"),
-                    SimpleNamespace(a_path="README.md"),
-                ]
+            self.untracked_files = ["notes.txt"]
+            self.git = SimpleNamespace(
+                status=lambda *_args: "M  src/main.py\n M README.md\n?? notes.txt\n"
             )
 
         def close(self) -> None:
@@ -80,7 +78,9 @@ def test_status_json_output_reports_tracked_changes(tmp_path: Path, monkeypatch,
     payload = json.loads(capsys.readouterr().out)
     assert payload["requestedTargets"] == ["alpha"]
     assert payload["repos"][0]["name"] == "alpha"
-    assert payload["repos"][0]["trackedChanges"] == ["src/main.py", "README.md"]
+    assert payload["repos"][0]["stagedChanges"] == ["src/main.py"]
+    assert payload["repos"][0]["unstagedChanges"] == ["README.md"]
+    assert payload["repos"][0]["untrackedFiles"] == ["notes.txt"]
 
 
 def test_status_json_output_uses_inferred_repo_target(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -90,7 +90,8 @@ def test_status_json_output_uses_inferred_repo_target(tmp_path: Path, monkeypatc
 
     class FakeRepo:
         def __init__(self, *_args, **_kwargs) -> None:
-            self.index = SimpleNamespace(diff=lambda _other: [SimpleNamespace(a_path="src/main.py")])
+            self.untracked_files = []
+            self.git = SimpleNamespace(status=lambda *_args: " M src/main.py\n")
 
         def close(self) -> None:
             return None
@@ -108,3 +109,4 @@ def test_status_json_output_uses_inferred_repo_target(tmp_path: Path, monkeypatc
     assert payload["requestedTargets"] == []
     assert payload["inferredTargets"] == ["alpha"]
     assert payload["repos"][0]["name"] == "alpha"
+    assert payload["repos"][0]["unstagedChanges"] == ["src/main.py"]

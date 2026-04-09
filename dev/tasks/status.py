@@ -11,6 +11,32 @@ from dev.messages import accent, error, heading, info, muted, success
 from dev.repo_resolution import configured_repo_targets, inferred_repo_targets, resolve_repo_targets
 
 
+def _status_lists(repo: Repo) -> tuple[list[str], list[str], list[str]]:
+    staged: list[str] = []
+    unstaged: list[str] = []
+    untracked = sorted(repo.untracked_files)
+
+    porcelain = repo.git.status("--porcelain=1", "--untracked-files=all")
+    for raw_line in porcelain.splitlines():
+        if not raw_line:
+            continue
+        status = raw_line[:2]
+        path_text = raw_line[3:] if len(raw_line) > 3 else ""
+        if " -> " in path_text:
+            path_text = path_text.split(" -> ", 1)[1]
+        path_text = path_text.strip()
+        if not path_text:
+            continue
+        if status == "??":
+            continue
+        if status[0] != " ":
+            staged.append(path_text)
+        if status[1] != " ":
+            unstaged.append(path_text)
+
+    return sorted(dict.fromkeys(staged)), sorted(dict.fromkeys(unstaged)), untracked
+
+
 def status(targets: str | list[str] | None, *, json_output: bool = False) -> int:
     requested_targets = [targets] if isinstance(targets, str) else targets
     payload: dict[str, object] = {
@@ -49,7 +75,9 @@ def status(targets: str | list[str] | None, *, json_output: bool = False) -> int
         repo_payload = {
             "name": resolved_target.name,
             "path": str(Path(path).resolve()),
-            "trackedChanges": [],
+            "stagedChanges": [],
+            "unstagedChanges": [],
+            "untrackedFiles": [],
         }
         if not path.exists():
             repo_payload["error"] = "Path does not exist."
@@ -59,8 +87,12 @@ def status(targets: str | list[str] | None, *, json_output: bool = False) -> int
                 error(f"Project {resolved_target.name} does not exist")
             continue
         repo = Repo(path, search_parent_directories=True)
-        tracked_changes = [item.a_path for item in repo.index.diff(None)]
-        repo_payload["trackedChanges"] = tracked_changes
+        staged_changes, unstaged_changes, untracked_files = _status_lists(repo)
+        repo_payload["stagedChanges"] = staged_changes
+        repo_payload["unstagedChanges"] = unstaged_changes
+        repo_payload["trackedChanges"] = unstaged_changes
+        repo_payload["untrackedFiles"] = untracked_files
+        repo_payload["isClean"] = not (staged_changes or unstaged_changes or untracked_files)
         payload["repos"].append(repo_payload)
 
         if json_output:
@@ -71,10 +103,20 @@ def status(targets: str | list[str] | None, *, json_output: bool = False) -> int
             print()
         repo_header = f"{heading('Status for')} {accent(resolved_target.name)}"
         repo_path = muted(Path(path).resolve())
-        if tracked_changes:
+        if staged_changes or unstaged_changes or untracked_files:
             info(f"{repo_header} ({repo_path})")
-            for item_path in tracked_changes:
-                print(f"  {accent(item_path, 'yellow')}")
+            if staged_changes:
+                print(f"  {heading('Staged')}:")
+                for item_path in staged_changes:
+                    print(f"    {accent(item_path, 'green')}")
+            if unstaged_changes:
+                print(f"  {heading('Unstaged')}:")
+                for item_path in unstaged_changes:
+                    print(f"    {accent(item_path, 'yellow')}")
+            if untracked_files:
+                print(f"  {heading('Untracked')}:")
+                for item_path in untracked_files:
+                    print(f"    {accent(item_path, 'magenta')}")
         else:
             success(f"{repo_header} ({repo_path})")
             print(f"  {muted('Working tree clean.')}")

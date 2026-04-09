@@ -51,7 +51,7 @@ commands from the workspace root.
 | `completion bash` / `completion zsh` | Print shell completion scripts with dynamic command, target, and check-name completion. |
 | `doctor [TARGET ...] [--only CHECK_OR_COMMAND] [--json]` | Diagnose workspace, toolchain, and credential readiness. |
 | `docs check [TARGET ...] [--semantic] [--json]` | Validate docs links, sections, snippets, hooks, and optional semantic quality. |
-| `docs snippets [TARGET ...] [--python-hook] [--gradle-build] [--json]` | Validate fenced docs snippets with optional deeper project-specific verification. |
+| `docs snippets [TARGET ...] [--verify] [--json]` | Validate fenced docs snippets with optional deeper project-specific verification. |
 | `where [--json]` | Show the workspace, repo, and project context inferred from the current directory. |
 | `config check` | Parse and validate `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...] [--json]` | Generate or refresh managed project files. |
@@ -65,7 +65,7 @@ commands from the workspace root.
 | `jitpack info GROUP ARTIFACT [VERSION]` | Show refs, commits, versions, and build info from JitPack. |
 | `clean [TARGET ...]` | Remove generated build and cache directories. |
 | `cloc [TARGET ...]` | Run `cloc` for configured targets or direct paths. |
-| `status [TARGET ...] [--json]` | Show tracked working-tree changes for the current or selected repo targets. |
+| `status [TARGET ...] [--json]` | Show staged, unstaged, and untracked status for the current or selected repo targets. |
 | `commit [TARGET ...] [--dry-run]` | Run PROD setup, stage changes, and create commits, or print the commit plan. |
 | `push [TARGET ...] [--dry-run]` | Push `origin/master` and tags, or print the push plan. |
 | `project list` | List configured projects grouped by repository. |
@@ -73,8 +73,8 @@ commands from the workspace root.
 | `project deps [TARGET ...] [--json]` | Show resolved dependencies for one or more configured projects. |
 | `project repo [TARGET ...] [--json]` | Show repo metadata for one or more configured targets. |
 | `project targets [TARGET ...] [--json]` | Show Kotlin Multiplatform target platforms for matching configured projects. |
-| `check --list [--json]` | List the loaded checks and what they do. |
-| `check --describe CHECK [--json]` | Show issue IDs, config knobs, and suppression examples for one check. |
+| `check list [--json]` | List the loaded checks and what they do. |
+| `check describe CHECK [--json]` | Show issue IDs, config knobs, and suppression examples for one check. |
 | `check [TARGET] [CHECK ...]` | Run the configured check suite. |
 | `spdx headers [TARGET] [--fix]` | Run only the SPDX header check. |
 | `secrets scan [TARGET]` | Run the internal high-entropy-string secret scan. |
@@ -193,7 +193,7 @@ dev docs check --json jeeves
 ### `docs snippets`
 
 ```bash
-dev docs snippets [TARGET ...] [--python-hook] [--gradle-build] [--json]
+dev docs snippets [TARGET ...] [--verify] [--json]
 ```
 
 Runs snippet-focused validation for fenced code blocks extracted from README and
@@ -208,21 +208,20 @@ Default behavior stays intentionally cheap:
 
 Optional deeper verification:
 
-- `--python-hook`: run `pytest -q tests/test_docs_snippets.py` for Python
-  projects when that hook exists
-- `--gradle-build`: for Gradle projects that actually contain JVM-oriented
-  snippets, run one coarse project build as an extra signal
+- `--verify`: enable project-specific deeper verification where the project
+  type supports it, such as Python snippet hook tests or one coarse Gradle
+  verification build
 
-`--gradle-build` is honest by design: it validates the project build as a
-whole, not each Kotlin snippet individually.
+`--verify` is honest by design: for Gradle projects it validates the project
+build or publication path as a whole, not each Kotlin snippet individually.
 
 Examples:
 
 ```bash
 dev docs snippets
 dev docs snippets python-lang-mu
-dev docs snippets --python-hook python-lang-mu
-dev docs snippets --gradle-build kotlin-data
+dev docs snippets --verify python-lang-mu
+dev docs snippets --verify kotlin-data
 dev docs snippets --json app-wabbit-dev
 ```
 
@@ -636,10 +635,10 @@ targets without uploading artifacts or contacting remote publish services.
 ### `check`
 
 ```bash
-dev check --list
-dev check --list --json
-dev check --describe SpdxHeaderCheck
-dev check --describe SpdxHeaderCheck --json
+dev check list
+dev check list --json
+dev check describe SpdxHeaderCheck
+dev check describe SpdxHeaderCheck --json
 dev check [TARGET] [CHECK ...] [--fix]
 ```
 
@@ -652,9 +651,9 @@ Runs the loaded check suite against:
 
 Discovery helpers:
 
-- `--list`: show every loaded check with its scope and whether it advertises auto-fix support
-- `--describe CHECK`: show issue IDs, config commands, and suppression examples for one check
-- `--json`: with `--list` or `--describe`, emit structured output instead of text
+- `check list`: show every loaded check with its scope and whether it advertises auto-fix support
+- `check describe CHECK`: show issue IDs, config commands, and suppression examples for one check
+- `--json`: with `check list` or `check describe`, emit structured output instead of text
 
 Examples:
 
@@ -730,16 +729,15 @@ loaded workspace config.
 dev status TARGET ... [--json]
 ```
 
-Shows tracked working-tree changes for:
+Shows repo status for:
 
 - a configured repo ID
 - a configured project ID from `root.clj`
 - any path inside a git repository
 
-This command reports tracked files that differ between the index and working
-tree. It does not list untracked files.
+This command reports staged changes, unstaged changes, and untracked files.
 
-Use `--json` to emit a per-repo list of tracked changes for scripts or editor
+Use `--json` to emit a per-repo status summary for scripts or editor
 integrations.
 
 ### `commit`

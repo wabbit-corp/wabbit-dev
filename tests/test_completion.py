@@ -83,7 +83,7 @@ def test_completion_reply_suggests_check_targets_and_colon_forms(monkeypatch) ->
     reply = completion_task.get_completion_reply(["wabbit-dev", "check", ""], 2)
 
     assert reply.allow_files is True
-    assert reply.candidates == (":root", "app-wabbit-dev", "jeeves", ":app-wabbit-dev", ":jeeves")
+    assert reply.candidates == ("list", "describe", ":root", "app-wabbit-dev", "jeeves", ":app-wabbit-dev", ":jeeves")
 
 
 def test_completion_reply_suggests_check_names_after_target(monkeypatch) -> None:
@@ -104,7 +104,7 @@ def test_completion_reply_suggests_check_names_for_describe(monkeypatch) -> None
     monkeypatch.setattr(completion_task, "load_config", lambda: None)
     monkeypatch.setattr(completion_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck"])
 
-    reply = completion_task.get_completion_reply(["wabbit-dev", "check", "--describe", ""], 3)
+    reply = completion_task.get_completion_reply(["wabbit-dev", "check", "describe", ""], 3)
 
     assert reply.allow_files is False
     assert reply.candidates == ("SpdxHeaderCheck",)

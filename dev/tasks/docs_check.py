@@ -969,8 +969,7 @@ def _project_docs_result(
 def _project_snippets_result(
     project: Project,
     *,
-    run_python_hook: bool,
-    gradle_build: bool,
+    verify: bool,
     redirect_output: bool,
 ) -> dict[str, object]:
     markdown_files = _project_markdown_files(project)
@@ -992,19 +991,26 @@ def _project_snippets_result(
     findings, snippet_summary = _syntax_check_snippets(code_blocks)
     result["snippetSummary"] = snippet_summary
 
-    if run_python_hook and isinstance(project, PythonProject):
-        hook_findings, hook_result = _run_python_snippet_hook(project, redirect_output=redirect_output)
-        findings.extend(hook_findings)
-        result["pythonHook"] = hook_result
+    if verify and isinstance(project, PythonProject):
+        hook_path = project.path / "tests" / "test_docs_snippets.py"
+        if hook_path.is_file():
+            hook_findings, hook_result = _run_python_snippet_hook(project, redirect_output=redirect_output)
+            findings.extend(hook_findings)
+            result["verification"] = hook_result | {"mode": "python-hook"}
+        else:
+            result["verification"] = {"status": "skipped", "reason": "no-project-specific-verifier", "mode": "python-hook"}
 
-    if gradle_build and isinstance(project, GradleProject):
+    if verify and isinstance(project, GradleProject):
         has_jvm_snippets = any(_snippet_language(block) in _SNIPPET_JVM_LANGUAGES for block in code_blocks)
         if has_jvm_snippets:
             gradle_findings, gradle_result = _run_gradle_snippet_build(project, redirect_output=redirect_output)
             findings.extend(gradle_findings)
-            result["gradleBuild"] = gradle_result
+            result["verification"] = gradle_result
         else:
-            result["gradleBuild"] = {"status": "skipped", "reason": "no-jvm-snippets"}
+            result["verification"] = {"status": "skipped", "reason": "no-jvm-snippets", "mode": "gradle"}
+
+    if verify and "verification" not in result and not isinstance(project, (PythonProject, GradleProject)):
+        result["verification"] = {"status": "skipped", "reason": "unsupported-project-kind"}
 
     result["findings"] = [finding.payload() for finding in findings]
     has_errors = any(finding.severity == "error" for finding in findings)
@@ -1169,8 +1175,7 @@ def docs_check(
 def docs_snippets(
     projects: str | list[str] | None = None,
     *,
-    run_python_hook: bool = False,
-    gradle_build: bool = False,
+    verify: bool = False,
     json_output: bool = False,
 ) -> int:
     requested_projects = [projects] if isinstance(projects, str) else projects
@@ -1179,8 +1184,7 @@ def docs_snippets(
         "inferredTargets": [],
         "resolvedTargets": [],
         "results": [],
-        "runPythonHook": run_python_hook,
-        "gradleBuild": gradle_build,
+        "verify": verify,
     }
 
     def run() -> int:
@@ -1206,8 +1210,7 @@ def docs_snippets(
             project = config.defined_projects[project_id]
             result = _project_snippets_result(
                 project,
-                run_python_hook=run_python_hook,
-                gradle_build=gradle_build,
+                verify=verify,
                 redirect_output=json_output,
             )
             payload["results"].append(result)
@@ -1218,18 +1221,21 @@ def docs_snippets(
         _update_snippet_summary(payload)
         summary = cast(dict[str, int], payload["summary"])
         if summary["error"]:
-            error(
-                f"{heading('Docs snippets summary')}: {summary['error']} error project(s), "
-                f"{summary['warning']} warning project(s)."
-            )
+            if not json_output:
+                error(
+                    f"{heading('Docs snippets summary')}: {summary['error']} error project(s), "
+                    f"{summary['warning']} warning project(s)."
+                )
             return 1
         if summary["warning"]:
-            warning(
-                f"{heading('Docs snippets summary')}: {summary['warning']} warning project(s), "
-                "no blocking snippet errors."
-            )
+            if not json_output:
+                warning(
+                    f"{heading('Docs snippets summary')}: {summary['warning']} warning project(s), "
+                    "no blocking snippet errors."
+                )
             return 0
-        success(f"{heading('Docs snippets summary')}: no snippet problems found.")
+        if not json_output:
+            success(f"{heading('Docs snippets summary')}: no snippet problems found.")
         return 0
 
     output_context = redirect_stdout(sys.stderr) if json_output else nullcontext()

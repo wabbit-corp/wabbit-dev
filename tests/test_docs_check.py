@@ -421,11 +421,11 @@ def test_docs_snippets_runs_python_hook_when_requested(
         lambda command, cwd, check, **kwargs: commands.append(command) or None,
     )
 
-    result = docs_task.docs_snippets(["alpha"], run_python_hook=True, json_output=True)
+    result = docs_task.docs_snippets(["alpha"], verify=True, json_output=True)
 
     assert result == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["results"][0]["pythonHook"]["status"] == "success"
+    assert payload["results"][0]["verification"]["status"] == "success"
     assert commands == [[docs_task.sys.executable, "-m", "pytest", "-q", "tests/test_docs_snippets.py"]]
 
 
@@ -452,16 +452,15 @@ def test_docs_snippets_warns_when_python_hook_missing(
     monkeypatch.setattr(docs_task, "load_config", lambda: config)
     monkeypatch.setattr(docs_task, "resolve_project_ids", lambda _config, targets: list(targets))
 
-    result = docs_task.docs_snippets(["alpha"], run_python_hook=True, json_output=True)
+    result = docs_task.docs_snippets(["alpha"], verify=True, json_output=True)
 
     assert result == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["summary"]["warning"] == 1
-    codes = {finding["code"] for finding in payload["results"][0]["findings"]}
-    assert "W_DOCS_SNIPPETS_MISSING_PYTHON_HOOK" in codes
+    assert payload["summary"]["success"] == 1
+    assert payload["results"][0]["verification"]["status"] == "skipped"
 
 
-def test_docs_snippets_runs_gradle_build_when_requested(
+def test_docs_snippets_runs_gradle_build_when_verify_requested(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -488,11 +487,11 @@ def test_docs_snippets_runs_gradle_build_when_requested(
         lambda project, redirect_output: ([], {"status": "success", "mode": "coarse-project-build"}),
     )
 
-    result = docs_task.docs_snippets(["alpha"], gradle_build=True, json_output=True)
+    result = docs_task.docs_snippets(["alpha"], verify=True, json_output=True)
 
     assert result == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["results"][0]["gradleBuild"]["status"] == "success"
+    assert payload["results"][0]["verification"]["status"] == "success"
 
 
 def test_docs_snippets_kmp_gradle_build_uses_multiplatform_publication(
@@ -527,10 +526,10 @@ def test_docs_snippets_kmp_gradle_build_uses_multiplatform_publication(
         lambda command, cwd, check, **kwargs: commands.append(command) or None,
     )
 
-    result = docs_task.docs_snippets(["alpha"], gradle_build=True, json_output=True)
+    result = docs_task.docs_snippets(["alpha"], verify=True, json_output=True)
 
     assert result == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["results"][0]["gradleBuild"]["status"] == "success"
-    assert payload["results"][0]["gradleBuild"]["mode"] == "kmp-multiplatform-publication"
+    assert payload["results"][0]["verification"]["status"] == "success"
+    assert payload["results"][0]["verification"]["mode"] == "kmp-multiplatform-publication"
     assert commands == [["./gradlew", "--no-daemon", "publishKotlinMultiplatformPublicationToMavenLocal"]]
