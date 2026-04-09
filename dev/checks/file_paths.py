@@ -213,8 +213,11 @@ class FilenamePropertiesCheck(FileCheck):
         if self.reserved_pattern and self.reserved_pattern.match(filename):
             ctx.add_issue(E_RESERVED_FILENAME)
 
-        # 4. Check for leading/trailing spaces or dots
-        if self.check_leading_trailing and filename != filename.strip(" ."):
+        # 4. Check for leading/trailing spaces or trailing dots.
+        # Leading dots are valid and common for hidden files like .gitignore.
+        if self.check_leading_trailing and (
+            filename.startswith(" ") or filename.endswith(" ") or filename.endswith(".")
+        ):
             ctx.add_issue(E_LEADING_TRAILING_SPACES_OR_DOTS)
 
 

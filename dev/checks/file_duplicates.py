@@ -8,7 +8,7 @@ from pathlib import Path
 
 from dev.checks.base import Issue, IssueType, RepoCheck
 from dev.config import Project
-from dev.ignore_files import IgnoreMatcher
+from dev.project_layout import build_content_ignore_matcher
 from dev.tasks.duplicates import FileGroup, TreeGroup, find_duplicates
 
 E_DUPLICATE_FILE = IssueType(
@@ -54,8 +54,10 @@ class DuplicateFilesCheck(RepoCheck):
     order = 70
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
-        del project
-        report = find_duplicates([str(path)], ignore_path=IgnoreMatcher(path))
+        report = find_duplicates(
+            [str(path)],
+            ignore_path=build_content_ignore_matcher(path, project=project),
+        )
 
         issues = [_make_tree_issue(group) for group in report.tree_groups]
         issues.extend(_make_file_issue(group) for group in report.file_groups)

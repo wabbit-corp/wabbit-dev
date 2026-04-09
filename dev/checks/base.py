@@ -19,6 +19,9 @@ from dev.intrangeset import IntRangeSet
 
 if TYPE_CHECKING:
     from dev.config import Project
+    from dev.ignore_files import IgnoreMatcher
+
+from dev.generated_files import is_setup_managed_file
 
 
 @dataclass(frozen=True)
@@ -322,6 +325,7 @@ class FileContext:
     path: Path
     issues: IssueList = field(default_factory=IssueList)
     project: Project | None = None
+    ignore_matcher: IgnoreMatcher | None = None
     project_type: CoarseProjectType | None = None
     file_scope: CoarseFileScope | None = None
     scoped_read_suppressions: ScopedReadSuppressions | None = None
@@ -341,6 +345,16 @@ class FileContext:
     @property
     def is_file(self) -> bool:
         return self.path.is_file()
+
+    @property
+    def is_ignored(self) -> bool:
+        if self.ignore_matcher is None:
+            return False
+        return self.ignore_matcher.matches(self.path, is_dir=self.path.is_dir())
+
+    @property
+    def is_setup_managed(self) -> bool:
+        return self.path.is_file() and is_setup_managed_file(self.path)
 
     @property
     def expected_properties(self) -> ExpectedFileProperties:

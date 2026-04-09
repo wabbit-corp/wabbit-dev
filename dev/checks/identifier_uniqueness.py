@@ -20,8 +20,8 @@ from dev.config import Project
 # Assuming get_expected_file_properties exists and helps identify text files
 # If not, we might need a simpler text file check.
 from dev.file_properties import get_expected_file_properties
-from dev.ignore_files import IgnoreMatcher
 from dev.intrangeset import IntRangeSet
+from dev.project_layout import build_content_ignore_matcher
 
 # Assuming a walk_files utility exists or we implement one
 # from dev.io import walk_files # If you have this utility
@@ -163,7 +163,7 @@ class UniqueIdentifiersCheck(ProjectCheck):
         seen_ulids: dict[str, FileLocation] = {}
         seen_uuids: dict[str, FileLocation] = {}
         issues = IssueList()  # Use IssueList for potential merging later if needed
-        ignore_matcher = IgnoreMatcher(path)
+        ignore_matcher = build_content_ignore_matcher(path, project=project)
 
         def scan_file(file_path: Path) -> None:
             if self._is_locally_ignored(file_path, path):

@@ -3,8 +3,8 @@ from pathlib import Path
 from dev.checks.base import FileContext
 from dev.checks.dependencies import E_UNPINNED_DEPENDENCY, PythonRequirementsPinnedCheck
 from dev.checks.file_paths import (
-    E_LEADING_TRAILING_SPACES_OR_DOTS,
     E_FILE_NAMING_CONVENTION,
+    E_LEADING_TRAILING_SPACES_OR_DOTS,
     E_SYMLINK,
     E_SYMLINK_BROKEN,
     E_SYMLINK_ESCAPES_REPO,
@@ -75,6 +75,16 @@ def test_filename_properties_check_reports_leading_space(tmp_path: Path) -> None
     FilenamePropertiesCheck().check(ctx)
 
     assert [issue.issue_type for issue in ctx.issues.issues] == [E_LEADING_TRAILING_SPACES_OR_DOTS]
+
+
+def test_filename_properties_check_allows_hidden_dotfiles(tmp_path: Path) -> None:
+    path = tmp_path / ".gitignore"
+    path.write_text("build/\n", encoding="utf-8")
+    ctx = FileContext(check_name="FilenamePropertiesCheck", path=path)
+
+    FilenamePropertiesCheck().check(ctx)
+
+    assert ctx.issues.issues == []
 
 
 def test_symlink_target_check_always_reports_symlink_issue(tmp_path: Path) -> None:

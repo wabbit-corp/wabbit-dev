@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 import re
+import string
 import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from collections.abc import Callable, Sequence
@@ -33,11 +34,15 @@ from dev.checks.base import (
 from dev.checks.root_paths import E_GITIGNORE_WITHOUT_REPO
 from dev.config import Project, find_workspace_root, load_config
 from dev.discoverability import did_you_mean_suffix, unknown_name_message
-from dev.ignore_files import IgnoreMatcher
+from dev.ignore_files import IgnoreMatcher, read_checkignore_issue_directives
 from dev.messages import accent, command_text, error, heading, info, style, warning
+from dev.project_layout import build_check_ignore_matcher
 from dev.repo_resolution import configured_repo_targets, inferred_project_targets, resolve_check_paths
 
 _ISSUE_ID_RE = re.compile(r"\b(E_[A-Z0-9_]+)\b")
+_QUOTED_MESSAGE_PLACEHOLDER_RE = re.compile(
+    r"(['\"])\{(?P<field>[a-zA-Z_][a-zA-Z0-9_]*)(?P<spec>:[^}]*)?\}\1"
+)
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,44 @@ class CheckCatalogEntry:
     fixable: str
     issue_types: tuple[IssueType, ...]
     config_commands: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ScopedIssueIgnore:
+    issue_id: str
+    base_dir: Path
+    spec: pathspec.PathSpec
+    value: str | None = None
+    field_name: str | None = None
+    field_value: str | None = None
+    field_regex: re.Pattern[str] | None = None
+
+    def matches_path(self, path: Path, issue_id: str) -> bool:
+        if self.issue_id != "*" and self.issue_id != issue_id:
+            return False
+        try:
+            relative_path = path.resolve().relative_to(self.base_dir.resolve()).as_posix()
+        except ValueError:
+            return False
+        return self.spec.match_file(relative_path)
+
+    def matches_issue(self, issue: Issue, message: str) -> bool:
+        if issue.location is None or not self.matches_path(issue.location.path, issue.issue_type.id):
+            return False
+        if self.field_name is not None:
+            if issue.data is None:
+                return False
+            field_value = issue.data.get(self.field_name)
+            if not isinstance(field_value, str):
+                return False
+            if self.field_value is not None:
+                return field_value == self.field_value
+            if self.field_regex is None:
+                return False
+            return self.field_regex.search(field_value) is not None
+        if self.value is not None:
+            return self.value in message
+        return True
 
 
 def _load_optional_config(start: str | Path = ".") -> object | None:
@@ -438,7 +481,7 @@ def check_main(
     needs_recursive_walk = bool(file_checks or dir_checks)
 
     disabled_checks: dict[str, pathspec.PathSpec] = {}
-    ignored_findings: list[tuple[str, pathspec.PathSpec, str]] = []
+    ignored_findings: list[ScopedIssueIgnore] = []
     known_types = known_issue_types()
     if config is not None:
         patterns_by_error_name: dict[str, list[str]] = {}
@@ -472,21 +515,102 @@ def check_main(
                 error_name in known_types or error_name == "*"
             ), f"Unknown error type in ignored_findings: {repr(error_name)}"
             ignored_findings.append(
-                (
-                    error_name,
-                    pathspec.PathSpec.from_lines(
+                ScopedIssueIgnore(
+                    issue_id=error_name,
+                    base_dir=config_root,
+                    spec=pathspec.PathSpec.from_lines(
                         pathspec.patterns.gitwildmatch.GitWildMatchPattern,
                         [pattern],
                     ),
-                    value,
+                    value=value,
+                )
+            )
+
+    checkignore_paths: set[Path] = set()
+    for root_path in root_paths:
+        if root_path.is_file():
+            current = root_path.parent
+        else:
+            current = root_path
+        while True:
+            checkignore_path = current / ".checkignore"
+            if checkignore_path.is_file():
+                checkignore_paths.add(checkignore_path.resolve())
+            if current.parent == current:
+                break
+            current = current.parent
+        if root_path.is_dir():
+            for checkignore_path in root_path.rglob(".checkignore"):
+                checkignore_paths.add(checkignore_path.resolve())
+
+    for checkignore_path in sorted(checkignore_paths):
+        for directive in read_checkignore_issue_directives(checkignore_path):
+            assert (
+                directive.issue_id in known_types or directive.issue_id == "*"
+            ), f"Unknown error type in .checkignore: {directive.issue_id!r} ({checkignore_path})"
+            compiled_field_regex: re.Pattern[str] | None = None
+            if directive.matcher is not None and directive.matcher.field_regex is not None:
+                try:
+                    compiled_field_regex = re.compile(directive.matcher.field_regex)
+                except re.error as ex:
+                    raise ValueError(
+                        f"Invalid .checkignore regex {directive.matcher.field_regex!r} in {checkignore_path}: {ex}"
+                    ) from ex
+            ignored_findings.append(
+                ScopedIssueIgnore(
+                    issue_id=directive.issue_id,
+                    base_dir=checkignore_path.parent,
+                    spec=pathspec.PathSpec.from_lines(
+                        pathspec.patterns.gitwildmatch.GitWildMatchPattern,
+                        [directive.pathspec],
+                    ),
+                    value=directive.matcher.value if directive.matcher is not None else None,
+                    field_name=directive.matcher.field_name if directive.matcher is not None else None,
+                    field_value=directive.matcher.field_value if directive.matcher is not None else None,
+                    field_regex=compiled_field_regex,
                 )
             )
 
     # print(f"Disabled checks: {disabled_checks}")
 
+    def _format_issue_field_value(value: object) -> str:
+        if isinstance(value, Path):
+            value = value.as_posix()
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
     def issue_message(issue: Issue, report_format_error: bool = False) -> str:
         try:
-            return issue.issue_type.message.format(**(issue.data or {}))
+            data = dict(issue.data or {})
+            template = _QUOTED_MESSAGE_PLACEHOLDER_RE.sub(
+                lambda match: "{"
+                + match.group("field")
+                + (match.group("spec") or "")
+                + "}",
+                issue.issue_type.message,
+            )
+
+            formatter = string.Formatter()
+            parts: list[str] = []
+            for literal_text, field_name, format_spec, conversion in formatter.parse(template):
+                parts.append(literal_text)
+                if field_name is None:
+                    continue
+                if field_name not in data:
+                    raise KeyError(field_name)
+                value = data[field_name]
+                if conversion == "r":
+                    value = repr(value)
+                elif conversion == "s":
+                    value = str(value)
+                elif conversion == "a":
+                    value = ascii(value)
+
+                if format_spec:
+                    rendered_value = format(value, format_spec)
+                else:
+                    rendered_value = _format_issue_field_value(value)
+                parts.append(f"{field_name}:{rendered_value}")
+            return "".join(parts)
         except Exception as e:
             if report_format_error:
                 error(f"Error formatting issue message: {e} with type: {issue.issue_type} and data: {issue.data}")
@@ -508,14 +632,9 @@ def check_main(
                 return True
 
         if issue.location is not None and ignored_findings:
-            path_text = issue_relative_path(issue.location.path)
             message = issue_message(issue, report_format_error=False)
-            for error_name, spec, value in ignored_findings:
-                if error_name != "*" and error_name != issue.issue_type.id:
-                    continue
-                if not spec.match_file(path_text):
-                    continue
-                if value in message:
+            for rule in ignored_findings:
+                if rule.matches_issue(issue, message):
                     return True
 
         return False
@@ -523,15 +642,16 @@ def check_main(
     def scoped_read_suppressions_for(path: Path) -> ScopedReadSuppressions | None:
         if not ignored_findings:
             return None
-        relative_path = issue_relative_path(path)
         scoped_rules: list[ScopedFindingIgnoreRule] = []
-        for error_name, spec, value in ignored_findings:
-            if not spec.match_file(relative_path):
+        for rule in ignored_findings:
+            if rule.value is None or rule.field_name is not None:
+                continue
+            if not rule.matches_path(path, rule.issue_id):
                 continue
             scoped_rules.append(
                 ScopedFindingIgnoreRule(
-                    issue_id=error_name,
-                    value=value,
+                    issue_id=rule.issue_id,
+                    value=rule.value,
                 )
             )
         if not scoped_rules:
@@ -605,6 +725,17 @@ def check_main(
 
     def repo_ignores_path(path: Path, repo: RepoContext) -> bool:
         return repo.matcher.matches(path, is_dir=path.is_dir())
+
+    def configured_projects_for_repo_root(repo_root: Path) -> list[Project]:
+        resolved_root = repo_root.resolve()
+        return sorted(
+            [
+                candidate
+                for candidate in projects_by_path.values()
+                if candidate.effective_repo_root.resolve() == resolved_root
+            ],
+            key=lambda candidate: candidate.path.as_posix(),
+        )
 
     def find_repo_root(path: Path) -> Path | None:
         current = path.absolute()
@@ -700,7 +831,13 @@ def check_main(
         if repo is None:
             repo_root = find_repo_root(path)
             if repo_root is not None:
-                repo = RepoContext(root=repo_root, matcher=IgnoreMatcher(repo_root))
+                repo = RepoContext(
+                    root=repo_root,
+                    matcher=build_check_ignore_matcher(
+                        repo_root,
+                        projects=configured_projects_for_repo_root(repo_root),
+                    ),
+                )
                 project_at_root = projects_by_path.get(repo_root.resolve())
                 maybe_run_repo_checks(repo_root, project_at_root)
 
@@ -719,15 +856,29 @@ def check_main(
 
             # It could be a repo
             if (path / ".git").exists():
-                repo = RepoContext(root=path, matcher=IgnoreMatcher(path))
+                repo = RepoContext(
+                    root=path,
+                    matcher=build_check_ignore_matcher(
+                        path,
+                        project=project,
+                        projects=configured_projects_for_repo_root(path),
+                    ),
+                )
                 maybe_run_repo_checks(path, project)
             elif (path / ".checkignore").exists() and repo is None:
-                repo = RepoContext(root=path, matcher=IgnoreMatcher(path))
+                repo = RepoContext(
+                    root=path,
+                    matcher=build_check_ignore_matcher(path, project=project),
+                )
 
             accumulated_issues = IssueList()
             for directory_check in dir_checks:
-                # FIXME: File Context?
-                ctx = FileContext(path=path, check_name=directory_check.__class__.__name__)
+                ctx = FileContext(
+                    path=path,
+                    check_name=directory_check.__class__.__name__,
+                    project=project,
+                    ignore_matcher=repo.matcher if repo is not None else None,
+                )
                 try:
                     directory_check.check(ctx=ctx)
                 except CheckFailedWithReportedIssues:
@@ -754,6 +905,7 @@ def check_main(
                     check_name=file_check.__class__.__name__,
                     path=path,
                     project=project,
+                    ignore_matcher=repo.matcher if repo is not None else None,
                     project_type=project_type,
                     file_scope=file_scope,
                     scoped_read_suppressions=scoped_suppressions,

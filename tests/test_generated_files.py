@@ -6,6 +6,7 @@ import pytest
 
 from dev.generated_files import (
     SETUP_MANAGED_INTEGRITY_LABEL,
+    is_setup_managed_file,
     prepend_generated_comment,
     stamp_managed_text,
     verify_managed_file_integrity,
@@ -72,6 +73,13 @@ def test_verify_managed_integrity_detects_manual_edit(tmp_path: Path) -> None:
     assert not verification.is_valid
     assert verification.reason is not None
     assert "expected" in verification.reason
+
+
+def test_is_setup_managed_file_returns_false_for_binary_files(tmp_path: Path) -> None:
+    path = tmp_path / "icon.png"
+    path.write_bytes(b"\x89PNG\r\n\x1a\n\x00\xb8")
+
+    assert is_setup_managed_file(path) is False
 
 
 def test_check_main_reports_managed_generated_file_edit(

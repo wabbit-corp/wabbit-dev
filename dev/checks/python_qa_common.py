@@ -2176,6 +2176,8 @@ def _dedupe_preserving_order(values: Sequence[str]) -> list[str]:
 
 
 def _read_simple_checkignore_paths(repo_root: Path) -> list[str]:
+    from dev.ignore_files import is_checkignore_issue_directive
+
     checkignore = repo_root / ".checkignore"
     if not checkignore.is_file():
         return []
@@ -2187,7 +2189,7 @@ def _read_simple_checkignore_paths(repo_root: Path) -> list[str]:
     paths: list[str] = []
     for raw in lines:
         line = raw.strip()
-        if not line or line.startswith("#") or line.startswith("!"):
+        if not line or line.startswith("#") or line.startswith("!") or is_checkignore_issue_directive(line):
             continue
         if any(ch in line for ch in "*?[]"):
             continue

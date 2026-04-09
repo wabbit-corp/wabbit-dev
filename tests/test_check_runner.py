@@ -240,6 +240,24 @@ def test_check_main_renders_warning_and_error_prefixes_by_severity(
     assert "[✗] [E_TEST_RUNNER_ERROR]" in output
 
 
+def test_check_main_renders_issue_data_as_named_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sample = tmp_path / "demo.py"
+    sample.write_text("HOST = '10.0.0.0'\n", encoding="utf-8")
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"ValueMatchCheck": ValueMatchCheck()}),
+    )
+
+    assert check_task.check_main(str(tmp_path), ["ValueMatchCheck"]) == 1
+    output = capsys.readouterr().out
+    assert 'literal:"10.0.0.0"' in output
+
+
 def test_check_main_loads_config_from_parent_directories(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -358,6 +376,135 @@ def test_gitignore_without_repo_check_uses_selected_root_only(
 
     assert check_task.check_main(str(tmp_path), ["GitignoreWithoutRepoCheck"]) == 1
     assert "E_GITIGNORE_WITHOUT_REPO" in capsys.readouterr().out
+
+
+def test_checkignore_issue_directive_suppresses_matching_file_issue(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sample = tmp_path / "demo.py"
+    sample.write_text("HOST = '10.0.0.0'\n", encoding="utf-8")
+    (tmp_path / ".checkignore").write_text(
+        "check:ignore E_TEST_VALUE_MATCH demo.py\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"ValueMatchCheck": ValueMatchCheck()}),
+    )
+
+    assert check_task.check_main(str(tmp_path), ["ValueMatchCheck"]) == 0
+
+
+def test_nested_checkignore_issue_directive_applies_relative_to_its_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root_file = tmp_path / "demo.py"
+    root_file.write_text("HOST = '10.0.0.0'\n", encoding="utf-8")
+    nested_dir = tmp_path / "src"
+    nested_dir.mkdir()
+    nested_file = nested_dir / "demo.py"
+    nested_file.write_text("HOST = '10.0.0.0'\n", encoding="utf-8")
+    (nested_dir / ".checkignore").write_text(
+        "check:ignore E_TEST_VALUE_MATCH demo.py\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"ValueMatchCheck": ValueMatchCheck()}),
+    )
+
+    assert check_task.check_main(str(tmp_path), ["ValueMatchCheck"]) == 1
+    output = capsys.readouterr().out
+    assert str(root_file) in output
+    assert str(nested_file) not in output
+
+
+def test_checkignore_issue_directive_supports_value_matching(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sample = tmp_path / "demo.py"
+    sample.write_text("HOST = '10.0.0.0'\n", encoding="utf-8")
+    (tmp_path / ".checkignore").write_text(
+        "check:ignore E_TEST_VALUE_MATCH demo.py value=10.0.0.0\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"ValueMatchCheck": ValueMatchCheck()}),
+    )
+
+    assert check_task.check_main(str(tmp_path), ["ValueMatchCheck"]) == 0
+
+
+def test_checkignore_issue_directive_supports_wildcard_issue_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sample = tmp_path / "demo.py"
+    sample.write_text("HOST = '10.0.0.0'\n", encoding="utf-8")
+    (tmp_path / ".checkignore").write_text(
+        "check:ignore * demo.py\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"ValueMatchCheck": ValueMatchCheck()}),
+    )
+
+    assert check_task.check_main(str(tmp_path), ["ValueMatchCheck"]) == 0
+
+
+def test_checkignore_issue_directive_supports_field_regex_matching(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sample = tmp_path / "demo.py"
+    sample.write_text("HOST = '10.0.0.0'\n", encoding="utf-8")
+    (tmp_path / ".checkignore").write_text(
+        r"check:ignore E_TEST_VALUE_MATCH demo.py literal~10\.0\..+"
+        "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"ValueMatchCheck": ValueMatchCheck()}),
+    )
+
+    assert check_task.check_main(str(tmp_path), ["ValueMatchCheck"]) == 0
+
+
+def test_checkignore_issue_directive_supports_exact_field_matching(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sample = tmp_path / "demo.py"
+    sample.write_text("HOST = '10.0.0.0'\n", encoding="utf-8")
+    (tmp_path / ".checkignore").write_text(
+        "check:ignore E_TEST_VALUE_MATCH demo.py literal=10.0.0.0\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"ValueMatchCheck": ValueMatchCheck()}),
+    )
+
+    assert check_task.check_main(str(tmp_path), ["ValueMatchCheck"]) == 0
 
 
 def test_gitignore_without_repo_check_does_not_fire_inside_enclosing_repo(

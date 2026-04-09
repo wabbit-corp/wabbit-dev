@@ -117,7 +117,10 @@ def is_setup_managed_text(text: str) -> bool:
 def is_setup_managed_file(path: Path) -> bool:
     if not path.is_file():
         return False
-    return is_setup_managed_text(path.read_text(encoding="utf-8"))
+    try:
+        return is_setup_managed_text(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return False
 
 
 def managed_file_repair_guidance(path: Path) -> str:

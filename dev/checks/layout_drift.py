@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dev.check_fixers import can_regenerate_with_setup, rerun_setup_for_project, rerun_setup_for_repo_root
 from dev.checks.base import Issue, IssueType, ProjectCheck, RepoCheck, Severity
 from dev.config import (
     CANONICAL_KMP_SOURCE_SET_REQUIREMENTS,
@@ -40,6 +41,7 @@ from dev.project_metadata import (
     parse_pyproject_poetry_paths,
 )
 from dev.repo_metadata import build_repo_metadata_plan, repo_projects_for_root
+from dev.tasks.publish import determine_publish_target
 
 E_KMP_CUSTOM_SOURCE_ROOT_UNDECLARED = IssueType(
     "E_KMP_CUSTOM_SOURCE_ROOT_UNDECLARED",
@@ -169,6 +171,10 @@ def _has_source_files(root: Path) -> bool:
 
 def _project_is_publishable_gradle(project: GradleProject) -> bool:
     return project.publish and not project.quarantine and project.publish_target is not None
+
+
+def _project_uses_maven_publication_metadata(project: GradleProject) -> bool:
+    return determine_publish_target(project) in {"maven-central", "jitpack"}
 
 
 def _expected_publication_strings(project: GradleProject, config: object) -> list[str]:
@@ -685,24 +691,42 @@ class GradlePublicationMetadataDriftCheck(ProjectCheck):
     order = 235
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
-        if not isinstance(project, GradleProject) or not _project_is_publishable_gradle(project):
+        if (
+            not isinstance(project, GradleProject)
+            or not _project_is_publishable_gradle(project)
+            or not _project_uses_maven_publication_metadata(project)
+        ):
             return []
 
         issues: list[Issue] = []
+        fix_publication_metadata = (
+            (lambda: rerun_setup_for_project(project))
+            if can_regenerate_with_setup(project)
+            else None
+        )
         repo_license_path = project.effective_repo_root / "LICENSE.md"
         if not repo_license_path.is_file():
-            issues.append(E_GRADLE_PUBLICATION_LICENSE_FILE_MISSING.at(project.effective_repo_root))
+            issue = E_GRADLE_PUBLICATION_LICENSE_FILE_MISSING.at(project.effective_repo_root)
+            if fix_publication_metadata is not None:
+                issue = issue.fixable(fix_publication_metadata)
+            issues.append(issue)
 
         build_file = project.path / "build.gradle.kts"
         if not build_file.is_file():
-            issues.append(E_GRADLE_PUBLICATION_METADATA_DRIFT.make(expected="build.gradle.kts").at(project.path))
+            issue = E_GRADLE_PUBLICATION_METADATA_DRIFT.make(expected="build.gradle.kts").at(project.path)
+            if fix_publication_metadata is not None:
+                issue = issue.fixable(fix_publication_metadata)
+            issues.append(issue)
             return issues
 
         build_text = build_file.read_text(encoding="utf-8")
         config = load_config(project.path)
         for expected_value in _expected_publication_strings(project, config):
             if expected_value and expected_value not in build_text:
-                issues.append(E_GRADLE_PUBLICATION_METADATA_DRIFT.make(expected=expected_value).at(build_file))
+                issue = E_GRADLE_PUBLICATION_METADATA_DRIFT.make(expected=expected_value).at(build_file)
+                if fix_publication_metadata is not None:
+                    issue = issue.fixable(fix_publication_metadata)
+                issues.append(issue)
         return issues
 
 
@@ -801,6 +825,8 @@ class RepoMetadataPlacementDriftCheck(RepoCheck):
         expected_paths = expected_repo_metadata_paths_for_plan(plan)
         ignore_matcher = IgnoreMatcher(repo_root)
         issues: list[Issue] = []
+        def fix_repo_metadata() -> None:
+            rerun_setup_for_repo_root(repo_root)
         for current_root, dirnames, filenames in os.walk(repo_root):
             current_path = Path(current_root)
             dirnames[:] = [
@@ -817,7 +843,9 @@ class RepoMetadataPlacementDriftCheck(RepoCheck):
                 if file_path.resolve() in expected_paths:
                     continue
                 issues.append(
-                    E_MISPLACED_REPO_METADATA_FILE.make(relative_path=_repo_relative(repo_root, file_path)).at(file_path)
+                    E_MISPLACED_REPO_METADATA_FILE.make(relative_path=_repo_relative(repo_root, file_path))
+                    .at(file_path)
+                    .fixable(fix_repo_metadata)
                 )
         return issues
 
@@ -836,25 +864,32 @@ class TestLicenseCoverageCheck(ProjectCheck):
 
         layout = build_project_layout(project)
         issues: list[Issue] = []
+        fix_test_licenses = (
+            (lambda: rerun_setup_for_project(project))
+            if can_regenerate_with_setup(project)
+            else None
+        )
         if project.test_license is not None:
             for test_root in layout.test_license_roots:
                 license_path = test_root / "LICENSE.md"
                 if not license_path.is_file():
-                    issues.append(
-                        E_TEST_LICENSE_COPY_MISSING.make(relative_path=_relative_to_project(project, test_root)).at(
-                            test_root
-                        )
+                    issue = E_TEST_LICENSE_COPY_MISSING.make(relative_path=_relative_to_project(project, test_root)).at(
+                        test_root
                     )
+                    if fix_test_licenses is not None:
+                        issue = issue.fixable(fix_test_licenses)
+                    issues.append(issue)
             return issues
 
         for test_root in layout.test_license_roots:
             license_path = test_root / "LICENSE.md"
             if license_path.is_file():
-                issues.append(
-                    E_STALE_TEST_LICENSE_COPY.make(relative_path=_relative_to_project(project, test_root)).at(
-                        license_path
-                    )
+                issue = E_STALE_TEST_LICENSE_COPY.make(relative_path=_relative_to_project(project, test_root)).at(
+                    license_path
                 )
+                if fix_test_licenses is not None:
+                    issue = issue.fixable(fix_test_licenses)
+                issues.append(issue)
         return issues
 
 

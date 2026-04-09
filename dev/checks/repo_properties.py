@@ -6,8 +6,10 @@ community files, and workflow presence.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
+from dev.check_fixers import rerun_setup_for_repo_root
 from dev.checks.base import Issue, IssueType, RepoCheck, Severity
 from dev.config import Project, find_workspace_root, load_config
 from dev.repo_metadata import build_repo_metadata_plan
@@ -51,9 +53,12 @@ def _is_valid_codeowner_owner(token: str) -> bool:
     return _CODEOWNER_EMAIL_RE.fullmatch(token) is not None
 
 
-def _validate_codeowners_file(path: Path) -> list[Issue]:
+def _validate_codeowners_file(path: Path, *, fix: Callable[[], None] | None = None) -> list[Issue]:
     if not path.is_file():
-        return [E_MISSING_CODEOWNERS.at(path)]
+        issue = E_MISSING_CODEOWNERS.at(path)
+        if fix is not None:
+            issue = issue.fixable(fix)
+        return [issue]
 
     issues: list[Issue] = []
     has_default_rule = False
@@ -64,17 +69,26 @@ def _validate_codeowners_file(path: Path) -> list[Issue]:
 
         parts = stripped.split()
         if len(parts) < 2:
-            issues.append(E_CODEOWNERS_INVALID_ENTRY.make(entry=stripped).at(path))
+            issue = E_CODEOWNERS_INVALID_ENTRY.make(entry=stripped).at(path)
+            if fix is not None:
+                issue = issue.fixable(fix)
+            issues.append(issue)
             continue
 
         pattern, owners = parts[0], parts[1:]
         if pattern == "*":
             has_default_rule = True
         if not all(_is_valid_codeowner_owner(owner) for owner in owners):
-            issues.append(E_CODEOWNERS_INVALID_ENTRY.make(entry=stripped).at(path))
+            issue = E_CODEOWNERS_INVALID_ENTRY.make(entry=stripped).at(path)
+            if fix is not None:
+                issue = issue.fixable(fix)
+            issues.append(issue)
 
     if not has_default_rule:
-        issues.append(E_CODEOWNERS_MISSING_DEFAULT_RULE.at(path))
+        issue = E_CODEOWNERS_MISSING_DEFAULT_RULE.at(path)
+        if fix is not None:
+            issue = issue.fixable(fix)
+        issues.append(issue)
     return issues
 
 
@@ -101,34 +115,42 @@ class RepoMetadataHygieneCheck(RepoCheck):
 
         issues: list[Issue] = []
         repo_root = plan.repo_root
+        def fix_repo_metadata() -> None:
+            rerun_setup_for_repo_root(repo_root)
         if plan.requires_editorconfig and not (repo_root / ".editorconfig").is_file():
-            issues.append(E_MISSING_EDITORCONFIG.at(repo_root))
+            issues.append(E_MISSING_EDITORCONFIG.at(repo_root).fixable(fix_repo_metadata))
 
         if not plan.requires_github_metadata:
             return issues
 
         github_root = repo_root / ".github"
         if plan.code_owners:
-            issues.extend(_validate_codeowners_file(github_root / "CODEOWNERS"))
+            issues.extend(_validate_codeowners_file(github_root / "CODEOWNERS", fix=fix_repo_metadata))
         else:
             issues.append(E_REPO_CODEOWNERS_UNCONFIGURED.at(repo_root))
 
         if not (github_root / "SECURITY.md").is_file():
-            issues.append(E_MISSING_SECURITY_POLICY.at(github_root / "SECURITY.md"))
+            issues.append(E_MISSING_SECURITY_POLICY.at(github_root / "SECURITY.md").fixable(fix_repo_metadata))
         if not (github_root / "pull_request_template.md").is_file():
-            issues.append(E_MISSING_PULL_REQUEST_TEMPLATE.at(github_root / "pull_request_template.md"))
+            issues.append(
+                E_MISSING_PULL_REQUEST_TEMPLATE.at(github_root / "pull_request_template.md").fixable(fix_repo_metadata)
+            )
 
         issue_template_root = github_root / "ISSUE_TEMPLATE"
         for expected_name in ("bug_report.yml", "feature_request.yml"):
             expected_path = issue_template_root / expected_name
             if not expected_path.is_file():
-                issues.append(E_MISSING_ISSUE_TEMPLATE.make(path=str(expected_path.relative_to(repo_root))).at(expected_path))
+                issues.append(
+                    E_MISSING_ISSUE_TEMPLATE.make(path=str(expected_path.relative_to(repo_root)))
+                    .at(expected_path)
+                    .fixable(fix_repo_metadata)
+                )
 
         if plan.requires_ci_workflows:
             workflows_dir = github_root / "workflows"
             workflow_files = list(workflows_dir.glob("*.yml")) + list(workflows_dir.glob("*.yaml"))
             if not workflow_files:
-                issues.append(E_MISSING_REPO_WORKFLOW.at(workflows_dir))
+                issues.append(E_MISSING_REPO_WORKFLOW.at(workflows_dir).fixable(fix_repo_metadata))
 
         return issues
 

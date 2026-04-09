@@ -29,6 +29,8 @@
 
 from pathlib import Path
 
+from dev.check_fixers import can_regenerate_with_setup, rerun_setup_for_project
+
 # Import necessary components from your base framework
 # (Adjust the import path if necessary)
 from dev.checks.base import (
@@ -60,6 +62,12 @@ class GenericProjectStructureCheck(ProjectCheck):
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         issues: list[Issue] = []
+        writes_repo_root_files = project is None or path.resolve() == project.effective_repo_root.resolve()
+        fix_generated_structure = (
+            (lambda: rerun_setup_for_project(project))
+            if can_regenerate_with_setup(project)
+            else None
+        )
 
         readme_path = path / "README.md"
 
@@ -83,14 +91,27 @@ class GenericProjectStructureCheck(ProjectCheck):
                 if "## Contributing" not in readme_content:
                     issues.append(E_README_NO_CONTRIBUTING.at(readme_path))
 
-        if not (path / "LICENSE").exists() and not (path / "LICENSE.md").exists():
-            issues.append(E_MISSING_LICENSE.at(path))
-        if not (path / "legal" / "cla" / "v1.0.0" / "CLA.md").exists():
-            issues.append(E_MISSING_CLA.at(path))
-        if not (path / "legal" / "cla" / "v1.0.0" / "CLA_EXPLANATIONS.md").exists():
-            issues.append(E_MISSING_CLA_SIMPLE.at(path))
+        if writes_repo_root_files:
+            if not (path / "LICENSE").exists() and not (path / "LICENSE.md").exists():
+                issue = E_MISSING_LICENSE.at(path)
+                if fix_generated_structure is not None:
+                    issue = issue.fixable(fix_generated_structure)
+                issues.append(issue)
+            if not (path / "legal" / "cla" / "v1.0.0" / "CLA.md").exists():
+                issue = E_MISSING_CLA.at(path)
+                if fix_generated_structure is not None:
+                    issue = issue.fixable(fix_generated_structure)
+                issues.append(issue)
+            if not (path / "legal" / "cla" / "v1.0.0" / "CLA_EXPLANATIONS.md").exists():
+                issue = E_MISSING_CLA_SIMPLE.at(path)
+                if fix_generated_structure is not None:
+                    issue = issue.fixable(fix_generated_structure)
+                issues.append(issue)
         if not (path / ".gitignore").exists():
-            issues.append(E_MISSING_GITIGNORE.at(path))
+            issue = E_MISSING_GITIGNORE.at(path)
+            if fix_generated_structure is not None:
+                issue = issue.fixable(fix_generated_structure)
+            issues.append(issue)
 
         return issues
 

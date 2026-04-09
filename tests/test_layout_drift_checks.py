@@ -324,6 +324,39 @@ def test_gradle_publication_metadata_check_reports_missing_license_and_build_met
 
     assert "E_GRADLE_PUBLICATION_LICENSE_FILE_MISSING" in issue_ids
     assert "E_GRADLE_PUBLICATION_METADATA_DRIFT" in issue_ids
+    assert all(issue.fix is not None for issue in issues)
+
+
+def test_gradle_publication_metadata_check_skips_intellij_marketplace_projects(tmp_path: Path) -> None:
+    from dev.checks.layout_drift import GradlePublicationMetadataDriftCheck
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-company-legal-name "Example Legal Co")',
+                '(default-company-email "legal@example.com")',
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'gradle "demo-ij" '
+                ':version "0.1.0" '
+                ':description "Demo IntelliJ plugin" '
+                ':repo "wabbit-corp/demo-ij" '
+                ':license "MIT" '
+                ':publish true '
+                ':publishTarget "jetbrains-marketplace" '
+                ':features [(intellij-plugin "Demo IJ")])',
+                "",
+            ]
+        ),
+    )
+    project = config.defined_projects["demo-ij"]
+    project.path.mkdir(parents=True, exist_ok=True)
+    (project.path / "build.gradle.kts").write_text("plugins {}\n", encoding="utf-8")
+
+    issues = GradlePublicationMetadataDriftCheck().check(project.path, project)
+
+    assert issues == []
 
 
 def test_python_package_layout_drift_check_reports_undeclared_and_missing_paths(tmp_path: Path) -> None:
@@ -412,6 +445,7 @@ def test_repo_metadata_placement_drift_check_reports_wrong_locations(tmp_path: P
     issues = RepoMetadataPlacementDriftCheck().check(project.path, None)
 
     assert {issue.issue_type.id for issue in issues} == {"E_MISPLACED_REPO_METADATA_FILE"}
+    assert all(issue.fix is not None for issue in issues)
 
 
 def test_test_license_coverage_check_reports_missing_and_stale_copies(tmp_path: Path) -> None:
@@ -438,3 +472,5 @@ def test_test_license_coverage_check_reports_missing_and_stale_copies(tmp_path: 
 
     assert {issue.issue_type.id for issue in configured_issues} == {"E_TEST_LICENSE_COPY_MISSING"}
     assert {issue.issue_type.id for issue in stale_issues} == {"E_STALE_TEST_LICENSE_COPY"}
+    assert all(issue.fix is not None for issue in configured_issues)
+    assert all(issue.fix is not None for issue in stale_issues)

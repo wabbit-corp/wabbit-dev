@@ -108,6 +108,7 @@ def test_repo_metadata_hygiene_check_reports_missing_repo_files(tmp_path: Path) 
     assert "E_MISSING_PULL_REQUEST_TEMPLATE" in issue_ids
     assert "E_MISSING_ISSUE_TEMPLATE" in issue_ids
     assert "E_MISSING_REPO_WORKFLOW" in issue_ids
+    assert all(issue.fix is not None for issue in issues if issue.issue_type.id != "E_REPO_CODEOWNERS_UNCONFIGURED")
 
 
 def test_repo_metadata_hygiene_check_warns_when_codeowners_are_unconfigured(tmp_path: Path) -> None:

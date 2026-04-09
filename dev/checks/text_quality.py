@@ -140,6 +140,15 @@ def fix_no_newline(file: Path) -> None:
             f.write(nl.value)
 
 
+def fix_utf8_bom(file: Path) -> None:
+    content = file.read_bytes()
+    if not content.startswith(b"\xef\xbb\xbf"):
+        return
+    remainder = content[3:]
+    remainder.decode("utf-8")
+    file.write_bytes(remainder)
+
+
 def fix_line_endings(file: Path, target_ending: LineEnding) -> None:
     with file.open("rb") as f:
         content = f.read()
@@ -281,7 +290,14 @@ class TextQualityCheck(FileCheck):
 
         is_invalid_encoding = False
         if content_bytes.startswith(b"\xef\xbb\xbf"):  # UTF-8 BOM
-            ctx.add_issue(E_BOM_AT_START)
+            bom_fix = None
+            try:
+                content_bytes[3:].decode("utf-8")
+                def bom_fix() -> None:
+                    fix_utf8_bom(ctx.path)
+            except UnicodeDecodeError:
+                bom_fix = None
+            ctx.add_issue(E_BOM_AT_START, fix=bom_fix)
         elif content_bytes.startswith(b"\xff\xfe\x00\x00") or content_bytes.startswith(
             b"\x00\x00\xfe\xff"
         ):  # UTF-32 BOM
