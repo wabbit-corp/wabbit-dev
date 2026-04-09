@@ -618,7 +618,8 @@ def release_verify(projects: str | list[str] | None = None, *, json_output: bool
                 selected_project_names = resolve_project_ids(config, effective_requested_projects)
             except ValueError as ex:
                 payload["error"] = str(ex)
-                error(contextualize_failure(str(ex), ["release", "verify", *effective_requested_projects]))
+                if not json_output:
+                    error(contextualize_failure(str(ex), ["release", "verify", *effective_requested_projects]))
                 _update_release_summary(payload)
                 return 1
 
@@ -634,7 +635,8 @@ def release_verify(projects: str | list[str] | None = None, *, json_output: bool
                 else f"No projects found for release verification target(s): {', '.join(selected_project_names)}"
             )
             payload["error"] = message
-            error(message)
+            if not json_output:
+                error(message)
             _update_release_summary(payload)
             return 1
 
@@ -718,10 +720,12 @@ def release_verify(projects: str | list[str] | None = None, *, json_output: bool
         _update_release_summary(payload)
         if failures:
             payload["error"] = f"Release verification failed for {failures} project(s)."
-            error(payload["error"])
+            if not json_output:
+                error(payload["error"])
             return 1
 
-        success("Release verification completed successfully.")
+        if not json_output:
+            success("Release verification completed successfully.")
         return 0
 
     output_context = redirect_stdout(sys.stderr) if json_output else nullcontext()

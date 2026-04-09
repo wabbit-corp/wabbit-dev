@@ -55,6 +55,8 @@ def test_python_sdist_policy_excludes_local_and_workspace_noise(tmp_path: Path) 
     assert ".github/**" in check_manifest_ignore_patterns
     assert ".gitignore" in check_manifest_ignore_patterns
     assert ".llm/**" in check_manifest_ignore_patterns
+    assert ".editorconfig" in check_manifest_ignore_patterns
+    assert "AGENTS.md" in check_manifest_ignore_patterns
 
 
 def _toml_string_array(items: list[str]) -> str:

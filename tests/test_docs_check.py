@@ -314,6 +314,106 @@ def test_docs_check_semantic_adds_advisory_findings(
     assert findings[0]["source"] == "semantic"
 
 
+def test_docs_check_json_suppresses_summary_lines(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import dev.tasks.docs_check as docs_task
+    from dev.config import Config
+
+    project_path = tmp_path / "alpha"
+    project_path.mkdir()
+    _write_common_docs(
+        project_path,
+        readme_text=(
+            "# Alpha\n\n"
+            "Alpha is a small developer library that exists to make alpha workflows predictable.\n\n"
+            "## Status\n\nExperimental.\n\n"
+            "## Installation\n\n"
+            "## Quickstart\n\n"
+            "[API docs](docs/index.md)\n\n"
+            "[Issues](https://github.com/wabbit-corp/alpha/issues)\n\n"
+            "[Changelog](CHANGELOG.md)\n\n"
+            "## Examples\n\n```python\nprint('ok')\n```\n"
+        ),
+    )
+    (project_path / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
+    project = _make_python_project(project_path)
+
+    config = Config(raw=parse("()"))
+    config.defined_projects["alpha"] = project
+    config.openai_key = "test-key"
+
+    monkeypatch.setattr(docs_task, "load_config", lambda: config)
+    monkeypatch.setattr(docs_task, "resolve_project_ids", lambda _config, targets: list(targets))
+    monkeypatch.setattr(docs_task, "_check_external_url", lambda url, timeout_seconds=5.0: (True, "HTTP 200"))
+    monkeypatch.setattr(docs_task, "_semantic_findings", lambda project, markdown_files, api_key: [])
+
+    result = docs_task.docs_check(["alpha"], semantic=True, json_output=True)
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert output.lstrip().startswith("{")
+
+
+def test_semantic_prompt_includes_new_semantic_categories_and_project_facts(tmp_path: Path) -> None:
+    import dev.tasks.docs_check as docs_task
+
+    project_path = tmp_path / "alpha"
+    project_path.mkdir()
+    readme_path = project_path / "README.md"
+    readme_path.write_text("# Alpha\n\nAlpha docs.\n", encoding="utf-8")
+    project = _make_python_project(project_path)
+    project.description = "Alpha project"
+    project.publish_target = "pypi"
+
+    prompt = docs_task._semantic_prompt(project, [readme_path])
+
+    assert '"projectKind": "python"' in prompt
+    assert '"githubRepo": "wabbit-corp/alpha"' in prompt
+    assert '"publishTarget": "pypi"' in prompt
+    assert '"docsFiles": [' in prompt
+    assert "missing-project-why" in prompt
+    assert "quickstart-not-actionable" in prompt
+    assert "examples-not-core-or-compelling" in prompt
+    assert "docs-audience-mismatch" in prompt
+    assert "maturity-or-status-misleading" in prompt
+    assert "docs-journey-fragmented" in prompt
+    assert "support-path-unclear" in prompt
+    assert "You may use the provided local tools" in prompt
+
+
+def test_semantic_tools_can_list_read_and_grep_project_files(tmp_path: Path) -> None:
+    import dev.tasks.docs_check as docs_task
+
+    project_path = tmp_path / "alpha"
+    project_path.mkdir()
+    (project_path / "README.md").write_text("# Alpha\n\nQuickstart here.\n", encoding="utf-8")
+    (project_path / "docs").mkdir()
+    (project_path / "docs" / "index.md").write_text("# Docs\n\nSupport via issues.\n", encoding="utf-8")
+    (project_path / "mkdocs.yml").write_text("site_name: Alpha\n", encoding="utf-8")
+    project = _make_python_project(project_path)
+
+    listed = docs_task._semantic_tool_list_paths(project, relative_path=".")
+    assert listed["ok"] is True
+    listed_paths = {entry["path"] for entry in listed["entries"]}
+    assert "README.md" in listed_paths
+    assert "docs" in listed_paths
+    assert "mkdocs.yml" in listed_paths
+
+    read = docs_task._semantic_tool_read_file(project, relative_path="mkdocs.yml")
+    assert read["ok"] is True
+    assert "site_name: Alpha" in str(read["content"])
+
+    grep = docs_task._semantic_tool_grep_repo(project, pattern="Quickstart|Support", relative_path=".")
+    assert grep["ok"] is True
+    matches = grep["matches"]
+    assert isinstance(matches, list)
+    joined = "\n".join(matches)
+    assert "README.md" in joined or "docs/index.md" in joined
+
+
 def test_docs_check_reports_missing_readme_quality_sections(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

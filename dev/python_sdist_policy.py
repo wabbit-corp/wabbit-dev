@@ -71,9 +71,11 @@ _SDIST_EXCLUDE_PATTERNS = [
 _CHECK_MANIFEST_IGNORE_PATTERNS = [
     *list(_SDIST_EXCLUDE_PATTERNS),
     ".DS_Store",
+    ".editorconfig",
     ".github",
     ".github/**",
     ".gitignore",
+    "AGENTS.md",
 ]
 
 

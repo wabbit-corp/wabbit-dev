@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -16,6 +17,10 @@ from urllib.parse import urlparse
 
 import openai
 import requests
+from openai.types.responses import ResponseFunctionToolCall
+from openai.types.responses.function_tool_param import FunctionToolParam
+from openai.types.responses.response_input_item_param import FunctionCallOutput
+from openai.types.responses.response_input_param import ResponseInputParam
 
 from dev.config import GradleProject, Project, PythonProject, load_config
 from dev.failure_context import contextualize_failure
@@ -48,6 +53,10 @@ _SNIPPET_JSON_LANGUAGES = {"json"}
 _SNIPPET_TOML_LANGUAGES = {"toml"}
 _SNIPPET_PYTHON_LANGUAGES = {"python", "py"}
 _SNIPPET_SHELL_LANGUAGES = {"bash", "sh", "zsh", "shell"}
+_SEMANTIC_TOOL_MAX_FILE_CHARS = 12000
+_SEMANTIC_TOOL_MAX_LIST_ENTRIES = 200
+_SEMANTIC_TOOL_MAX_GREP_LINES = 200
+_SEMANTIC_TOOL_TIMEOUT_SECONDS = 5
 
 
 class DocsCheckError(Exception):
@@ -694,19 +703,30 @@ def _semantic_prompt(project: Project, markdown_files: Sequence[Path]) -> str:
     facts = {
         "projectId": project.project_id or project.name,
         "projectKind": _project_kind(project),
+        "description": getattr(project, "description", None),
+        "githubRepo": getattr(project, "github_repo", None),
         "docsEnabled": project.docs_enabled,
         "docsSystem": project.docs_system,
+        "publishTarget": getattr(project, "publish_target", None),
+        "buildModel": getattr(project, "build_model", None),
+        "hasReadme": (project.path / "README.md").is_file(),
+        "docsFiles": [path.relative_to(project.path).as_posix() for path in markdown_files],
         "path": str(project.path.resolve()),
     }
     prompt = [
         "You are reviewing project documentation quality for a developer tool.",
         "Only make high-signal semantic judgments that cannot be determined by syntax or link checks alone.",
         "Do not report broken links, missing files, or syntax errors. Those are handled elsewhere.",
+        "Judge the docs as a newcomer would: can they understand what this project is for, who it is for, how mature it is, and how to get to first success?",
+        "You may use the provided local tools to inspect the repo structure, grep for evidence, and read a few relevant text files such as mkdocs.yml, pyproject.toml, build.gradle.kts, or docs pages.",
         "Return strict JSON with this shape:",
         '{"summary": "string", "findings": [{"code": "string", "severity": "warning", "path": "string|null", "message": "string", "evidence": "string"}]}',
-        "Use at most 5 findings.",
-        "Allowed codes: missing-purpose, weak-quickstart, unclear-installation, misleading-example, docs-metadata-mismatch, missing-user-path.",
+        "Use at most 7 findings.",
+        "Allowed codes: missing-project-why, quickstart-not-actionable, examples-not-core-or-compelling, docs-audience-mismatch, maturity-or-status-misleading, docs-journey-fragmented, support-path-unclear.",
         "Findings must be warning severity only.",
+        "Every finding must include short concrete evidence quoted or paraphrased from the provided docs files.",
+        "Do not complain about writing style, tone, badges, visuals, or generic polish.",
+        "Do not suggest adding sections that already exist unless their content is substantively weak or misleading.",
         "Base your judgment only on the facts and files provided.",
         "",
         "<project-facts>",
@@ -731,6 +751,201 @@ def _semantic_prompt(project: Project, markdown_files: Sequence[Path]) -> str:
             ]
         )
     return "\n".join(prompt)
+
+
+def _resolve_semantic_relative_path(project: Project, relative_path: str) -> Path:
+    base = project.path.resolve()
+    candidate = (base / relative_path).resolve() if relative_path not in {"", "."} else base
+    if not candidate.is_relative_to(base):
+        raise DocsCheckError(f"Path escapes project root: {relative_path}")
+    return candidate
+
+
+def _clip_semantic_text(text: str, *, limit: int = _SEMANTIC_TOOL_MAX_FILE_CHARS) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 20] + "\n...[truncated]"
+
+
+def _semantic_tool_list_paths(project: Project, *, relative_path: str = ".") -> dict[str, object]:
+    try:
+        path = _resolve_semantic_relative_path(project, relative_path)
+    except DocsCheckError as ex:
+        return {"ok": False, "error": str(ex)}
+
+    if not path.exists():
+        return {"ok": False, "error": f"Path does not exist: {relative_path}"}
+
+    if path.is_file():
+        return {
+            "ok": True,
+            "path": str(path.relative_to(project.path.resolve())),
+            "entries": [{"path": str(path.relative_to(project.path.resolve())), "kind": "file"}],
+            "truncated": False,
+        }
+
+    entries: list[dict[str, str]] = []
+    children = sorted(path.iterdir(), key=lambda item: item.name.casefold())
+    for child in children[:_SEMANTIC_TOOL_MAX_LIST_ENTRIES]:
+        kind = "dir" if child.is_dir() else "file"
+        entries.append({"path": child.relative_to(project.path.resolve()).as_posix(), "kind": kind})
+    return {
+        "ok": True,
+        "path": str(path.relative_to(project.path.resolve())) if path != project.path.resolve() else ".",
+        "entries": entries,
+        "truncated": len(children) > _SEMANTIC_TOOL_MAX_LIST_ENTRIES,
+    }
+
+
+def _semantic_tool_read_file(project: Project, *, relative_path: str) -> dict[str, object]:
+    try:
+        path = _resolve_semantic_relative_path(project, relative_path)
+    except DocsCheckError as ex:
+        return {"ok": False, "error": str(ex)}
+
+    if not path.is_file():
+        return {"ok": False, "error": f"File does not exist: {relative_path}"}
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return {"ok": False, "error": f"File is not valid UTF-8 text: {relative_path}"}
+
+    return {
+        "ok": True,
+        "path": path.relative_to(project.path.resolve()).as_posix(),
+        "content": _clip_semantic_text(content),
+        "truncated": len(content) > _SEMANTIC_TOOL_MAX_FILE_CHARS,
+    }
+
+
+def _semantic_tool_grep_repo(
+    project: Project,
+    *,
+    pattern: str,
+    relative_path: str = ".",
+) -> dict[str, object]:
+    try:
+        path = _resolve_semantic_relative_path(project, relative_path)
+    except DocsCheckError as ex:
+        return {"ok": False, "error": str(ex)}
+
+    if not path.exists():
+        return {"ok": False, "error": f"Path does not exist: {relative_path}"}
+
+    rg_path = shutil.which("rg")
+    if rg_path is not None:
+        command = [
+            rg_path,
+            "-n",
+            "--hidden",
+            "--color",
+            "never",
+            "--max-count",
+            str(_SEMANTIC_TOOL_MAX_GREP_LINES),
+            pattern,
+            str(path),
+        ]
+    else:
+        command = [
+            "grep",
+            "-R",
+            "-n",
+            "-E",
+            pattern,
+            str(path),
+        ]
+
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=project.path,
+            capture_output=True,
+            text=True,
+            timeout=_SEMANTIC_TOOL_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"grep timed out after {_SEMANTIC_TOOL_TIMEOUT_SECONDS}s"}
+    except OSError as ex:
+        return {"ok": False, "error": f"Failed to execute grep tool: {ex}"}
+
+    if completed.returncode not in {0, 1}:
+        return {"ok": False, "error": completed.stderr.strip() or f"grep failed with exit code {completed.returncode}"}
+
+    stdout = completed.stdout.strip()
+    results = stdout.splitlines() if stdout else []
+    normalized_results: list[str] = []
+    project_root = project.path.resolve()
+    for line in results[:_SEMANTIC_TOOL_MAX_GREP_LINES]:
+        if line.startswith(str(project_root)):
+            normalized_results.append(line.replace(str(project_root) + "/", "", 1))
+        else:
+            normalized_results.append(line)
+
+    return {
+        "ok": True,
+        "path": str(path.relative_to(project_root)) if path != project_root else ".",
+        "pattern": pattern,
+        "matches": normalized_results,
+        "truncated": len(results) > _SEMANTIC_TOOL_MAX_GREP_LINES,
+    }
+
+
+def _semantic_tools() -> list[FunctionToolParam]:
+    return [
+        {
+            "type": "function",
+            "name": "list_paths",
+            "description": "List files or directories under the project root to understand docs structure and neighboring config files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "relative_path": {
+                        "type": "string",
+                        "description": "Project-relative directory or file path to inspect. Defaults to '.'.",
+                    }
+                },
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "read_file",
+            "description": "Read one UTF-8 text file from the project, such as README.md, mkdocs.yml, pyproject.toml, build.gradle.kts, or a docs page.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "relative_path": {
+                        "type": "string",
+                        "description": "Project-relative file path to read.",
+                    }
+                },
+                "required": ["relative_path"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "grep_repo",
+            "description": "Search project files for evidence such as quickstart commands, support paths, status language, or docs references.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Ripgrep or grep regex pattern to search for.",
+                    },
+                    "relative_path": {
+                        "type": "string",
+                        "description": "Project-relative starting path. Defaults to '.'.",
+                    },
+                },
+                "required": ["pattern"],
+                "additionalProperties": False,
+            },
+        },
+    ]
 
 
 def _parse_semantic_response(raw: str) -> dict[str, object]:
@@ -764,26 +979,98 @@ def _semantic_findings(
             return _coerce_semantic_findings(project, parsed)
 
     client = openai.Client(api_key=api_key)
-    response = client.chat.completions.create(
-        messages=[
+    response = client.responses.create(
+        model="gpt-5-chat-latest",
+        input=[
             {
                 "role": "system",
                 "content": "You are a strict documentation reviewer. Output JSON only.",
             },
             {"role": "user", "content": prompt},
         ],
-        model="gpt-5-chat-latest",
-        max_tokens=2000,
-        temperature=0.2,
-        top_p=0.9,
+        tools=_semantic_tools(),
+        tool_choice="auto",
     )
-    content = response.choices[0].message.content
+
+    tool_calls_log: list[dict[str, object]] = []
+    content: str | None = None
+    for _ in range(8):
+        function_calls: list[ResponseFunctionToolCall] = [
+            item for item in response.output if isinstance(item, ResponseFunctionToolCall)
+        ]
+        if not function_calls:
+            content = response.output_text
+            break
+
+        tool_outputs: ResponseInputParam = []
+        for tool_call in function_calls:
+            tool_name = tool_call.name
+            try:
+                tool_arguments_raw = json.loads(tool_call.arguments)
+            except json.JSONDecodeError:
+                tool_arguments_raw = {}
+            tool_arguments = cast(dict[str, object], tool_arguments_raw if isinstance(tool_arguments_raw, dict) else {})
+
+            if tool_name == "list_paths":
+                relative_path = tool_arguments.get("relative_path")
+                tool_result = _semantic_tool_list_paths(
+                    project,
+                    relative_path=relative_path if isinstance(relative_path, str) else ".",
+                )
+            elif tool_name == "read_file":
+                relative_path = tool_arguments.get("relative_path")
+                if not isinstance(relative_path, str):
+                    tool_result = {"ok": False, "error": "Missing or invalid relative_path"}
+                else:
+                    tool_result = _semantic_tool_read_file(project, relative_path=relative_path)
+            elif tool_name == "grep_repo":
+                pattern = tool_arguments.get("pattern")
+                relative_path = tool_arguments.get("relative_path")
+                if not isinstance(pattern, str):
+                    tool_result = {"ok": False, "error": "Missing or invalid pattern"}
+                else:
+                    tool_result = _semantic_tool_grep_repo(
+                        project,
+                        pattern=pattern,
+                        relative_path=relative_path if isinstance(relative_path, str) else ".",
+                    )
+            else:
+                tool_result = {"ok": False, "error": f"Unknown tool: {tool_name}"}
+
+            tool_calls_log.append(
+                {
+                    "name": tool_name,
+                    "arguments": tool_arguments,
+                    "result": tool_result,
+                }
+            )
+            tool_output: FunctionCallOutput = {
+                "type": "function_call_output",
+                "call_id": tool_call.call_id,
+                "output": json.dumps(tool_result, ensure_ascii=False),
+            }
+            tool_outputs.append(tool_output)
+
+        response = client.responses.create(
+            model="gpt-5-chat-latest",
+            previous_response_id=response.id,
+            input=tool_outputs,
+        )
+
     if content is None:
         raise DocsCheckError("Semantic docs check returned no content.")
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text(
-        json.dumps({"prompt": prompt, "response": content, "projectId": project.project_id or project.name}, indent=2),
+        json.dumps(
+            {
+                "prompt": prompt,
+                "response": content,
+                "projectId": project.project_id or project.name,
+                "tool_calls": tool_calls_log,
+            },
+            indent=2,
+        ),
         encoding="utf-8",
     )
     parsed = _parse_semantic_response(content)
@@ -795,7 +1082,7 @@ def _coerce_semantic_findings(project: Project, payload: dict[str, object]) -> l
     if not isinstance(findings_raw, list):
         return []
     findings: list[DocsFinding] = []
-    for item in findings_raw[:5]:
+    for item in findings_raw[:7]:
         if not isinstance(item, dict):
             continue
         code = item.get("code")
@@ -1121,7 +1408,8 @@ def docs_check(
                 selected_project_ids = resolve_project_ids(config, effective_requested)
             except ValueError as ex:
                 payload["error"] = str(ex)
-                error(contextualize_failure(str(ex), ["docs", "check", *effective_requested]))
+                if not json_output:
+                    error(contextualize_failure(str(ex), ["docs", "check", *effective_requested]))
                 _update_summary(payload)
                 return 1
         if selected_project_ids is None:
@@ -1146,14 +1434,19 @@ def docs_check(
         _update_summary(payload)
         summary = cast(dict[str, int], payload["summary"])
         if summary["error"]:
-            error(f"{heading('Docs summary')}: {summary['error']} error project(s), {summary['warning']} warning project(s).")
+            if not json_output:
+                error(
+                    f"{heading('Docs summary')}: {summary['error']} error project(s), {summary['warning']} warning project(s)."
+                )
             return 1
         if summary["warning"]:
-            warning(
-                f"{heading('Docs summary')}: {summary['warning']} warning project(s), no blocking docs errors."
-            )
+            if not json_output:
+                warning(
+                    f"{heading('Docs summary')}: {summary['warning']} warning project(s), no blocking docs errors."
+                )
             return 0
-        success(f"{heading('Docs summary')}: no docs problems found.")
+        if not json_output:
+            success(f"{heading('Docs summary')}: no docs problems found.")
         return 0
 
     output_context = redirect_stdout(sys.stderr) if json_output else nullcontext()

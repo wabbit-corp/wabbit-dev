@@ -119,7 +119,7 @@ Every command is documented here and in the MkDocs reference under
 | --- | --- |
 | `completion bash` / `completion zsh` | Prints shell completion scripts with dynamic command, target, and check-name completion. |
 | `doctor [TARGET ...] [--only CHECK_OR_COMMAND] [--json]` | Diagnoses workspace, toolchain, and credential readiness, optionally scoped to selected checks or targets. |
-| `docs check [TARGET ...] [--semantic] [--json]` | Validates docs links, sections, snippets, hooks, and optional semantic quality. |
+| `docs check [TARGET ...] [--semantic] [--json]` | Validates docs links, sections, snippets, hooks, and optional semantic quality such as unclear purpose or weak quickstarts, with constrained repo-local inspection in semantic mode. |
 | `docs snippets [TARGET ...] [--verify] [--json]` | Validates fenced docs snippets, with optional deeper project-specific verification. |
 | `where [--json]` | Shows the workspace, repo, and project context inferred from the current directory. |
 | `config check` | Parses and validates `root.clj` and `root.private.clj`. |

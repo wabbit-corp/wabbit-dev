@@ -173,13 +173,17 @@ Deterministic checks cover:
 
 Use `--semantic` to add an advisory LLM-based docs review for issues such as:
 
-- a weak or unclear quickstart
-- examples that do not feel grounded in the project
-- a README that does not explain the project purpose clearly
-- docs messaging that conflicts with the configured project metadata
+- a README that still does not explain the project's purpose or value clearly
+- a quickstart that exists but is not actionable for a first-time user
+- examples that do not show the core use case convincingly
+- docs written for the wrong audience or overselling project maturity
+- a fragmented docs journey from README to deeper guides/reference
+- unclear support or escalation guidance
 
 The semantic layer is opt-in, warning-level by design, and requires an OpenAI
-key from `root.private.clj` or `OPENAI_API_KEY`.
+key from `root.private.clj` or `OPENAI_API_KEY`. It can inspect the project
+structure and a few relevant local text files with constrained repo-local tools
+such as path listing, grep, and file reads.
 
 Examples:
 

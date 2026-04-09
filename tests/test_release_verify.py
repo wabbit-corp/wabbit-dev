@@ -215,6 +215,8 @@ def test_release_verify_python_passes_standard_check_manifest_ignore_patterns(
     assert ".llm/**" in check_manifest_args[1]
     assert "docs-research/**" in check_manifest_args[1]
     assert ".github/**" in check_manifest_args[1]
+    assert ".editorconfig" in check_manifest_args[1]
+    assert "AGENTS.md" in check_manifest_args[1]
 
 
 def test_release_verify_python_reports_missing_check_manifest(
