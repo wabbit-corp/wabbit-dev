@@ -78,6 +78,7 @@ execution_flags: dict[str, int] = {}  # Track function executions
 class ClearableSyncFunc(Protocol):
     def __call__(self, x: int, y: int = 10) -> int: ...
     def clear_cache(self) -> None: ...
+    def close_shared_cache(self) -> None: ...
 
 
 def reset_flags() -> None:
@@ -97,6 +98,19 @@ async def async_func(x: int, y: int = 20) -> int:
     execution_flags[flag_name] = execution_flags.get(flag_name, 0) + 1
     await asyncio.sleep(0.01)  # Simulate async work
     return x * y
+
+
+def sync_none_func(x: int) -> None:
+    flag_name = f"sync_none_func_{x}"
+    execution_flags[flag_name] = execution_flags.get(flag_name, 0) + 1
+    return None
+
+
+async def async_none_func(x: int) -> None:
+    flag_name = f"async_none_func_{x}"
+    execution_flags[flag_name] = execution_flags.get(flag_name, 0) + 1
+    await asyncio.sleep(0.01)
+    return None
 
 
 def error_func(x: int) -> int:
@@ -313,6 +327,15 @@ class TestCacheDecorator:
         assert cached_sync_func(5, y=11) == 16
         assert execution_flags.get("sync_func_5_11", 0) == 1
 
+    def test_sync_none_result_is_cached(self, cache_path: Path) -> None:
+        cached_sync_none_func = cache(path=str(cache_path))(sync_none_func)
+
+        assert cached_sync_none_func(5) is None
+        assert execution_flags.get("sync_none_func_5", 0) == 1
+
+        assert cached_sync_none_func(5) is None
+        assert execution_flags.get("sync_none_func_5", 0) == 1
+
     @pytest.mark.asyncio
     async def test_async_basic_hit_miss(self, cache_path: Path) -> None:
         cached_async_func = cache(path=str(cache_path))(async_func)
@@ -333,9 +356,15 @@ class TestCacheDecorator:
         assert await cached_async_func(5, y=30) == 150
         assert execution_flags.get("async_func_5_30", 0) == 1
 
-        # Call again - hit
-        assert await cached_async_func(5, y=30) == 150
-        assert execution_flags.get("async_func_5_30", 0) == 1
+    @pytest.mark.asyncio
+    async def test_async_none_result_is_cached(self, cache_path: Path) -> None:
+        cached_async_none_func = cache(path=str(cache_path))(async_none_func)
+
+        assert await cached_async_none_func(5) is None
+        assert execution_flags.get("async_none_func_5", 0) == 1
+
+        assert await cached_async_none_func(5) is None
+        assert execution_flags.get("async_none_func_5", 0) == 1
 
     def test_sync_ttl(self, cache_path: Path) -> None:
         ttl_sec = 0.1
@@ -404,6 +433,31 @@ class TestCacheDecorator:
         assert cached_sync_func(7) == 17
         assert execution_flags.get("sync_func_7_10", 0) == 2
 
+    def test_clear_cache_helper_uses_original_resolved_cache_path_after_cwd_change(
+        self,
+        tmp_path: Path,
+        monkeypatch: MonkeyPatch,
+    ) -> None:
+        original_cwd = tmp_path / "original"
+        other_cwd = tmp_path / "other"
+        original_cwd.mkdir()
+        other_cwd.mkdir()
+
+        monkeypatch.chdir(original_cwd)
+        cached_sync_func = cache(path="relative-cache.db")(sync_func)
+
+        assert cached_sync_func(9) == 19
+        assert execution_flags.get("sync_func_9_10", 0) == 1
+        assert cached_sync_func(9) == 19
+        assert execution_flags.get("sync_func_9_10", 0) == 1
+
+        monkeypatch.chdir(other_cwd)
+        assert isinstance(cached_sync_func, ClearableSyncFunc)
+        cached_sync_func.clear_cache()
+
+        assert cached_sync_func(9) == 19
+        assert execution_flags.get("sync_func_9_10", 0) == 2
+
     def test_sync_error_propagation(self, cache_path: Path) -> None:
         cached_error_func = cache(path=str(cache_path))(error_func)
         with pytest.raises(ValueError, match="Test error from function"):
@@ -421,28 +475,56 @@ class TestCacheDecorator:
             await async_error_func(1)
 
     def test_sync_unpickleable_return(self, cache_path: Path) -> None:
-        cached_unpickleable_func = cache(path=str(cache_path))(unpickleable_return_func)
+        calls = {"count": 0}
 
-        # First call executes the function, but fails during pickling/caching
-        with pytest.raises(TypeError, match="cannot be pickled"):
-            cached_unpickleable_func(1)
+        def tracked_unpickleable_return_func(x: int) -> NonPickleable:
+            del x
+            calls["count"] += 1
+            return NonPickleable()
 
-        # Second call should re-execute and fail again (not cached)
-        with pytest.raises(TypeError, match="cannot be pickled"):
-            cached_unpickleable_func(1)
+        cached_unpickleable_func = cache(path=str(cache_path))(tracked_unpickleable_return_func)
+
+        first = cached_unpickleable_func(1)
+        assert isinstance(first, NonPickleable)
+        assert calls["count"] == 1
+
+        second = cached_unpickleable_func(1)
+        assert isinstance(second, NonPickleable)
+        assert calls["count"] == 2
 
     @pytest.mark.asyncio
     async def test_async_unpickleable_return(self, cache_path: Path) -> None:
-        cached_async_unpickleable = cache(path=str(cache_path))(async_unpickleable_return_func)
+        calls = {"count": 0}
 
-        # First call executes, fails during pickling/caching within run_in_executor
-        # The error from run_in_executor should be propagated
-        with pytest.raises(TypeError, match="cannot be pickled"):
-            await cached_async_unpickleable(1)
+        async def tracked_async_unpickleable_return_func(x: int) -> NonPickleable:
+            del x
+            calls["count"] += 1
+            await asyncio.sleep(0.01)
+            return NonPickleable()
 
-        # Second call should re-execute and fail again
-        with pytest.raises(TypeError, match="cannot be pickled"):
-            await cached_async_unpickleable(1)
+        cached_async_unpickleable = cache(path=str(cache_path))(tracked_async_unpickleable_return_func)
+
+        first = await cached_async_unpickleable(1)
+        assert isinstance(first, NonPickleable)
+        assert calls["count"] == 1
+
+        second = await cached_async_unpickleable(1)
+        assert isinstance(second, NonPickleable)
+        assert calls["count"] == 2
+
+    def test_close_shared_cache_allows_future_calls_with_fresh_connection(self, cache_path: Path) -> None:
+        cached_sync_func = cache(path=str(cache_path))(sync_func)
+
+        assert cached_sync_func(1) == 11
+        assert execution_flags.get("sync_func_1_10", 0) == 1
+
+        assert isinstance(cached_sync_func, ClearableSyncFunc)
+        cached_sync_func.close_shared_cache()
+
+        assert cached_sync_func(2) == 12
+        assert execution_flags.get("sync_func_2_10", 0) == 1
+        assert cached_sync_func(2) == 12
+        assert execution_flags.get("sync_func_2_10", 0) == 1
 
     def test_multiple_functions_same_cache(self, cache_path: Path) -> None:
         cached_sync1 = cache(path=str(cache_path))(sync_func)

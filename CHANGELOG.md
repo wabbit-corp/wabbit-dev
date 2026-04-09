@@ -10,6 +10,28 @@
 - make `HardcodedInternalHostnameIpCheck` scan documentation files so the implementation matches the documented policy
 - extend `dep updates` to check exact-pinned Python project dependencies against PyPI in addition to named Maven libraries
 - relax `requirements.txt` pinning checks to allow exact pins or bounded same-major ranges such as `>=2.10.2,<3.0.0`
+- bound `agent_call()` to 1024 tool-call steps and raise clear runtime errors on step exhaustion or unexpected finish reasons
+- treat cached `None` values as real cache hits instead of recomputing them on every wrapper call
+- make cache helper methods use the originally resolved cache DB path so `cwd` changes do not redirect `clear_cache()` or `close_shared_cache()`
+- stop `file_modes` scans from mutating the tree on `.DS_Store` files and handle `.DS_Store` removal errors without aborting the run
+- make `HardcodedUrlCheck` actually skip markdown links instead of detecting them and still reporting them
+- stop `dev.tasks.duplicates` from mutating `sys.stdout` at import time; only reconfigure stdout in CLI execution
+- make symlink escape detection find the repo root from the link location instead of following the link target first
+- make `save_uri()` download bytes safely, use request timeouts, and only persist new ETags after a successful download
+- make the SPDX fixer search past the first five lines so it replaces existing late headers instead of inserting duplicates
+- stop `dev/git_contributors.py` from mutating the process-wide current working directory; contributor and git-user helpers now use repo-scoped git commands
+- make `check --fix` return success when it fixes all error-level findings during that pass instead of still exiting nonzero from the pre-fix snapshot
+- stop `agent_call()` from reading files outside the repository via `..` traversal or symlink escapes in `request_to_developer` paths
+- make script-mode auto-venv re-exec fall back to `python -m dev` when the repo-root `dev.py` launcher is unavailable instead of execing a nonexistent file
+- make cache write/pickling failures degrade to uncached behavior instead of raising after the wrapped function succeeded, and let `close_shared_cache()` reacquire a fresh shared connection on later calls
+- make `suggest_commit_name()` raise when the model never exits tool-calling mode instead of fabricating an `Unknown` commit message
+- make `agent_call()` convert malformed tool-argument JSON into tool errors so a bad model payload does not abort the whole run
+- turn `dev.checks.file_modes` into a real registered file check by exposing suspicious executable permissions as a fixable `FileCheck`
+- align Maven version service-pack handling with `ComparableVersion` ordering so final/`ga` releases sort before `sp`, and parse `sp1`/`SP1` as service-pack qualifiers
+- make `Module.load_modules()` inspect constructor signatures up front so only genuine “needs args” modules are skipped and real `TypeError` init bugs are no longer masked
+- make `agent_call()` reject known binary files via file-property metadata and surface UTF-8 decode failures as tool errors instead of crashing on binary reads
+- make `agent_call()` process all tool calls in a single assistant message before honoring `answer`, so tool work is not dropped based on call ordering
+- make the C# formatting check keep the legacy `csharpier` runner selected when dotnet-tool fallback reports an unformatted file, so emitted fixes invoke the working formatter
 
 ## Unreleased (2026-02-17)
 - Generate real `java-gradle-plugin` JVM builds for `root.clj` Gradle projects that declare `:gradlePluginId`, including inferred plugin metadata, Kotlin Gradle plugin API/TestKit dependencies, and version expansion for `*gradle-plugin.properties` resources.

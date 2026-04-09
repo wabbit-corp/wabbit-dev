@@ -251,9 +251,10 @@ class CSharpFormattingCheck(FileCheck):
             # If 'dotnet' exists but tool isn't in manifest / not installed,
             # try legacy shim as a fallback before declaring missing.
             if result.returncode != 0 and selected == "dotnet":
+                dotnet_result = result
                 try:
                     result_legacy = self._run(legacy_cmd + ["--check", str(ctx.path)])
-                    if result_legacy.returncode == 0:
+                    if _looks_like_dotnet_csharpier_missing(dotnet_result) or result_legacy.returncode == 0:
                         selected = "legacy"
                         result = result_legacy
                 except FileNotFoundError:

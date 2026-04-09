@@ -29,7 +29,7 @@ def test_expected_spdx_identifier_uses_main_and_test_licenses(tmp_path: Path) ->
     assert expected_spdx_identifier(FileContext(check_name="x", path=main_file, project=project)) == "AGPL-3.0-or-later"
     assert (
         expected_spdx_identifier(FileContext(check_name="x", path=test_file, project=project))
-        == "LicenseRef-Wabbit-Public-Test-License"
+        == "LicenseRef-Wabbit-Public-Test-License-1.1"
     )
 
 
@@ -43,6 +43,24 @@ def test_render_spdx_fixed_text_replaces_incorrect_existing_header() -> None:
     text = "// SPDX-License-Identifier: MIT\n\npackage demo\n"
     fixed = render_spdx_fixed_text(Path("Main.kt"), text, "AGPL-3.0-or-later")
     assert fixed == "// SPDX-License-Identifier: AGPL-3.0-or-later\n\npackage demo\n"
+
+
+def test_render_spdx_fixed_text_replaces_existing_header_after_long_preamble() -> None:
+    text = (
+        "// Copyright 2026 Example\n"
+        "// Generated from upstream metadata\n"
+        "// Additional context line 1\n"
+        "// Additional context line 2\n"
+        "// Additional context line 3\n"
+        "// Additional context line 4\n"
+        "// SPDX-License-Identifier: MIT\n"
+        "\n"
+        "package demo\n"
+    )
+    fixed = render_spdx_fixed_text(Path("Main.kt"), text, "AGPL-3.0-or-later")
+    assert fixed.count("SPDX-License-Identifier:") == 1
+    assert "// SPDX-License-Identifier: AGPL-3.0-or-later\n" in fixed
+    assert "// SPDX-License-Identifier: MIT\n" not in fixed
 
 
 def test_spdx_header_check_reports_fix_for_missing_header(tmp_path: Path) -> None:

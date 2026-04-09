@@ -25,6 +25,7 @@ class NoCacheSentinel:
 
 
 NO_CACHE = NoCacheSentinel()
+_CACHE_MISS = object()
 
 ###############################################################################
 # Thread-Local Cashier Management & Cleanup
@@ -175,7 +176,7 @@ class Cashier:
             with conn:
                 conn.execute(self._DEL_FQN_SQL, (fqn,))
 
-    def get(self, key: str, default_ttl: float | None = None) -> object | None:
+    def get(self, key: str, default_ttl: float | None = None, missing: object | None = None) -> object | None:
         """
         Retrieve cached object. Prioritizes TTL stored with item over default_ttl.
         """
@@ -187,7 +188,7 @@ class Cashier:
             row = cursor.fetchone()
             if not row:
                 logger.debug("Cache miss - key not found: %s", key)
-                return None
+                return missing
 
             val_blob, insert_time, stored_ttl = row  # Unpack stored TTL
 
@@ -213,11 +214,11 @@ class Cashier:
                     # Perform deletion within the same transaction lock
                     with conn:
                         conn.execute(self._DEL_SQL, (key,))
-                    return None
+                    return missing
 
             logger.debug("Cache hit for key: %s", key)
             if not isinstance(val_blob, (bytes, bytearray)):
-                return None
+                return missing
             loaded_value: object = pickle.loads(val_blob)
             return loaded_value
 
@@ -475,6 +476,19 @@ def cache(
                 exc_info=True,
             )
             raise RuntimeError(f"Failed to initialize cache backend for {fqn} at {path}") from ex
+        resolved_cache_path = cashier.path
+
+        def _get_shared_cashier_for_use() -> Cashier | None:
+            try:
+                return get_cashier_instance(path=resolved_cache_path)
+            except Exception as ex:
+                logger.error(
+                    "Failed to obtain Cashier instance for %s used by %s during operation.",
+                    resolved_cache_path,
+                    fqn,
+                    exc_info=True,
+                )
+                return None
 
         @wraps(fn)
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -503,19 +517,21 @@ def cache(
 
             # 2. Try to get from cache
             try:
-                cached_result = cashier.get(key, default_ttl=ttl)
-                if cached_result is not None:
-                    logger.debug("Cache hit for key=%s (fqn=%s)", key, fqn)
-                    if is_async:
-                        # If original function was async, return an awaitable
-                        # even on cache hit, resolving immediately with the cached value.
-                        async def _async_return_cached() -> object:
-                            return cached_result
+                active_cashier = _get_shared_cashier_for_use()
+                if active_cashier is not None:
+                    cached_result = active_cashier.get(key, default_ttl=ttl, missing=_CACHE_MISS)
+                    if cached_result is not _CACHE_MISS:
+                        logger.debug("Cache hit for key=%s (fqn=%s)", key, fqn)
+                        if is_async:
+                            # If original function was async, return an awaitable
+                            # even on cache hit, resolving immediately with the cached value.
+                            async def _async_return_cached() -> object:
+                                return cached_result
 
-                        return cast(R, _async_return_cached())
-                    else:
-                        # Original function was sync, return raw value directly
-                        return cast(R, cached_result)
+                            return cast(R, _async_return_cached())
+                        else:
+                            # Original function was sync, return raw value directly
+                            return cast(R, cached_result)
             except Exception as e:
                 # Error during cache get (DB error, unpickling error)
                 logger.error(
@@ -551,18 +567,21 @@ def cache(
 
                 if cache_directive is NO_CACHE:
                     logger.debug(
-                        "Skipping cache set based on ttl_policy_func result (NO_CACHE) for key=%s",
-                        key,
-                    )
+                            "Skipping cache set based on ttl_policy_func result (NO_CACHE) for key=%s",
+                            key,
+                        )
                     # Do not cache
                 else:
                     # Directive is None or a TTL number
                     if isinstance(cache_directive, (float, int)):
                         specific_ttl_to_set = float(cache_directive)
                     try:
+                        active_cashier = _get_shared_cashier_for_use()
+                        if active_cashier is None:
+                            return
                         pickled_result = pickle.dumps(result, protocol=4)
                         # Call set, passing the specific TTL derived from the policy
-                        cashier.set(
+                        active_cashier.set(
                             key=key,
                             fqn=fqn,
                             val=pickled_result,
@@ -584,7 +603,7 @@ def cache(
                             cache_set_exc,
                             exc_info=True,
                         )
-                        raise cache_set_exc  # Propagate caching error
+                        return
 
             if not is_async:
                 # --- Handle Synchronous Function ---
@@ -625,12 +644,7 @@ def cache(
                     #       because cashier.set is thread-safe (locked).
                     #       We run it in executor primarily because pickle.dumps might block.
                     loop = asyncio.get_running_loop()
-                    try:
-                        await loop.run_in_executor(None, _execute_and_cache, result)
-                    except Exception as cache_exec_exc:
-                        # Error occurred during pickling or cashier.set via executor
-                        # _execute_and_cache already logs and raises, executor propagates
-                        raise cache_exec_exc
+                    await loop.run_in_executor(None, _execute_and_cache, result)
 
                     return result  # Return original awaited result
 
@@ -638,16 +652,17 @@ def cache(
 
         def clear_cache_for_this_fn() -> None:
             """Clears all cache entries associated with this specific function."""
-            logger.debug("Clearing cache for function %s (path=%s)", fqn, path)
+            logger.debug("Clearing cache for function %s (path=%s)", fqn, resolved_cache_path)
             try:
-                # Need to get the correct cashier instance
-                instance = get_cashier_instance(path=path)
-                instance.delete_by_fqn(fqn)
+                active_cashier = _get_shared_cashier_for_use()
+                if active_cashier is None:
+                    return
+                active_cashier.delete_by_fqn(fqn)
             except Exception as e:
                 logger.error(
                     "Failed to clear cache for fqn=%s (path=%s): %s",
                     fqn,
-                    path,
+                    resolved_cache_path,
                     e,
                     exc_info=True,
                 )
@@ -660,14 +675,16 @@ def cache(
             """
             logger.warning(
                 "Closing cache connection for path %s (used by %s and potentially others).",
-                path,
+                resolved_cache_path,
                 fqn,
             )
             try:
-                instance = get_cashier_instance(path=path)
-                instance.close()  # This handles unregistering etc.
+                active_cashier = _get_shared_cashier_for_use()
+                if active_cashier is None:
+                    return
+                active_cashier.close()  # This handles unregistering etc.
             except Exception as e:
-                logger.error("Failed to close cache for path=%s: %s", path, e, exc_info=True)
+                logger.error("Failed to close cache for path=%s: %s", resolved_cache_path, e, exc_info=True)
                 # Optionally re-raise
 
         # Attach helper methods to the wrapped function

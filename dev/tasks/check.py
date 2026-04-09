@@ -6,8 +6,7 @@ import re
 import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
-from functools import cached_property
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
@@ -34,6 +33,7 @@ from dev.checks.base import (
 from dev.checks.root_paths import E_GITIGNORE_WITHOUT_REPO
 from dev.config import Project, find_workspace_root, load_config
 from dev.discoverability import did_you_mean_suffix, unknown_name_message
+from dev.ignore_files import IgnoreMatcher
 from dev.messages import accent, command_text, error, heading, info, style, warning
 from dev.repo_resolution import configured_repo_targets, inferred_project_targets, resolve_check_paths
 
@@ -540,13 +540,10 @@ def check_main(
 
     has_errors = False
 
-    def report(issue: Issue | IssueList | list[Issue]) -> None:
-        nonlocal has_errors
-        if isinstance(issue, IssueList) or isinstance(issue, list):
-            for i in issue:
-                report(i)
-            return
+    def _is_error_issue(issue: Issue) -> bool:
+        return issue.issue_type.severity not in (Severity.INFO, Severity.WARNING)
 
+    def report(issue: Issue) -> None:
         if is_check_disabled(issue):
             return
 
@@ -570,9 +567,6 @@ def check_main(
         parts.append(style(">", "blue"))
         parts.append(issue_message(issue, report_format_error=True))
 
-        if issue.issue_type.severity not in (Severity.INFO, Severity.WARNING):
-            has_errors = True
-
         # data_str = (
         #     ", ".join(f"{k}={v}" for k, v in issue.data.items() if v is not None)
         #     if issue.data
@@ -583,36 +577,34 @@ def check_main(
 
         _severity_reporter(issue.issue_type.severity)(" ".join(parts))
 
+    def handle_issue(issue: Issue | IssueList | list[Issue]) -> None:
+        nonlocal has_errors
+        if isinstance(issue, IssueList) or isinstance(issue, list):
+            for i in issue:
+                handle_issue(i)
+            return
+
+        if is_check_disabled(issue):
+            return
+
+        report(issue)
+
+        was_fixed = False
+        if issue.fix and fix:
+            info("Fixing")
+            issue.fix()
+            was_fixed = True
+
+        if _is_error_issue(issue) and not was_fixed:
+            has_errors = True
+
     @dataclass(frozen=True)
     class RepoContext:
         root: Path
-        ignore: list[str] = field(default_factory=list)
+        matcher: IgnoreMatcher
 
-        def with_ignore(self, ignore: list[str]) -> RepoContext:
-            return RepoContext(
-                root=self.root,
-                ignore=self.ignore + ignore,
-            )
-
-        @cached_property
-        def spec(self) -> pathspec.PathSpec:
-            """
-            Returns a pathspec.PathSpec object for the ignore patterns.
-            """
-            from pathspec import PathSpec
-            from pathspec.patterns.gitwildmatch import GitWildMatchPattern
-
-            return PathSpec.from_lines(
-                GitWildMatchPattern,
-                self.ignore,
-            )
-
-    def read_ignore_patterns(path: Path) -> list[str]:
-        """
-        Reads a gitignore-style ignore file and returns active patterns.
-        """
-        with path.open("rt", encoding="utf-8") as f:
-            return [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+    def repo_ignores_path(path: Path, repo: RepoContext) -> bool:
+        return repo.matcher.matches(path, is_dir=path.is_dir())
 
     def find_repo_root(path: Path) -> Path | None:
         current = path.absolute()
@@ -641,7 +633,7 @@ def check_main(
             return
         for check in repo_checks:
             issues = check.check(repo_root, project=project)
-            report(issues)
+            handle_issue(issues)
         seen_repo_roots.add(resolved)
 
     configured_repo_paths: list[Path] = []
@@ -680,7 +672,7 @@ def check_main(
             return
         for project_check in project_checks:
             issues = project_check.check(project.path, project)
-            report(issues)
+            handle_issue(issues)
         seen_project_paths.add(resolved_project_path)
 
     def run_without_recursive_walk(path: Path) -> None:
@@ -701,14 +693,14 @@ def check_main(
 
     def go(path: Path, project: Project | None = None, repo: RepoContext | None = None) -> None:
         if repo is not None:
-            if repo.spec.match_file(path.relative_to(repo.root)):
+            if repo_ignores_path(path, repo):
                 # info(f"Skipping {path} due to .gitignore")
                 return
 
         if repo is None:
             repo_root = find_repo_root(path)
             if repo_root is not None:
-                repo = RepoContext(root=repo_root, ignore=["/.git"])
+                repo = RepoContext(root=repo_root, matcher=IgnoreMatcher(repo_root))
                 project_at_root = projects_by_path.get(repo_root.resolve())
                 maybe_run_repo_checks(repo_root, project_at_root)
 
@@ -722,30 +714,15 @@ def check_main(
             if project_at_path is not None:
                 for project_check in project_checks:
                     issues = project_check.check(path, project_at_path)
-                    report(issues)
+                    handle_issue(issues)
                 project = project_at_path
 
             # It could be a repo
             if (path / ".git").exists():
-                repo = RepoContext(
-                    root=path,
-                    ignore=["/.git"],
-                )
+                repo = RepoContext(root=path, matcher=IgnoreMatcher(path))
                 maybe_run_repo_checks(path, project)
-
-            if (path / ".gitignore").exists():
-                if repo is not None:
-                    ignore = read_ignore_patterns(path / ".gitignore")
-                    repo = repo.with_ignore(ignore)
-
-            if (path / ".checkignore").exists():
-                if repo is None:
-                    repo = RepoContext(
-                        root=path,
-                        ignore=["/.git"],
-                    )
-                ignore = read_ignore_patterns(path / ".checkignore")
-                repo = repo.with_ignore(ignore)
+            elif (path / ".checkignore").exists() and repo is None:
+                repo = RepoContext(root=path, matcher=IgnoreMatcher(path))
 
             accumulated_issues = IssueList()
             for directory_check in dir_checks:
@@ -756,11 +733,11 @@ def check_main(
                 except CheckFailedWithReportedIssues:
                     pass  # Issues already reported in context
                 accumulated_issues.extend(ctx.issues)
-            report(accumulated_issues)
+            handle_issue(accumulated_issues)
 
             for child in path.iterdir():
                 if repo is not None:
-                    if repo.spec.match_file(child.relative_to(repo.root)):
+                    if repo_ignores_path(child, repo):
                         # info(f"Skipping {child} due to .gitignore")
                         continue
                 go(child, project=project, repo=repo)
@@ -788,16 +765,13 @@ def check_main(
                 accumulated_issues.extend(ctx.issues)
 
             for issue in accumulated_issues:
-                report(issue)
-                if issue.fix and fix and is_check_disabled(issue) is False:
-                    info("Fixing")
-                    issue.fix()
+                handle_issue(issue)
 
     for path in root_paths:
         project_at_root = projects_by_path.get(path.resolve()) if path.is_dir() else None
         for root_check in root_checks:
             issues = root_check.check(path, project_at_root)
-            report(issues)
+            handle_issue(issues)
         if needs_recursive_walk or config is None:
             go(path)
         else:

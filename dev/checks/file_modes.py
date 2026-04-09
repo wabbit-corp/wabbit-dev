@@ -6,10 +6,15 @@
 * [ ] Check that files that are supposed to be executable (e.g., scripts) have the correct executable permissions.
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import stat
 import sys  # Added for stderr
+from pathlib import Path
+
+from dev.checks.base import FileCheck, FileContext, IssueType
 
 # --- Configuration ---
 EXECUTABLE_EXTENSIONS = {
@@ -22,6 +27,11 @@ EXECUTABLE_EXTENSIONS = {
     ".run",
     ".sh",
 }
+
+E_SUSPICIOUS_EXECUTABLE_FILE_MODE = IssueType(
+    "E_SUSPICIOUS_EXECUTABLE_FILE_MODE",
+    "File is marked executable but does not appear to be an executable script or binary.",
+)
 
 # --- Helper Functions ---
 
@@ -103,6 +113,25 @@ def is_executable(filepath: str) -> bool:
         return False
 
 
+def is_suspicious_executable(filepath: str) -> bool:
+    """
+    Returns True when a regular non-link file has execute bits set but does not
+    look like a script or binary that should be executable.
+    """
+    if os.path.islink(filepath) or not os.path.isfile(filepath):
+        return False
+    if not is_executable(filepath):
+        return False
+
+    _, ext = os.path.splitext(filepath)
+    ext_lower = ext.lower()
+    return not (
+        has_shebang(filepath)
+        or is_elf_exe_mach(filepath) is not None
+        or ext_lower in EXECUTABLE_EXTENSIONS
+    )
+
+
 def remove_execute_permission(filepath: str) -> bool:
     """
     Removes execute permissions (user, group, other) from a file.
@@ -130,6 +159,23 @@ def remove_execute_permission(filepath: str) -> bool:
         return False
 
 
+def remove_ds_store(filepath: str) -> bool:
+    """
+    Removes a macOS .DS_Store file.
+    Returns True on success, False on failure.
+    """
+    try:
+        os.remove(filepath)
+        print(f"Removed: {filepath} (macOS system file)")
+        return True
+    except OSError as e:
+        print(f"Warning: Could not remove {filepath}: {e}", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"Warning: Unexpected error removing {filepath}: {e}", file=sys.stderr)
+        return False
+
+
 def find_and_process_files(root_dir: str, fix_files: bool = False) -> tuple[list[str], int, int]:
     """
     Walks the directory tree, finds suspicious files, and optionally fixes them.
@@ -154,42 +200,23 @@ def find_and_process_files(root_dir: str, fix_files: bool = False) -> tuple[list
             filepath = os.path.join(dirpath, filename)
 
             if filename == ".DS_Store":
-                os.remove(filepath)
-                print(f"Removed: {filepath} (macOS system file)")
+                if fix_files and not remove_ds_store(filepath):
+                    error_count += 1
                 continue
 
             try:
                 # Process only regular files (skip symlinks, etc.)
-                if not os.path.islink(filepath) and os.path.isfile(filepath):
-                    if is_executable(filepath):
-                        _, ext = os.path.splitext(filename)
-                        ext_lower = ext.lower()
+                if is_suspicious_executable(filepath):
+                    _, ext = os.path.splitext(filename)
+                    suspicious_files_found.append(filepath)
+                    print(f"Suspicious: {filepath} (Extension: {ext}, Executable, No Shebang)")
 
-                        # Check if extension is non-executable and file lacks shebang
-                        # (filename in NON_EXECUTABLE_EXTENSIONS or ext_lower in NON_EXECUTABLE_EXTENSIONS) and
-                        if not (
-                            has_shebang(filepath)
-                            or is_elf_exe_mach(filepath) is not None
-                            or ext_lower in EXECUTABLE_EXTENSIONS
-                        ):
-                            suspicious_files_found.append(filepath)
-                            print(f"Suspicious: {filepath} (Extension: {ext}, Executable, No Shebang)")
-
-                            # If fix mode is enabled, attempt to remove execute permission
-                            if fix_files:
-                                if remove_execute_permission(filepath):
-                                    fixed_count += 1
-                                else:
-                                    error_count += 1
-                        # Optional: Check for executable files with NO extension and no shebang
-                        # elif not ext and not has_shebang(filepath):
-                        #     suspicious_files_found.append(filepath)
-                        #     print(f"Suspicious: {filepath} (No Extension, Executable, No Shebang)")
-                        #     if fix_files:
-                        #         if remove_execute_permission(filepath):
-                        #             fixed_count += 1
-                        #         else:
-                        #             error_count += 1
+                    # If fix mode is enabled, attempt to remove execute permission
+                    if fix_files:
+                        if remove_execute_permission(filepath):
+                            fixed_count += 1
+                        else:
+                            error_count += 1
 
             except OSError as e:
                 print(f"Warning: Could not access {filepath}: {e}", file=sys.stderr)
@@ -201,6 +228,22 @@ def find_and_process_files(root_dir: str, fix_files: bool = False) -> tuple[list
 
     print("-" * 30)
     return suspicious_files_found, fixed_count, error_count
+
+
+class SuspiciousExecutableFileModeCheck(FileCheck):
+    """Flags files with execute bits that do not look like scripts or binaries."""
+
+    order = 85
+
+    def check(self, ctx: FileContext) -> None:
+        if ctx.path.is_symlink() or not ctx.is_file:
+            return
+        if not is_suspicious_executable(str(ctx.path)):
+            return
+        ctx.add_issue(
+            E_SUSPICIOUS_EXECUTABLE_FILE_MODE,
+            fix=lambda: remove_execute_permission(str(ctx.path)),
+        )
 
 
 # --- Main Execution ---
@@ -241,3 +284,17 @@ if __name__ == "__main__":
         print("No suspicious files found.")
 
     print("\nScan complete.")
+
+
+__all__ = [
+    "EXECUTABLE_EXTENSIONS",
+    "E_SUSPICIOUS_EXECUTABLE_FILE_MODE",
+    "SuspiciousExecutableFileModeCheck",
+    "find_and_process_files",
+    "has_shebang",
+    "is_elf_exe_mach",
+    "is_executable",
+    "is_suspicious_executable",
+    "remove_ds_store",
+    "remove_execute_permission",
+]

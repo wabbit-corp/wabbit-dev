@@ -87,9 +87,11 @@ def _assert_version_sequence(vs: str) -> None:
         "1.0.0-alpha < 1.0.0-beta < 1.0.0",
         "2.0.0-alpha.1 < 2.0.0-beta.1 < 2.0.0",
         "1.0-rc1 < 1.0-rc2 < 1.0 < 1.0.1",
+        "1.0-alpha < 1.0-beta < 1.0-m1 < 1.0-rc1 < 1.0-snapshot < 1.0 ~ 1.0-ga ~ 1.0-final < 1.0-sp < 1.0-sp1 < 1.0-sp2",
         "2.0.08 ~ 2.0.8",
         "1.0.0-RC1 < 1.0.0-GA ~ 1.0.0.RELEASE ~ 1.0.0",
         "1.0.0.Final ~ 1.0.0-Final ~ 1.0.0",
+        "1.0-sp1 ~ 1.0-SP1",
     ],
 )
 def test_version_sequence(sequence: str) -> None:

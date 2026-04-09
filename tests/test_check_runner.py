@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from dev.checks.base import FileCheck, FileContext, Issue, IssueType, RepoCheck, RootCheck, Severity
+from dev.checks.file_duplicates import DuplicateFilesCheck
 from dev.tasks import check as check_task
 
 E_TEST_ERROR = IssueType("E_TEST_RUNNER_ERROR", "runner error")
@@ -65,6 +66,22 @@ class RepoValueMatch(RepoCheck):
 
     def check(self, path: Path, project: object) -> list[Issue]:
         return [E_TEST_VALUE_MATCH.make(literal="10.0.0.0").at(path)]
+
+
+class RepoFixableError(RepoCheck):
+    order = 100
+
+    def __init__(self) -> None:
+        self.fixed = False
+
+    def check(self, path: Path, project: object) -> list[Issue]:
+        del project
+        if self.fixed:
+            return []
+        return [E_TEST_ERROR.at(path).fixable(self._fix)]
+
+    def _fix(self) -> None:
+        self.fixed = True
 
 
 class ProjectRecorder(check_task.ProjectCheck):
@@ -187,6 +204,22 @@ def test_check_main_exit_code_zero_for_warnings(tmp_path: Path, monkeypatch: pyt
         staticmethod(lambda: {"RepoWarning": RepoWarning()}),
     )
     assert check_task.check_main(str(tmp_path)) == 0
+
+
+def test_check_main_fix_mode_returns_zero_when_error_is_fixed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _make_repo(tmp_path)
+    fixable_check = RepoFixableError()
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"RepoFixableError": fixable_check}),
+    )
+
+    assert check_task.check_main(str(tmp_path), fix=True) == 0
+    assert fixable_check.fixed is True
 
 
 def test_check_main_renders_warning_and_error_prefixes_by_severity(
@@ -388,6 +421,77 @@ def test_nested_checkignore_applies_only_to_subtree(tmp_path: Path, monkeypatch:
     assert "/skip.txt" in joined
     assert "/src/keep.txt" in joined
     assert "/src/skip.txt" not in joined
+
+
+def test_gitignore_directory_pattern_skips_entire_directory_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _make_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text(".venv/\nsite/\n", encoding="utf-8")
+    (tmp_path / "keep.py").write_text("print('keep')\n", encoding="utf-8")
+    venv_dir = tmp_path / ".venv" / "lib"
+    venv_dir.mkdir(parents=True)
+    (venv_dir / "ignored.py").write_text("print('ignored')\n", encoding="utf-8")
+    site_dir = tmp_path / "site"
+    site_dir.mkdir()
+    (site_dir / "generated.py").write_text("print('generated')\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"FileRecorder": FileRecorder()}),
+    )
+
+    assert check_task.check_main(str(tmp_path)) == 0
+    joined = "\n".join(FILE_CALLS)
+    assert "keep.py" in joined
+    assert "ignored.py" not in joined
+    assert "generated.py" not in joined
+
+
+def test_duplicate_files_check_respects_repo_gitignore_and_checkignore(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _make_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text(".venv/\nsite/\n", encoding="utf-8")
+    (tmp_path / ".checkignore").write_text("/tmp-test/\n", encoding="utf-8")
+
+    keep_a = tmp_path / "src-a"
+    keep_b = tmp_path / "src-b"
+    keep_a.mkdir()
+    keep_b.mkdir()
+    (keep_a / "same.txt").write_text("same\n", encoding="utf-8")
+    (keep_b / "same.txt").write_text("same\n", encoding="utf-8")
+
+    ignored_dir = tmp_path / ".venv" / "lib"
+    ignored_dir.mkdir(parents=True)
+    (ignored_dir / "same.txt").write_text("same\n", encoding="utf-8")
+
+    site_dir = tmp_path / "site"
+    site_dir.mkdir()
+    (site_dir / "same.txt").write_text("same\n", encoding="utf-8")
+
+    tmp_test_dir = tmp_path / "tmp-test"
+    tmp_test_dir.mkdir()
+    (tmp_test_dir / "same.txt").write_text("same\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        check_task.Module,
+        "load_modules",
+        staticmethod(lambda: {"DuplicateFilesCheck": DuplicateFilesCheck()}),
+    )
+
+    assert check_task.check_main(str(tmp_path), enabled_checks=["DuplicateFilesCheck"]) == 1
+    output = capsys.readouterr().out
+    assert "src-a" in output
+    assert "src-b" in output
+    assert ".venv" not in output
+    assert "site/" not in output
+    assert "tmp-test" not in output
+
 
 
 def test_ignore_finding_config_suppresses_matching_value(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

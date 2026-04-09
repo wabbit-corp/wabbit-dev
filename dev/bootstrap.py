@@ -78,7 +78,10 @@ def build_workspace_venv_reexec_argv(
     if launch_mode == "module":
         return [str(venv_python), "-m", "dev", *active_argv[1:]]
 
-    return [str(venv_python), str(tool_dev_script()), *active_argv[1:]]
+    script_path = tool_dev_script()
+    if script_path.is_file():
+        return [str(venv_python), str(script_path), *active_argv[1:]]
+    return [str(venv_python), "-m", "dev", *active_argv[1:]]
 
 
 def maybe_reexec_to_workspace_venv(

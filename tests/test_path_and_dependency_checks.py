@@ -7,6 +7,7 @@ from dev.checks.file_paths import (
     E_FILE_NAMING_CONVENTION,
     E_SYMLINK,
     E_SYMLINK_BROKEN,
+    E_SYMLINK_ESCAPES_REPO,
     E_SYMLINK_POINTS_ABSOLUTE,
     FilenamePropertiesCheck,
     NamingConventionCheck,
@@ -88,6 +89,28 @@ def test_symlink_target_check_always_reports_symlink_issue(tmp_path: Path) -> No
     issue_types = [issue.issue_type for issue in ctx.issues.issues]
     assert E_SYMLINK in issue_types
     assert E_SYMLINK_POINTS_ABSOLUTE not in issue_types
+    assert E_SYMLINK_BROKEN not in issue_types
+
+
+def test_symlink_target_check_reports_relative_escape_from_repo(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    nested = repo_root / "nested"
+    nested.mkdir()
+
+    outside_target = tmp_path / "outside.txt"
+    outside_target.write_text("hello\n", encoding="utf-8")
+
+    link = nested / "escape.txt"
+    link.symlink_to("../../outside.txt")
+    ctx = FileContext(check_name="SymlinkTargetCheck", path=link)
+
+    SymlinkTargetCheck().check(ctx)
+
+    issue_types = [issue.issue_type for issue in ctx.issues.issues]
+    assert E_SYMLINK in issue_types
+    assert E_SYMLINK_ESCAPES_REPO in issue_types
     assert E_SYMLINK_BROKEN not in issue_types
 
 

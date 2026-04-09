@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import base64
+import importlib
+import io
+import sys
 import zipfile
 from pathlib import Path
 
@@ -18,6 +21,20 @@ ENCRYPTED_ZIP_BASE64 = (
 
 def write_encrypted_zip(path: Path) -> None:
     path.write_bytes(base64.b64decode(ENCRYPTED_ZIP_BASE64))
+
+
+def test_importing_duplicates_module_does_not_replace_sys_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeStdout:
+        def __init__(self) -> None:
+            self.buffer = io.BytesIO()
+
+    fake_stdout = FakeStdout()
+    monkeypatch.setattr(sys, "stdout", fake_stdout)
+
+    reloaded = importlib.reload(duplicates_task)
+
+    assert sys.stdout is fake_stdout
+    assert reloaded is duplicates_task
 
 
 def test_find_duplicate_file_groups_across_directories(tmp_path: Path) -> None:

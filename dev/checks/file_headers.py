@@ -126,7 +126,7 @@ def render_spdx_fixed_text(path: Path, text: str, identifier: str) -> str:
     newline = _newline_for_text(text)
     lines = text.splitlines(keepends=True)
     insert_at = 1 if lines and lines[0].startswith("#!") else 0
-    existing_index = _find_existing_spdx_line(lines, start=insert_at, stop=insert_at + 5)
+    existing_index = _find_existing_spdx_line(lines, start=insert_at, stop=len(lines))
 
     if existing_index is not None:
         existing_line = lines[existing_index]

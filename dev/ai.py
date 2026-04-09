@@ -26,6 +26,7 @@ from openai.types.shared_params.reasoning import Reasoning
 
 from dev.caching import DEFAULT_CACHE_DB_PATH, cache
 from dev.config import load_config
+from dev.file_properties import get_expected_file_properties
 from dev.io import read_ignore_file, read_text_file, walk_files
 from dev.json_utils import as_dict, as_list
 
@@ -89,6 +90,7 @@ README_PROMPT_TEMPLATE_ENV = jinja2.Environment(
 SEMVER_IMPACT_PATTERN = re.compile(r"^Semver Impact:\s*(MAJOR|MINOR|PATCH|NONE)\s*$", re.MULTILINE | re.IGNORECASE)
 GIT_TOOL_TIMEOUT_SECONDS = 15
 GIT_TOOL_MAX_OUTPUT_CHARS = 12000
+AGENT_CALL_MAX_STEPS = 1024
 GIT_TOOL_ALLOWED_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^git status(?: --short)?(?: --branch)?$"),
     re.compile(r"^git diff(?: --staged| --cached)?(?: --name-only| --name-status| --stat)?$"),
@@ -360,6 +362,9 @@ def suggest_commit_name(modified: str, /, api_key: str, repo_path: Path | str | 
             indent=2,
         )
 
+    if final_message_content is None:
+        raise RuntimeError("suggest_commit_name failed: model did not return a final commit message after 8 tool rounds")
+
     return ensure_semver_impact_line(_extract_full_commit_message(final_message_content))
 
 
@@ -513,8 +518,14 @@ def answer_about_file(
     prompt = ""
     for path in paths:
         assert os.path.isfile(path), f"File {path} does not exist"
+        try:
+            file_text = read_text_file(path)
+        except UnicodeDecodeError as ex:
+            raise ValueError(f"File is not valid UTF-8 text: {path}") from ex
+        except OSError as ex:
+            raise ValueError(f"Could not read file {path}: {ex}") from ex
         prompt += f"<file path='{path}'>\n"
-        prompt += f"```\n{read_text_file(path)}\n```\n"
+        prompt += f"```\n{file_text}\n```\n"
         prompt += "</file>\n\n"
 
     prompt += "Answer the following question based on the context of the files:\n"
@@ -613,6 +624,26 @@ def _summarize_agent_tool_result(result: object) -> str:
     return f"type={type(result).__name__}"
 
 
+def _raise_agent_call_error(message: str) -> None:
+    raise RuntimeError(f"agent_call failed: {message}")
+
+
+def _agent_text_file_error(path: Path) -> str | None:
+    props = get_expected_file_properties(path)
+    if props is not None and not props.is_text:
+        return f"Files are not text and cannot be read safely: {[path.as_posix()]}"
+    return None
+
+
+def _resolve_repo_scoped_path(root: Path, relative_path: str) -> Path | None:
+    try:
+        candidate = (root / relative_path).resolve()
+        candidate.relative_to(root.resolve())
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return candidate
+
+
 def agent_call(
     root: Path,
     task: str,
@@ -654,17 +685,47 @@ def agent_call(
         if not paths:
             return {"error": "No file were provided"}
 
-        non_existent_files = [path for path in paths if not (root / path).exists()]
+        resolved_paths: dict[str, Path] = {}
+        escaped_paths: list[str] = []
+        for path in paths:
+            resolved_path = _resolve_repo_scoped_path(root, path)
+            if resolved_path is None:
+                escaped_paths.append(path)
+                continue
+            resolved_paths[path] = resolved_path
+
+        if escaped_paths:
+            return {
+                "error": (
+                    f"Paths escape repository root: {escaped_paths}. "
+                    "Please provide repository-relative file paths."
+                )
+            }
+
+        non_existent_files = [path for path, resolved_path in resolved_paths.items() if not resolved_path.exists()]
         if non_existent_files:
             return {"error": f"Files do not exist: {non_existent_files}. Known files: {known_files}"}
 
-        non_file_paths = [path for path in paths if not os.path.isfile(root / path)]
+        non_file_paths = [path for path, resolved_path in resolved_paths.items() if not os.path.isfile(resolved_path)]
         if non_file_paths:
             return {
                 "error": f"Paths are directories: {non_file_paths}. Please provide paths to files, not directories."
             }
 
-        return answer_about_file([root / path for path in paths], question, api_key=api_key, client=client)
+        non_text_files: list[str] = []
+        for path, resolved_path in resolved_paths.items():
+            text_error = _agent_text_file_error(resolved_path)
+            if text_error is not None:
+                non_text_files.append(path)
+        if non_text_files:
+            return {
+                "error": f"Files are not text and cannot be read safely: {non_text_files}. Please provide text files."
+            }
+
+        try:
+            return answer_about_file(list(resolved_paths.values()), question, api_key=api_key, client=client)
+        except ValueError as ex:
+            return {"error": str(ex)}
 
     initial_prompt = ""
     initial_prompt += "You are given a repository with the following files:\n"
@@ -684,7 +745,7 @@ def agent_call(
         {"role": "user", "content": initial_prompt},
     ]
 
-    while True:
+    for step in range(AGENT_CALL_MAX_STEPS):
         response = client.chat.completions.create(
             messages=messages,
             model=CHAT_MODEL,
@@ -697,17 +758,24 @@ def agent_call(
 
         message = response.choices[0].message
         finish_reason = response.choices[0].finish_reason
-        assert finish_reason == "tool_calls"
+        if finish_reason != "tool_calls":
+            _raise_agent_call_error(f"unexpected finish_reason={finish_reason!r} at step {step + 1}")
         messages.append(_assistant_message_to_param(message))
 
         if message.tool_calls:
+            pending_answer_result: str | None = None
             for tool_call in message.tool_calls:
                 assert tool_call.type == "function", f"Unknown tool call type: {tool_call.type}"
                 tool_id = tool_call.id
                 tool_function = tool_call.function
 
                 tool_name = tool_function.name
-                tool_arguments = json.loads(tool_function.arguments)
+                invalid_arguments_error: str | None = None
+                try:
+                    tool_arguments: object = json.loads(tool_function.arguments)
+                except json.JSONDecodeError as ex:
+                    tool_arguments = None
+                    invalid_arguments_error = ex.msg
 
                 logging.info(
                     "Calling tool %s with %s",
@@ -715,11 +783,30 @@ def agent_call(
                     _summarize_agent_tool_arguments(tool_name, tool_arguments),
                 )
 
-                if tool_name == "request_to_developer":
-                    paths = tool_arguments["paths"]
-                    question = tool_arguments["task_or_question"]
+                if tool_arguments is None:
+                    result: object = {
+                        "error": f"Invalid JSON tool arguments for {tool_name}: {invalid_arguments_error or 'invalid JSON'}",
+                    }
+                    logging.info("Tool %s returned %s", tool_name, _summarize_agent_tool_result(result))
+                    msg: ChatCompletionToolMessageParam = {
+                        "tool_call_id": tool_id,
+                        "role": "tool",
+                        "content": json.dumps(result, ensure_ascii=False),
+                    }
+                    messages.append(msg)
+                    continue
 
-                    result = answer(paths, question)
+                tool_arguments_obj = as_dict(tool_arguments)
+
+                if tool_name == "request_to_developer":
+                    raw_paths = None if tool_arguments_obj is None else tool_arguments_obj.get("paths")
+                    question = None if tool_arguments_obj is None else tool_arguments_obj.get("task_or_question")
+                    if not isinstance(raw_paths, list) or not all(isinstance(path, str) for path in raw_paths):
+                        result = {"error": "Missing or invalid tool argument: paths"}
+                    elif not isinstance(question, str):
+                        result = {"error": "Missing or invalid tool argument: task_or_question"}
+                    else:
+                        result = answer(raw_paths, question)
 
                     logging.info("Tool %s returned %s", tool_name, _summarize_agent_tool_result(result))
 
@@ -732,10 +819,39 @@ def agent_call(
                     messages.append(msg)
 
                 elif tool_name == "answer":
-                    result = tool_arguments["result"]
+                    if tool_arguments_obj is None or "result" not in tool_arguments_obj:
+                        result = {"error": "Missing tool argument: result"}
+                        logging.info("Tool %s returned %s", tool_name, _summarize_agent_tool_result(result))
+                        msg = {
+                            "tool_call_id": tool_id,
+                            "role": "tool",
+                            "content": json.dumps(result, ensure_ascii=False),
+                        }
+                        messages.append(msg)
+                        continue
+
+                    result = tool_arguments_obj["result"]
                     if isinstance(result, str):
-                        return result
-                    return json.dumps(result, ensure_ascii=False)
+                        pending_answer_result = result
+                    else:
+                        pending_answer_result = json.dumps(result, ensure_ascii=False)
+                else:
+                    result = {"error": f"Unknown tool: {tool_name}"}
+                    logging.info("Tool %s returned %s", tool_name, _summarize_agent_tool_result(result))
+                    msg = {
+                        "tool_call_id": tool_id,
+                        "role": "tool",
+                        "content": json.dumps(result, ensure_ascii=False),
+                    }
+                    messages.append(msg)
+
+            if pending_answer_result is not None:
+                return pending_answer_result
+
+        if not message.tool_calls:
+            _raise_agent_call_error(f"missing tool calls at step {step + 1}")
+
+    _raise_agent_call_error(f"exceeded maximum tool-call steps ({AGENT_CALL_MAX_STEPS})")
 
 
 def create_readme(project_name: str, root: Path, /, api_key: str) -> str:

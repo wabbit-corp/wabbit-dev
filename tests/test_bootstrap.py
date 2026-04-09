@@ -45,6 +45,32 @@ def test_build_workspace_venv_reexec_argv_for_module_mode(tmp_path: Path) -> Non
     assert result == [str(venv_python), "-m", "dev", "build", "demo"]
 
 
+def test_build_workspace_venv_reexec_argv_for_script_mode_falls_back_to_module_when_dev_script_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from dev import bootstrap
+
+    workspace_root = tmp_path / "workspace"
+    nested = workspace_root / "apps" / "demo"
+    venv_python = workspace_root / ".venv" / "bin" / "python"
+    nested.mkdir(parents=True, exist_ok=True)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+    (workspace_root / "root.clj").write_text("()", encoding="utf-8")
+
+    monkeypatch.setattr(bootstrap, "tool_dev_script", lambda: workspace_root / "missing-dev.py")
+
+    result = bootstrap.build_workspace_venv_reexec_argv(
+        argv=["dev.py", "build", "demo"],
+        launch_mode="script",
+        cwd=nested,
+        current_executable=workspace_root / "python3",
+    )
+
+    assert result == [str(venv_python), "-m", "dev", "build", "demo"]
+
+
 def test_canonical_rerun_command_uses_global_dev_name(tmp_path: Path) -> None:
     from dev.bootstrap import canonical_rerun_command
 

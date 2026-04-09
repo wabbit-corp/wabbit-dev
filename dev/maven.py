@@ -40,6 +40,15 @@ class MavenVersionCoordinate:
     version: int | str
 
     @staticmethod
+    def _parse_qualifier_number(text: str, prefix_len: int) -> int | None:
+        suffix = text[prefix_len:]
+        if suffix == "":
+            return 0
+        if suffix.isdigit():
+            return int(suffix)
+        return None
+
+    @staticmethod
     def from_string(s: str) -> "MavenVersionCoordinate":
         if all(c.isdigit() for c in s):
             return MavenVersionCoordinate(axis=VersionAxis.NUMBER, version=int(s))
@@ -48,31 +57,38 @@ class MavenVersionCoordinate:
 
         if upper_s == "ALPHA":
             return MavenVersionCoordinate(axis=VersionAxis.ALPHA, version=0)
-        elif upper_s.startswith("ALPHA"):
-            return MavenVersionCoordinate(axis=VersionAxis.ALPHA, version=int(s[5:]))
+        alpha_value = MavenVersionCoordinate._parse_qualifier_number(upper_s, 5)
+        if upper_s.startswith("ALPHA") and alpha_value is not None:
+            return MavenVersionCoordinate(axis=VersionAxis.ALPHA, version=alpha_value)
         # a1, a2, a3, etc. are also valid alpha versions
-        elif upper_s.startswith("A"):
-            return MavenVersionCoordinate(axis=VersionAxis.ALPHA, version=int(s[1:]))
+        alpha_short_value = MavenVersionCoordinate._parse_qualifier_number(upper_s, 1)
+        if upper_s.startswith("A") and alpha_short_value is not None:
+            return MavenVersionCoordinate(axis=VersionAxis.ALPHA, version=alpha_short_value)
 
         if upper_s == "BETA":
             return MavenVersionCoordinate(axis=VersionAxis.BETA, version=0)
-        elif upper_s.startswith("BETA"):
-            return MavenVersionCoordinate(axis=VersionAxis.BETA, version=int(s[4:]))
+        beta_value = MavenVersionCoordinate._parse_qualifier_number(upper_s, 4)
+        if upper_s.startswith("BETA") and beta_value is not None:
+            return MavenVersionCoordinate(axis=VersionAxis.BETA, version=beta_value)
         # b1, b2, b3, etc. are also valid beta versions
-        elif upper_s.startswith("B"):
-            return MavenVersionCoordinate(axis=VersionAxis.BETA, version=int(s[1:]))
+        beta_short_value = MavenVersionCoordinate._parse_qualifier_number(upper_s, 1)
+        if upper_s.startswith("B") and beta_short_value is not None:
+            return MavenVersionCoordinate(axis=VersionAxis.BETA, version=beta_short_value)
 
         if upper_s == "MILESTONE":
             return MavenVersionCoordinate(axis=VersionAxis.MILESTONE, version=0)
-        elif upper_s.startswith("MILESTONE"):
-            return MavenVersionCoordinate(axis=VersionAxis.MILESTONE, version=int(s[9:]))
-        elif upper_s.startswith("M"):
-            return MavenVersionCoordinate(axis=VersionAxis.MILESTONE, version=int(s[1:]))
+        milestone_value = MavenVersionCoordinate._parse_qualifier_number(upper_s, 9)
+        if upper_s.startswith("MILESTONE") and milestone_value is not None:
+            return MavenVersionCoordinate(axis=VersionAxis.MILESTONE, version=milestone_value)
+        milestone_short_value = MavenVersionCoordinate._parse_qualifier_number(upper_s, 1)
+        if upper_s.startswith("M") and milestone_short_value is not None:
+            return MavenVersionCoordinate(axis=VersionAxis.MILESTONE, version=milestone_short_value)
 
         if upper_s == "RC":
             return MavenVersionCoordinate(axis=VersionAxis.RC, version=0)
-        elif upper_s.startswith("RC"):
-            return MavenVersionCoordinate(axis=VersionAxis.RC, version=int(s[2:]))
+        rc_value = MavenVersionCoordinate._parse_qualifier_number(upper_s, 2)
+        if upper_s.startswith("RC") and rc_value is not None:
+            return MavenVersionCoordinate(axis=VersionAxis.RC, version=rc_value)
 
         if upper_s == "SNAPSHOT":
             return MavenVersionCoordinate(axis=VersionAxis.SNAPSHOT, version=0)
@@ -81,6 +97,12 @@ class MavenVersionCoordinate:
 
         if upper_s == "SP" or upper_s == "SEC":
             return MavenVersionCoordinate(axis=VersionAxis.SECURITY_PATCH, version=0)
+        sp_value = MavenVersionCoordinate._parse_qualifier_number(upper_s, 2)
+        if upper_s.startswith("SP") and sp_value is not None:
+            return MavenVersionCoordinate(axis=VersionAxis.SECURITY_PATCH, version=sp_value)
+        sec_value = MavenVersionCoordinate._parse_qualifier_number(upper_s, 3)
+        if upper_s.startswith("SEC") and sec_value is not None:
+            return MavenVersionCoordinate(axis=VersionAxis.SECURITY_PATCH, version=sec_value)
 
         return MavenVersionCoordinate(axis=VersionAxis.UNKNOWN, version=s)
 
@@ -117,11 +139,11 @@ class MavenVersionCoordinate:
                 return (4, self.version)
             case VersionAxis.SNAPSHOT:
                 return (5, self.version)
-            case VersionAxis.SECURITY_PATCH:
-                return (6, self.version)
             case VersionAxis.NUMBER:
-                return (7, self.version)
+                return (6, self.version)
             case VersionAxis.FINAL:
+                return (6, self.version)
+            case VersionAxis.SECURITY_PATCH:
                 return (7, self.version)
             case VersionAxis.UNKNOWN:
                 return (99, self.version)

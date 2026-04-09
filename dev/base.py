@@ -18,8 +18,10 @@ CHECK_MODULE_IMPORTS: tuple[str, ...] = (
     "dev.checks.hardcoded",
     "dev.checks.identifier_uniqueness",
     "dev.checks.kmp_target_expansion",
+    "dev.checks.layout_drift",
     "dev.checks.large_files",
     "dev.checks.managed_generated_files",
+    "dev.checks.migrations",
     "dev.checks.project_files",
     "dev.checks.python_bandit",
     "dev.checks.python_black",
@@ -123,6 +125,24 @@ class Module:
         return []
 
     @staticmethod
+    def _has_required_constructor_args(module_type: type["Module"]) -> bool:
+        import inspect
+
+        try:
+            signature = inspect.signature(module_type)
+        except (TypeError, ValueError):
+            return False
+
+        for parameter in signature.parameters.values():
+            if parameter.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            ) and parameter.default is inspect.Parameter.empty:
+                return True
+        return False
+
+    @staticmethod
     def load_modules() -> dict[str, "Module"]:
         import inspect
         from importlib import import_module
@@ -149,12 +169,10 @@ class Module:
                     if skip:
                         continue
 
-                    try:
-                        # print(f"Loading module: {name}")
-                        modules[name] = obj()  # assumes no-arg ctor
-                    except TypeError:
-                        # print(f"Skipping module (needs args): {name}")
-                        # skip or handle modules that need args
-                        pass
+                    if Module._has_required_constructor_args(obj):
+                        continue
+
+                    # print(f"Loading module: {name}")
+                    modules[name] = obj()  # assumes no-arg ctor
 
         return modules

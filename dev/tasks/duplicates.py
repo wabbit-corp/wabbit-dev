@@ -9,7 +9,6 @@ Based on a staged fingerprinting approach to minimize I/O.
 from __future__ import annotations
 
 import argparse
-import codecs
 import fnmatch
 import hashlib
 import os
@@ -22,10 +21,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import BinaryIO, NamedTuple
 
-# reopen stdout with utf-8 support
-stdout_buffer = getattr(sys.stdout, "buffer", None)
-if stdout_buffer is not None:
-    sys.stdout = codecs.getwriter("utf-8")(stdout_buffer)
+type IgnorePathPredicate = Callable[[str, bool], bool]
 
 
 IGNORE_DIRS = {".git", ".svn", ".hg", ".idea", ".vscode", "__pycache__"}
@@ -607,6 +603,7 @@ def build_filesystem_index(
     exclude_filters: list[str] | None = None,
     include_filters: list[str] | None = None,
     no_default_excludes: bool = False,
+    ignore_path: IgnorePathPredicate | None = None,
 ) -> FilesystemTreeIndex:
     file_records: dict[str, FileRecord] = {}
     directory_paths: set[str] = set()
@@ -622,6 +619,8 @@ def build_filesystem_index(
         for path in paths:
             root_path = os.path.realpath(path)
             if root_path in seen_directories:
+                continue
+            if ignore_path is not None and ignore_path(root_path, True):
                 continue
             if not no_default_excludes and is_ignored_dir(root_path):
                 continue
@@ -645,6 +644,8 @@ def build_filesystem_index(
 
                             try:
                                 if entry.is_dir(follow_symlinks=False):
+                                    if ignore_path is not None and ignore_path(entry.path, True):
+                                        continue
                                     if not no_default_excludes and entry_name in IGNORE_DIRS:
                                         continue
 
@@ -655,6 +656,8 @@ def build_filesystem_index(
                                     pending_directories.append((child_dirpath, dirpath, entry_name))
                                     continue
 
+                                if ignore_path is not None and ignore_path(entry.path, False):
+                                    continue
                                 if not no_default_excludes and entry_name in IGNORE_FILES:
                                     continue
                                 if not should_include_file(
@@ -1386,12 +1389,14 @@ def find_duplicate_file_groups(
     include_filters: list[str] | None = None,
     min_size: int = 1,
     no_default_excludes: bool = False,
+    ignore_path: IgnorePathPredicate | None = None,
 ) -> list[FileGroup]:
     index = build_filesystem_index(
         paths,
         exclude_filters=exclude_filters,
         include_filters=include_filters,
         no_default_excludes=no_default_excludes,
+        ignore_path=ignore_path,
     )
     return find_duplicate_file_groups_in_index(index, min_size=min_size)
 
@@ -1403,12 +1408,14 @@ def find_duplicate_directory_groups(
     no_default_excludes: bool = False,
     include_zip_contents: bool = False,
     include_weak_encrypted_zip: bool = False,
+    ignore_path: IgnorePathPredicate | None = None,
 ) -> list[TreeGroup]:
     index = build_filesystem_index(
         paths,
         exclude_filters=exclude_filters,
         include_filters=include_filters,
         no_default_excludes=no_default_excludes,
+        ignore_path=ignore_path,
     )
     return find_duplicate_tree_groups_in_index(
         index,
@@ -1428,12 +1435,14 @@ def find_duplicates(
     no_default_excludes: bool = False,
     include_zip_contents: bool = False,
     include_weak_encrypted_zip: bool = False,
+    ignore_path: IgnorePathPredicate | None = None,
 ) -> DuplicateReport:
     index = build_filesystem_index(
         paths,
         exclude_filters=exclude_filters,
         include_filters=include_filters,
         no_default_excludes=no_default_excludes,
+        ignore_path=ignore_path,
     )
     tree_groups = find_duplicate_tree_groups_in_index(
         index,
@@ -1565,6 +1574,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    stdout_reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(stdout_reconfigure):
+        stdout_reconfigure(encoding="utf-8")
     parser = build_parser()
     args = parser.parse_args(argv)
     check_for_duplicates(

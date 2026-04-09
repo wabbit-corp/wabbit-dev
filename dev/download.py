@@ -1,29 +1,44 @@
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 
 import dateparser
 import requests
 
+REQUEST_TIMEOUT_SECONDS = 10.0
+
+
+def _parse_http_datetime(raw_value: str | None) -> float | None:
+    if raw_value is None:
+        return None
+
+    parsed = dateparser.parse(raw_value)
+    if not isinstance(parsed, datetime):
+        return None
+    return time.mktime(parsed.timetuple())
+
 
 def save_uri(uri: str, path: str) -> None:
+    target_path = Path(path)
+    etag_path = target_path.with_name(target_path.name + ".etag")
     needs_download = True
 
-    if os.path.exists(path):
-        if os.path.isdir(path):
+    if target_path.exists():
+        if target_path.is_dir():
             raise Exception(f"{path} is a directory.")
 
         # Get the old modification time.
-        old_mtime = os.path.getmtime(path)
+        old_mtime = target_path.stat().st_mtime
         print(f"Old file modification time: {old_mtime}")
 
         # Get the old ETag.
         old_etag = None
-        if os.path.exists(path + ".etag"):
-            if os.path.isdir(path + ".etag"):
-                print(f"{path + '.etag'} is a directory.")
+        if etag_path.exists():
+            if etag_path.is_dir():
+                print(f"{etag_path} is a directory.")
             else:
-                with open(path + ".etag") as fin:
+                with etag_path.open(encoding="utf-8") as fin:
                     old_etag = fin.read().strip()
                 print(f"Old ETag: {old_etag}")
 
@@ -35,17 +50,15 @@ def save_uri(uri: str, path: str) -> None:
             response = requests.head(
                 uri,
                 headers={"If-Modified-Since": time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(old_mtime))},
+                timeout=REQUEST_TIMEOUT_SECONDS,
             )
 
             head_status = response.status_code
 
             # Parse Last-Modified if it exists
-            head_mtime_raw = response.headers.get("Last-Modified", None)
-            if head_mtime_raw is not None:
-                parsed_head_mtime = dateparser.parse(head_mtime_raw)
-                if isinstance(parsed_head_mtime, datetime):
-                    head_mtime = time.mktime(parsed_head_mtime.timetuple())
-                    print(f"Last modification time: {head_mtime}")
+            head_mtime = _parse_http_datetime(response.headers.get("Last-Modified"))
+            if head_mtime is not None:
+                print(f"Last modification time: {head_mtime}")
 
             head_etag = response.headers.get("ETag", None)
             if head_etag is not None:
@@ -67,33 +80,29 @@ def save_uri(uri: str, path: str) -> None:
             print("Modified at an earlier date.")
             needs_download = False
 
-        if head_etag is not None and head_etag != old_etag:
-            with open(path + ".etag", "w+") as fout:
-                fout.write(head_etag)
-
     if not needs_download:
         print(f"No need to download {uri} to {path}.")
         return
 
     print(f"Downloading {uri} to {path}.")
-    response = requests.get(uri)
+    response = requests.get(uri, timeout=REQUEST_TIMEOUT_SECONDS)
     assert response.status_code == 200
-    with open(path, "w+") as fout:
-        fout.write(response.text)
+    body = response.content
+    target_path.write_bytes(body)
 
-    last_modified: float | None = None
     try:
-        last_modified_raw = response.headers.get("Last-Modified", None)
-        if last_modified_raw is not None:
-            parsed_last_modified = dateparser.parse(last_modified_raw)
-            if isinstance(parsed_last_modified, datetime):
-                last_modified = time.mktime(parsed_last_modified.timetuple())
+        last_modified = _parse_http_datetime(response.headers.get("Last-Modified"))
     except Exception as e:
         print(e)
         print("Could not get last-modified date.")
+        last_modified = None
+
+    response_etag = response.headers.get("ETag")
+    if response_etag is not None:
+        etag_path.write_text(response_etag.strip(), encoding="utf-8")
 
     if last_modified is not None:
-        os.utime(path, (last_modified, last_modified))
+        os.utime(target_path, (last_modified, last_modified))
 
 
-__all__ = ["save_uri"]
+__all__ = ["REQUEST_TIMEOUT_SECONDS", "save_uri"]

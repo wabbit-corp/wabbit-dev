@@ -174,3 +174,49 @@ def test_csharp_formatting_check_reports_unformatted_for_style_failure(
     CSharpFormattingCheck().check(ctx)
 
     assert [issue.issue_type for issue in ctx.issues.issues] == [E_CS_NOT_FORMATTED]
+
+
+def test_csharp_formatting_check_fix_uses_legacy_runner_when_dotnet_tool_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "Sample.cs"
+    path.write_text("class C{}\n", encoding="utf-8")
+    ctx = FileContext(check_name="CSharpFormattingCheck", path=path)
+
+    calls = {"count": 0}
+
+    def fake_run(_self: CSharpFormattingCheck, args: list[str]) -> subprocess.CompletedProcess[str]:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=1,
+                stdout="",
+                stderr="Could not execute because the specified command or file was not found.",
+            )
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=1,
+            stdout="Needs formatting",
+            stderr="",
+        )
+
+    fix_invocations: list[list[str]] = []
+
+    def fake_subprocess_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        fix_invocations.append(args)
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(CSharpFormattingCheck, "_run", fake_run)
+    monkeypatch.setattr("dev.checks.code_linting.subprocess.run", fake_subprocess_run)
+
+    CSharpFormattingCheck().check(ctx)
+
+    issues = ctx.issues.issues
+    assert [issue.issue_type for issue in issues] == [E_CS_NOT_FORMATTED]
+    assert issues[0].fix is not None
+
+    issues[0].fix()
+
+    assert fix_invocations == [["csharpier", str(path)]]

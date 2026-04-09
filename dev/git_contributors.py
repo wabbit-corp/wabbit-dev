@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -29,52 +28,47 @@ def _resolve_git_root(path: Path) -> Path:
     return Path(output)
 
 
+def _git_output(repo_root: Path, *args: str) -> str:
+    return subprocess.check_output(["git", "-C", str(repo_root), *args], text=True).strip()
+
+
 def list_git_contributors(path: Path) -> dict[GitContributor, int]:
     """
     List all git contributors in the current repository.
     """
     repo_root = _resolve_git_root(path)
-
-    change_dir = os.getcwd()
     try:
-        os.chdir(repo_root)
-        # git shortlog -sne --all
+        output = _git_output(repo_root, "shortlog", "-sne", "--all")
+    except subprocess.CalledProcessError as e:
+        print(f"Error: {e}")
+        return {}
+    except FileNotFoundError:
+        print("Error: git command not found. Make sure git is installed.")
+        return {}
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return {}
 
-        # Get the output of the git command
-        try:
-            output = subprocess.check_output(["git", "shortlog", "-sne", "--all"], text=True)
-        except subprocess.CalledProcessError as e:
-            print(f"Error: {e}")
-            return {}
-        except FileNotFoundError:
-            print("Error: git command not found. Make sure git is installed.")
-            return {}
-        except Exception as e:
-            print(f"An unexpected error occurred: {e}")
-            return {}
+    # Split the output into lines
+    lines = output.strip().split("\n")
 
-        # Split the output into lines
-        lines = output.strip().split("\n")
-
-        # Parse the lines to extract contributors
-        contributors: dict[GitContributor, int] = {}
-        for line in lines:
-            # Match the line with regex
-            match = re.match(r"^\s*(\d+)\s+(.+?)\s+<(.+?)>", line)
-            if match:
-                commit_count = int(match.group(1))
-                name = match.group(2).strip()
-                email = match.group(3).strip()
-                # Create a GitContributor object
-                contributor = GitContributor(name, email)
-                # Add the contributor to the dictionary
-                if contributor in contributors:
-                    contributors[contributor] += commit_count
-                else:
-                    contributors[contributor] = commit_count
-        return contributors
-    finally:
-        os.chdir(change_dir)
+    # Parse the lines to extract contributors
+    contributors: dict[GitContributor, int] = {}
+    for line in lines:
+        # Match the line with regex
+        match = re.match(r"^\s*(\d+)\s+(.+?)\s+<(.+?)>", line)
+        if match:
+            commit_count = int(match.group(1))
+            name = match.group(2).strip()
+            email = match.group(3).strip()
+            # Create a GitContributor object
+            contributor = GitContributor(name, email)
+            # Add the contributor to the dictionary
+            if contributor in contributors:
+                contributors[contributor] += commit_count
+            else:
+                contributors[contributor] = commit_count
+    return contributors
 
 
 def get_git_user_name(path: Path) -> str | None:
@@ -82,11 +76,8 @@ def get_git_user_name(path: Path) -> str | None:
     Get the git user name from the git configuration.
     """
     repo_root = _resolve_git_root(path)
-
-    change_dir = os.getcwd()
     try:
-        os.chdir(repo_root)
-        name = subprocess.check_output(["git", "config", "--get", "user.name"], text=True).strip()
+        name = _git_output(repo_root, "config", "--get", "user.name")
         return name
     except subprocess.CalledProcessError:
         return None
@@ -96,8 +87,6 @@ def get_git_user_name(path: Path) -> str | None:
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         return None
-    finally:
-        os.chdir(change_dir)
 
 
 def get_git_user_email(path: Path) -> str | None:
@@ -105,11 +94,8 @@ def get_git_user_email(path: Path) -> str | None:
     Get the git user email from the git configuration.
     """
     repo_root = _resolve_git_root(path)
-
-    change_dir = os.getcwd()
     try:
-        os.chdir(repo_root)
-        email = subprocess.check_output(["git", "config", "--get", "user.email"], text=True).strip()
+        email = _git_output(repo_root, "config", "--get", "user.email")
         return email
     except subprocess.CalledProcessError:
         return None
@@ -119,8 +105,6 @@ def get_git_user_email(path: Path) -> str | None:
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         return None
-    finally:
-        os.chdir(change_dir)
 
 
 def get_git_user(path: Path) -> GitContributor | None:

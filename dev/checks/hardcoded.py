@@ -491,7 +491,7 @@ class HardcodedUrlCheck(FileCheck):
                 ):
                     # Could add more context checks here, e.g., if line is purely a comment
                     # For now, if it's a markdown link, assume it's for documentation
-                    pass  # Still report, but one might want to filter these based on severity or context
+                    continue
 
                 ctx.add_issue(E_HARDCODED_URL, url_found=url_found, line=line_number)
 

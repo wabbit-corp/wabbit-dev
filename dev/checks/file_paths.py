@@ -297,7 +297,8 @@ class SymlinkTargetCheck(FileCheck):
         self.check_broken = check_broken
 
     def _find_repo_root(self, path: Path) -> Path | None:
-        current = path.resolve().parent if path.is_symlink() else path.resolve()
+        current = path if path.is_dir() else path.parent
+        current = current.resolve(strict=False)
         for candidate in (current, *current.parents):
             if (candidate / ".git").exists():
                 return candidate

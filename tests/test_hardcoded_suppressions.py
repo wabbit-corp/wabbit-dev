@@ -5,7 +5,9 @@ from pathlib import Path
 from dev.checks.base import FileContext, ScopedFindingIgnoreRule, ScopedReadSuppressions
 from dev.checks.hardcoded import (
     E_HARDCODED_INTERNAL_HOSTNAME_IP,
+    E_HARDCODED_URL,
     HardcodedInternalHostnameIpCheck,
+    HardcodedUrlCheck,
 )
 
 
@@ -17,6 +19,19 @@ def _issue_values(ctx: FileContext) -> set[str]:
         if issue.data is None:
             continue
         value = issue.data.get("host_or_ip")
+        if isinstance(value, str):
+            values.add(value)
+    return values
+
+
+def _url_issue_values(ctx: FileContext) -> set[str]:
+    values: set[str] = set()
+    for issue in ctx.issues:
+        if issue.issue_type.id != E_HARDCODED_URL.id:
+            continue
+        if issue.data is None:
+            continue
+        value = issue.data.get("url_found")
         if isinstance(value, str):
             values.add(value)
     return values
@@ -77,3 +92,16 @@ def test_hardcoded_internal_host_ip_scans_documentation_files(tmp_path: Path) ->
 
     values = _issue_values(ctx)
     assert "10.10.10.10" in values
+
+
+def test_hardcoded_url_check_skips_markdown_links(tmp_path: Path) -> None:
+    path = tmp_path / "sample.py"
+    path.write_text(
+        'doc = "[Docs](https://example.com/docs)\\n<https://example.com/raw>"\n',
+        encoding="utf-8",
+    )
+
+    ctx = FileContext(check_name="HardcodedUrlCheck", path=path)
+    HardcodedUrlCheck().check(ctx)
+
+    assert _url_issue_values(ctx) == set()
