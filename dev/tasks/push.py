@@ -2,14 +2,15 @@ from git import Repo
 
 from dev.config import load_config
 from dev.failure_context import contextualize_failure
+from dev.git_env import configured_git_ssh
 from dev.messages import accent, error, info, muted, success
 from dev.repo_resolution import configured_repo_targets, resolve_repo_targets
 
 
 def push(targets: str | list[str] | None = None, *, dry_run: bool = False) -> int:
+    config = load_config()
     requested_targets = [targets] if isinstance(targets, str) else targets
     if not requested_targets or requested_targets == ["."]:
-        config = load_config()
         repo_targets = [
             repo_target
             for repo_target in configured_repo_targets(config)
@@ -24,7 +25,7 @@ def push(targets: str | list[str] | None = None, *, dry_run: bool = False) -> in
             error("`push .` cannot be combined with other targets.")
             return 1
         try:
-            repo_targets = resolve_repo_targets(requested_targets, config=load_config())
+            repo_targets = resolve_repo_targets(requested_targets, config=config)
         except ValueError as ex:
             error(contextualize_failure(str(ex), ["push", *requested_targets]))
             return 1
@@ -43,8 +44,9 @@ def push(targets: str | list[str] | None = None, *, dry_run: bool = False) -> in
             error(f"Project {resolved_target.name} does not exist")
             continue
         repo = Repo(path, search_parent_directories=True)
-        repo.git.push("origin", "master")
-        repo.git.push(tags=True)
+        with configured_git_ssh(repo.git, config):
+            repo.git.push("origin", "master")
+            repo.git.push(tags=True)
         success(f"Pushed changes for {resolved_target.name}")
         repo.close()
     return 0

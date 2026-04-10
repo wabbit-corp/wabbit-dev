@@ -64,8 +64,7 @@ python3 -m pip install "mkdocs>=1.6,<2.0" "mkdocs-material>=9.6,<9.7" "pymdown-e
 Enable shell completion:
 
 ```bash
-source <(dev completion bash)
-autoload -Uz compinit && compinit && source <(dev completion zsh)
+dev install completions
 ```
 
 ## Quick Start
@@ -117,6 +116,9 @@ Every command is documented here and in the MkDocs reference under
 
 | Command | What it does |
 | --- | --- |
+| `install app [--bin-dir DIR]` | Installs or refreshes global `dev` and `wabbit-dev` launcher wrappers. |
+| `install completions [--shell all\|bash\|zsh] [--no-rc]` | Installs completion scripts and managed shell rc snippets. |
+| `install tools [--tool TOOL] [--force] [--json]` | Installs optional local scanners, QA tools, and formatters into `.tools` or the workspace Python environment. |
 | `completion bash` / `completion zsh` | Prints shell completion scripts with dynamic command, target, and check-name completion. |
 | `doctor [TARGET ...] [--only CHECK_OR_COMMAND] [--json]` | Diagnoses workspace, toolchain, and credential readiness, optionally scoped to selected checks or targets. |
 | `docs check [TARGET ...] [--semantic] [--json]` | Validates docs links, sections, snippets, hooks, and optional semantic quality such as unclear purpose or weak quickstarts, with constrained repo-local inspection in semantic mode. |
@@ -129,6 +131,7 @@ Every command is documented here and in the MkDocs reference under
 | `dep updates` | Checks configured Maven libraries for newer upstream versions. |
 | `publish [TARGET ...] [--dry-run]` | Publishes configured projects in dependency order or prints the publish plan. |
 | `release verify [TARGET ...] [--json]` | Verifies publishable Python and Gradle projects without uploading artifacts. |
+| `security scan [TARGET ...] [--tool TOOL] [--json]` | Runs opt-in external security scanners when available and applicable. |
 | `build [TARGET ...] [--json]` | Builds configured Gradle projects or syntax-checks Python projects. |
 | `duplicates FOLDER ...` | Finds duplicate files and duplicate directory trees. |
 | `jitpack info GROUP ARTIFACT [VERSION]` | Shows refs, commits, versions, and build info for a JitPack artifact. |
@@ -248,6 +251,9 @@ The main target forms are:
 - `dev check :app-wabbit-dev`
 - `dev check :root`
 - `dev secrets scan .`
+- `dev security scan .`
+- `dev install tools --tool gitleaks --tool ktfmt`
+- `dev security scan --tool gitleaks --tool shellcheck .`
 
 Inventory commands:
 

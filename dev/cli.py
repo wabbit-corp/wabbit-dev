@@ -7,7 +7,8 @@ import sys
 import textwrap
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
-from typing import Literal, NoReturn, Protocol, TypedDict, Unpack
+from types import TracebackType
+from typing import Literal, NoReturn, Protocol, TypedDict, Unpack, runtime_checkable
 
 from dev.bootstrap import canonical_rerun_command, maybe_reexec_to_workspace_venv
 from dev.config import Config
@@ -47,6 +48,36 @@ class AddParser(Protocol):
     def __call__(self, name: str, **kwargs: Unpack[ParserKwargs]) -> ArgParser: ...
 
 
+@runtime_checkable
+class ArgsWithCommandPath(Protocol):
+    command_path: str
+
+
+@runtime_checkable
+class ArgsWithDryRun(Protocol):
+    dry_run: bool
+
+
+@runtime_checkable
+class ArgsWithJsonOutput(Protocol):
+    json: bool
+
+
+@runtime_checkable
+class ArgsWithProjectOrDirOrFile(Protocol):
+    project_or_dir_or_file: str | None
+
+
+@runtime_checkable
+class ArgsWithTarget(Protocol):
+    target: str | None
+
+
+@runtime_checkable
+class ArgsWithTargets(Protocol):
+    targets: list[str]
+
+
 _INVALID_CHOICE_RE = re.compile(r"invalid choice: '([^']+)' \(choose from (.+)\)")
 _CONFIG_CONTEXT_COMMANDS = {
     "where",
@@ -70,6 +101,8 @@ _CONFIG_CONTEXT_COMMANDS = {
     "project/deps",
     "project/repo",
     "project/targets",
+    "project/versions",
+    "security/scan",
     "check",
     "spdx/headers",
     "secrets/scan",
@@ -199,6 +232,27 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
             return tokens
         case "config/check":
             return ["config", "check"]
+        case "install/app":
+            tokens = ["install", "app"]
+            if args.bin_dir is not None:
+                tokens.extend(["--bin-dir", args.bin_dir])
+            return tokens
+        case "install/completions":
+            tokens = ["install", "completions"]
+            if args.shell != "all":
+                tokens.extend(["--shell", args.shell])
+            if args.no_rc:
+                tokens.append("--no-rc")
+            return tokens
+        case "install/tools":
+            tokens = ["install", "tools"]
+            for tool in _namespace_string_list(args, "tools"):
+                tokens.extend(["--tool", tool])
+            if args.force:
+                tokens.append("--force")
+            if args.json:
+                tokens.append("--json")
+            return tokens
         case "doctor":
             tokens = ["doctor"]
             only_values = _namespace_string_list(args, "only")
@@ -236,6 +290,14 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
             return tokens
         case "release/verify":
             tokens = ["release", "verify"]
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "security/scan":
+            tokens = ["security", "scan"]
+            for tool in _namespace_string_list(args, "tools"):
+                tokens.extend(["--tool", tool])
             if args.json:
                 tokens.append("--json")
             tokens.extend(args.targets or [])
@@ -312,6 +374,12 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
                 tokens.append("--json")
             tokens.extend(args.targets or [])
             return tokens
+        case "project/versions":
+            tokens = ["project", "versions"]
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
         case "check/run":
             tokens = ["check"]
             if args.fix:
@@ -384,20 +452,28 @@ def _print_failure_context(command_path: str, *, args: argparse.Namespace) -> No
     print(f"  {command_text(rerun_command, stream=sys.stderr)}", file=sys.stderr)
 
 
+def _dry_run_enabled(args: argparse.Namespace) -> bool:
+    return isinstance(args, ArgsWithDryRun) and args.dry_run
+
+
+def _json_output_enabled(args: argparse.Namespace) -> bool:
+    return isinstance(args, ArgsWithJsonOutput) and args.json
+
+
 def _guidance_target(args: argparse.Namespace) -> str | None:
-    if hasattr(args, "targets"):
+    if isinstance(args, ArgsWithTargets):
         targets = args.targets
-        if isinstance(targets, list) and targets and isinstance(targets[0], str):
+        if targets and isinstance(targets[0], str):
             return targets[0]
 
-    if hasattr(args, "target"):
+    if isinstance(args, ArgsWithTarget):
         target = args.target
-        if isinstance(target, str) and target not in {".", ":root"}:
+        if target is not None and target not in {".", ":root"}:
             return target
 
-    if hasattr(args, "project_or_dir_or_file"):
+    if isinstance(args, ArgsWithProjectOrDirOrFile):
         project_or_dir_or_file = args.project_or_dir_or_file
-        if isinstance(project_or_dir_or_file, str) and project_or_dir_or_file not in {".", ":root"}:
+        if project_or_dir_or_file is not None and project_or_dir_or_file not in {".", ":root"}:
             return project_or_dir_or_file
 
     return None
@@ -433,38 +509,51 @@ def _apply_context_defaults(command_path: str, args: argparse.Namespace) -> None
         "project/show",
         "project/deps",
         "project/targets",
+        "project/versions",
     }:
-        targets = getattr(args, "targets", None)
-        if isinstance(targets, list) and not targets:
+        if isinstance(args, ArgsWithTargets) and not args.targets:
             inferred_targets = inferred_project_targets(config)
             if inferred_targets is not None:
                 args.targets = inferred_targets
 
     if command_path in {"project/repo", "status"}:
-        targets = getattr(args, "targets", None)
-        if isinstance(targets, list) and not targets:
+        if isinstance(args, ArgsWithTargets) and not args.targets:
             inferred_targets = inferred_repo_targets(config)
             if inferred_targets is not None:
                 args.targets = inferred_targets
 
-    if command_path == "check/run" and getattr(args, "project_or_dir_or_file", None) is None:
+    if command_path == "security/scan":
+        if isinstance(args, ArgsWithTargets) and not args.targets:
+            inferred_targets = inferred_repo_targets(config)
+            if inferred_targets is not None:
+                args.targets = inferred_targets
+
+    if (
+        command_path == "check/run"
+        and isinstance(args, ArgsWithProjectOrDirOrFile)
+        and args.project_or_dir_or_file is None
+    ):
         inferred_targets = inferred_project_targets(config)
         if inferred_targets is not None:
             args.project_or_dir_or_file = inferred_targets[0]
 
-    if command_path == "spdx/headers" and getattr(args, "project_or_dir_or_file", None) is None:
+    if (
+        command_path == "spdx/headers"
+        and isinstance(args, ArgsWithProjectOrDirOrFile)
+        and args.project_or_dir_or_file is None
+    ):
         inferred_targets = inferred_project_targets(config)
         if inferred_targets is not None:
             args.project_or_dir_or_file = inferred_targets[0]
 
-    if command_path == "secrets/scan" and getattr(args, "target", None) is None:
+    if command_path == "secrets/scan" and isinstance(args, ArgsWithTarget) and args.target is None:
         inferred_targets = inferred_project_targets(config)
         if inferred_targets is not None:
             args.target = inferred_targets[0]
 
 
 def _print_next_steps(command_path: str, *, prog: str, args: argparse.Namespace) -> None:
-    if getattr(args, "json", False):
+    if _json_output_enabled(args):
         return
 
     target = _guidance_target(args)
@@ -492,7 +581,7 @@ def _print_next_steps(command_path: str, *, prog: str, args: argparse.Namespace)
             else:
                 steps = [f"{prog} check :root", f"{prog} project list", f"{prog} publish --dry-run"]
         case "publish":
-            if getattr(args, "dry_run", False):
+            if _dry_run_enabled(args):
                 steps = [
                     f"{prog} publish {target}" if target else f"{prog} publish",
                     f"{prog} status {target}" if target else f"{prog} project list",
@@ -507,9 +596,13 @@ def _print_next_steps(command_path: str, *, prog: str, args: argparse.Namespace)
         case "project/show":
             if target is None:
                 return
-            steps = [f"{prog} project deps {target}", f"{prog} project targets {target}", f"{prog} build {target}"]
+            steps = [
+                f"{prog} project deps {target}",
+                f"{prog} project versions {target}",
+                f"{prog} build {target}",
+            ]
         case "commit":
-            if getattr(args, "dry_run", False):
+            if _dry_run_enabled(args):
                 steps = [
                     f"{prog} commit {target}" if target else f"{prog} commit",
                     f"{prog} status {target}" if target else f"{prog} project list",
@@ -522,7 +615,7 @@ def _print_next_steps(command_path: str, *, prog: str, args: argparse.Namespace)
                     f"{prog} push {target}" if target else f"{prog} push",
                 ]
         case "push":
-            if getattr(args, "dry_run", False):
+            if _dry_run_enabled(args):
                 steps = [
                     f"{prog} push {target}" if target else f"{prog} push",
                     f"{prog} status {target}" if target else f"{prog} project list",
@@ -628,7 +721,7 @@ class Commands:
             self,
             exc_type: type[BaseException] | None,
             exc_value: BaseException | None,
-            traceback: object | None,
+            traceback: TracebackType | None,
         ) -> None:
             del exc_type, exc_value, traceback
 
@@ -672,6 +765,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             f"{prog} setup --local app-datatron",
             f"{prog} build app-datatron",
             f"{prog} secrets scan .",
+            f"{prog} security scan .",
             f"{prog} project list",
         ],
         notes=[
@@ -740,6 +834,110 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         ),
     ) as cmd:
         del cmd
+
+    with commands(
+        "install",
+        help="Install local developer entrypoints and shell integrations.",
+        description=_doc("""
+            Install app-wabbit-dev integrations for the current user.
+
+            Use `install app` to refresh the global `dev` and `wabbit-dev`
+            launcher wrappers. Use `install completions` to write shell
+            completion scripts and register managed shell rc snippets. Use
+            `install tools` to provision optional local scanners and formatters.
+            """),
+        epilog=examples(
+            "install app",
+            "install completions",
+            "install completions --shell zsh",
+            "install tools",
+        ),
+    ) as cmd:
+        del cmd
+
+    with commands(
+        "install",
+        "app",
+        help="Install or refresh the global dev and wabbit-dev launcher wrappers.",
+        description=_doc("""
+            Install global `dev` and `wabbit-dev` launcher wrappers.
+
+            By default, the command chooses the first writable PATH directory,
+            preferring /opt/homebrew/bin, /usr/local/bin, then ~/.local/bin.
+            """),
+        epilog=examples("install app", "install app --bin-dir ~/.local/bin"),
+    ) as cmd:
+        cmd.add_argument(
+            "--bin-dir",
+            metavar="DIR",
+            help="Install wrappers into this directory instead of the first writable PATH directory.",
+        )
+
+    with commands(
+        "install",
+        "completions",
+        help="Install and register bash/zsh completions for dev and wabbit-dev.",
+        description=_doc("""
+            Write completion scripts for `dev` and `wabbit-dev`.
+
+            By default this installs bash and zsh scripts under the user data
+            directory and updates managed blocks in .bashrc and .zshrc. Use
+            --no-rc to write the scripts without modifying shell rc files.
+            """),
+        epilog=examples("install completions", "install completions --shell zsh", "install completions --no-rc"),
+    ) as cmd:
+        cmd.add_argument(
+            "--shell",
+            choices=("all", "bash", "zsh"),
+            default="all",
+            help="Install completions for one shell or all supported shells.",
+        )
+        cmd.add_argument(
+            "--no-rc",
+            action="store_true",
+            help="Write completion scripts without updating .bashrc or .zshrc.",
+        )
+
+    with commands(
+        "install",
+        "tools",
+        help="Install optional local developer and security tools.",
+        description=_doc("""
+            Install optional tools used by dev checks and security scans.
+
+            Python tools are installed into the workspace/app Python
+            environment. Standalone GitHub release tools are downloaded into
+            .tools, verified against release SHA-256 digest metadata, and exposed
+            through .tools/bin.
+            """),
+        epilog=examples(
+            "install tools",
+            "install tools --tool gitleaks --tool shellcheck",
+            "install tools --force",
+            "install tools --json",
+        ),
+    ) as cmd:
+        from dev.tasks.install import install_tool_names
+
+        _add_argument(
+            cmd,
+            "--tool",
+            dest="tools",
+            action="append",
+            metavar="TOOL",
+            choices=install_tool_names(),
+            help="Install only this tool. Repeatable.",
+        )
+        cmd.add_argument(
+            "--force",
+            action="store_true",
+            help="Reinstall or upgrade tools even when an executable is already available.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit a machine-readable install report instead of human-oriented output.",
+        )
 
     with commands(
         "completion",
@@ -1058,6 +1256,78 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "--json",
             action="store_true",
             help="Emit a machine-readable release verification report instead of human-oriented progress output.",
+        )
+
+    with commands(
+        "security",
+        help="Run opt-in external security tooling.",
+        description=_doc("""
+            Run security-oriented external tools separately from the normal check
+            suite.
+
+            These scanners can be slower, noisier, depend on optional local
+            binaries, or contact vulnerability databases. Missing or
+            non-applicable tools are reported as skipped rather than blocking the
+            command.
+            """),
+        epilog=examples(
+            "security scan",
+            "security scan app-wabbit-dev",
+            "security scan --tool gitleaks --tool shellcheck .",
+            "security scan --json jeeves",
+        ),
+    ) as cmd:
+        del cmd
+
+    with commands(
+        "security",
+        "scan",
+        help="Run opt-in external security scanners against selected repos or paths.",
+        description=_doc("""
+            Run available external security scanners for selected repo targets.
+
+            The command currently knows about gitleaks, trufflehog, semgrep,
+            bandit, shellcheck, osv-scanner, pip-audit, and configured Gradle
+            dependency-check tasks. Tools that are not installed or not relevant
+            to the selected target are skipped with a reason.
+            """),
+        epilog=examples(
+            "security scan",
+            "security scan app-wabbit-dev",
+            "security scan --tool gitleaks --tool trufflehog .",
+            "security scan --json jeeves",
+            notes=[
+                "With no targets from inside a configured repo, security scan defaults to that current repo.",
+                "From the workspace root, omitting targets scans every configured repo target.",
+                "External scanner output is written to a temp log directory and summarized on stdout.",
+            ],
+        ),
+    ) as cmd:
+        from dev.tasks.security_scan import security_tool_names
+
+        _add_argument(
+            cmd,
+            "targets",
+            metavar="TARGET",
+            type=str,
+            nargs="*",
+            completion_kind="repo-target",
+            completion_allow_files=True,
+            help="Repo IDs, project IDs, or paths inside git repositories.",
+        )
+        _add_argument(
+            cmd,
+            "--tool",
+            dest="tools",
+            action="append",
+            metavar="TOOL",
+            choices=security_tool_names(),
+            help="Run only this external security tool. Repeatable.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit a machine-readable security scan report instead of human-oriented output.",
         )
 
     with commands(
@@ -1546,6 +1816,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "project deps jeeves",
             "project repo jeeves",
             "project targets",
+            "project versions app-wabbit-dev",
         ),
     ) as cmd:
         del cmd
@@ -1717,6 +1988,46 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "--json",
             action="store_true",
             help="Emit KMP target platform data as JSON.",
+        )
+
+    with commands(
+        "project",
+        "versions",
+        help="Show current, tagged, and registry-visible versions for one configured project.",
+        description=_doc("""
+            Print the configured project version, local and remote git release
+            tags, and versions visible in the configured publish registry.
+
+            The registry source is selected from the project publish target:
+            Maven Central for Gradle projects, PyPI for Python projects, and a
+            diagnostic for publish targets whose registry lookup is not yet
+            supported.
+            """),
+        epilog=examples(
+            "project versions app-wabbit-dev",
+            "project versions kotlin-filesystem",
+            "project versions .",
+            "project versions app-wabbit-dev --json",
+            notes=[
+                "With no target from inside a configured project, the command defaults to that current project.",
+                "The command expects exactly one project; pass a project ID or a path inside one project rather than a multi-project repo ID.",
+            ],
+        ),
+    ) as cmd:
+        _add_argument(
+            cmd,
+            "targets",
+            metavar="TARGET",
+            type=str,
+            nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
+            help="One project ID or path inside a configured project. Omit to infer the current project from cwd.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit version source data as JSON.",
         )
 
     with commands(
@@ -1953,6 +2264,12 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     return parser, commands
 
 
+def _configure_logging() -> None:
+    level_name = os.environ.get("WABBIT_DEV_LOG_LEVEL", "WARNING").upper()
+    level = logging.getLevelNamesMapping().get(level_name, logging.WARNING)
+    logging.basicConfig(level=level, format="%(message)s", force=True)
+
+
 async def async_main() -> int:
     if sys.platform.lower() == "win32":
         os.system("color")
@@ -1960,7 +2277,7 @@ async def async_main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore
         sys.stderr.reconfigure(encoding="utf-8")  # type: ignore
 
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    _configure_logging()
 
     parser, commands = build_parser()
     prog = parser.prog
@@ -1973,10 +2290,10 @@ async def async_main() -> int:
         return typed_exit_code
 
     args = parser.parse_args(normalized_argv)
-    command_path = getattr(args, "command_path", None)
-    if command_path is None:
+    if not isinstance(args, ArgsWithCommandPath):
         parser.print_help()
         return 0
+    command_path = args.command_path
 
     if command_path in commands.subparsers:
         commands.parsers[command_path].print_help()
@@ -1999,18 +2316,26 @@ async def async_main() -> int:
             "commit",
             "clean",
             "dep/graph",
+            "security/scan",
         }
+        and isinstance(args, ArgsWithTargets)
         and args.targets
     ):
         selected_projects = tuple(args.targets)
-    elif command_path in {"project/show", "project/deps", "project/repo", "project/targets"}:
+    elif command_path in {
+        "project/show",
+        "project/deps",
+        "project/repo",
+        "project/targets",
+        "project/versions",
+    } and isinstance(args, ArgsWithTargets):
         selected_projects = tuple(args.targets)
 
     if not preflight_for_command(
         command_path,
         prog=prog,
         projects=selected_projects,
-        dry_run=getattr(args, "dry_run", False),
+        dry_run=_dry_run_enabled(args),
     ):
         _print_failure_context(command_path, args=args)
         return 2
@@ -2062,6 +2387,13 @@ async def async_main() -> int:
 
                 check_config()
 
+            case "install/tools":
+                from dev.tasks.install import install_tools
+
+                result = install_tools(args.tools, force=args.force, json_output=args.json)
+                if any(tool_result.status == "failed" for tool_result in result.results):
+                    exit_code = 1
+
             case "setup":
                 from dev.tasks.setup import RepoSetupMode, setup
 
@@ -2077,6 +2409,11 @@ async def async_main() -> int:
                 from dev.tasks.release_verify import release_verify
 
                 exit_code = release_verify(args.targets, json_output=args.json)
+
+            case "security/scan":
+                from dev.tasks.security_scan import security_scan
+
+                exit_code = security_scan(args.targets, tools=args.tools, json_output=args.json)
 
             case "llmcopy":
                 from dev.tasks.llmcopy import llmcopy
@@ -2173,6 +2510,11 @@ async def async_main() -> int:
                 from dev.tasks.project_list import show_project_targets
 
                 show_project_targets(args.targets, json_output=args.json)
+
+            case "project/versions":
+                from dev.tasks.project_versions import show_project_versions
+
+                exit_code = show_project_versions(args.targets, json_output=args.json)
 
             case "check/run":
                 from dev.tasks.check import check_main

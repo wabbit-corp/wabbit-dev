@@ -20,6 +20,9 @@ MAVEN_COORDINATE_PATTERN = r"""
     $                                       # End of string
 """
 MAVEN_COORDINATE_RE = re.compile(MAVEN_COORDINATE_PATTERN, re.VERBOSE)
+MAVEN_CENTRAL_BASE_URL = (
+    "https://repo1.maven.org/maven2/"  # check:ignore E_HARDCODED_URL value=https://repo1.maven.org/maven2/
+)
 
 
 class VersionAxis(Enum):
@@ -291,7 +294,7 @@ def _fetch_raw_metadata_impl(repo_base_url: str, group_id: str, artifact_id: str
     import requests
 
     url = f"{repo_base_url}{group_id.replace('.', '/')}/{artifact_id}/maven-metadata.xml"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
     response.raise_for_status()
     text: str = response.text
     return text

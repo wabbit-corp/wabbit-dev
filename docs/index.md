@@ -37,8 +37,10 @@ dev setup --local app-datatron
 Run checks:
 
 ```bash
+dev install tools
 dev check :root
 dev secrets scan .
+dev security scan .
 dev spdx headers . --fix
 ```
 

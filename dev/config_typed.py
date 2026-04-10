@@ -405,6 +405,12 @@ class GithubTokenCommand:
     token: str
 
 
+@tag("github-ssh-key")
+@dataclass(frozen=True)
+class GithubSshKeyCommand:
+    key: str
+
+
 @tag("anthropic-key")
 @dataclass(frozen=True)
 class AnthropicKeyCommand:
@@ -925,6 +931,7 @@ BuiltinTopLevelCommand = (
     | DefineCommand
     | OpenaiKeyCommand
     | GithubTokenCommand
+    | GithubSshKeyCommand
     | AnthropicKeyCommand
     | JetbrainsMarketplaceTokenCommand
     | PypiTokenCommand
@@ -964,6 +971,7 @@ BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[object], ...] = (
     DefineCommand,
     OpenaiKeyCommand,
     GithubTokenCommand,
+    GithubSshKeyCommand,
     AnthropicKeyCommand,
     JetbrainsMarketplaceTokenCommand,
     PypiTokenCommand,
@@ -1031,6 +1039,7 @@ __all__ = [
     "DepCall",
     "FeatureCommand",
     "GitCensorCommand",
+    "GithubSshKeyCommand",
     "GithubTokenCommand",
     "GitUserCommand",
     "GradleProjectCommand",

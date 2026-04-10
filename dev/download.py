@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 from datetime import datetime
@@ -7,6 +8,7 @@ import dateparser
 import requests
 
 REQUEST_TIMEOUT_SECONDS = 10.0
+LOGGER = logging.getLogger(__name__)
 
 
 def _parse_http_datetime(raw_value: str | None) -> float | None:
@@ -30,17 +32,17 @@ def save_uri(uri: str, path: str) -> None:
 
         # Get the old modification time.
         old_mtime = target_path.stat().st_mtime
-        print(f"Old file modification time: {old_mtime}")
+        LOGGER.debug("Old file modification time: %s", old_mtime)
 
         # Get the old ETag.
         old_etag = None
         if etag_path.exists():
             if etag_path.is_dir():
-                print(f"{etag_path} is a directory.")
+                LOGGER.warning("%s is a directory.", etag_path)
             else:
                 with etag_path.open(encoding="utf-8") as fin:
                     old_etag = fin.read().strip()
-                print(f"Old ETag: {old_etag}")
+                LOGGER.debug("Old ETag: %s", old_etag)
 
         head_mtime: float | None = None
         head_etag = None
@@ -58,33 +60,32 @@ def save_uri(uri: str, path: str) -> None:
             # Parse Last-Modified if it exists
             head_mtime = _parse_http_datetime(response.headers.get("Last-Modified"))
             if head_mtime is not None:
-                print(f"Last modification time: {head_mtime}")
+                LOGGER.debug("Last modification time: %s", head_mtime)
 
             head_etag = response.headers.get("ETag", None)
             if head_etag is not None:
                 head_etag = head_etag.strip()
-                print(f"New ETag: {head_etag}")
+                LOGGER.debug("New ETag: %s", head_etag)
         except Exception as e:
-            print(e)
-            print("Failed to query HEAD.")
+            LOGGER.warning("Failed to query HEAD for %s: %s", uri, e)
 
         if head_status == 304:
-            print("Server responded with 304.")
+            LOGGER.debug("Server responded with 304.")
             needs_download = False
 
         if head_etag == old_etag:
-            print("Same ETag.")
+            LOGGER.debug("Same ETag.")
             needs_download = False
 
         if head_mtime == old_mtime or (head_mtime is not None and head_mtime <= old_mtime):
-            print("Modified at an earlier date.")
+            LOGGER.debug("Remote file is not newer than local file.")
             needs_download = False
 
     if not needs_download:
-        print(f"No need to download {uri} to {path}.")
+        LOGGER.info("No need to download %s to %s.", uri, path)
         return
 
-    print(f"Downloading {uri} to {path}.")
+    LOGGER.info("Downloading %s to %s.", uri, path)
     response = requests.get(uri, timeout=REQUEST_TIMEOUT_SECONDS)
     assert response.status_code == 200
     body = response.content
@@ -93,8 +94,7 @@ def save_uri(uri: str, path: str) -> None:
     try:
         last_modified = _parse_http_datetime(response.headers.get("Last-Modified"))
     except Exception as e:
-        print(e)
-        print("Could not get last-modified date.")
+        LOGGER.warning("Could not parse Last-Modified date for %s: %s", uri, e)
         last_modified = None
 
     response_etag = response.headers.get("ETag")

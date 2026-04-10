@@ -48,6 +48,9 @@ commands from the workspace root.
 
 | Command | Summary |
 | --- | --- |
+| `install app [--bin-dir DIR]` | Install or refresh global `dev` and `wabbit-dev` launcher wrappers. |
+| `install completions [--shell all\|bash\|zsh] [--no-rc]` | Install completion scripts and register managed shell rc snippets. |
+| `install tools [--tool TOOL] [--force] [--json]` | Install optional local scanners, QA tools, and formatters. |
 | `completion bash` / `completion zsh` | Print shell completion scripts with dynamic command, target, and check-name completion. |
 | `doctor [TARGET ...] [--only CHECK_OR_COMMAND] [--json]` | Diagnose workspace, toolchain, and credential readiness. |
 | `docs check [TARGET ...] [--semantic] [--json]` | Validate docs links, sections, snippets, hooks, and optional semantic quality. |
@@ -60,6 +63,7 @@ commands from the workspace root.
 | `dep updates` | Check configured Maven libraries for newer versions. |
 | `publish [TARGET ...] [--dry-run]` | Publish configured projects in dependency order or print the publish plan. |
 | `release verify [TARGET ...] [--json]` | Verify publishable Python and Gradle projects without uploading them. |
+| `security scan [TARGET ...] [--tool TOOL] [--json]` | Run opt-in external security scanners when available and applicable. |
 | `build [TARGET ...] [--json]` | Build Gradle projects or syntax-check Python projects. |
 | `duplicates FOLDER ...` | Find duplicate files and duplicate directory trees. |
 | `jitpack info GROUP ARTIFACT [VERSION]` | Show refs, commits, versions, and build info from JitPack. |
@@ -79,6 +83,63 @@ commands from the workspace root.
 | `spdx headers [TARGET] [--fix]` | Run only the SPDX header check. |
 | `secrets scan [TARGET]` | Run the internal high-entropy-string secret scan. |
 | `contributors audit` | Audit contributor identity mismatches across configured repos. |
+
+## Installation Helpers
+
+### `install app`
+
+```bash
+dev install app
+```
+
+Installs or refreshes global `dev` and `wabbit-dev` wrappers tied to this
+checkout. By default it chooses the first writable PATH directory, preferring
+`/opt/homebrew/bin`, `/usr/local/bin`, then `~/.local/bin`.
+
+Use a specific install directory when needed:
+
+```bash
+dev install app --bin-dir ~/.local/bin
+```
+
+### `install completions`
+
+```bash
+dev install completions
+```
+
+Writes bash and zsh completion scripts for both `dev` and `wabbit-dev`, then
+updates managed blocks in `.bashrc` and `.zshrc` so new shells load them.
+
+Install only one shell, or skip rc edits:
+
+```bash
+dev install completions --shell zsh
+dev install completions --no-rc
+```
+
+### `install tools`
+
+```bash
+dev install tools
+dev install tools --tool gitleaks --tool ktfmt
+dev install tools --force
+dev install tools --json
+```
+
+Installs optional developer tools used by checks and security scans. Python
+tools such as `ruff`, `black`, `mypy`, `pyright`, `pytest`, `coverage`,
+`diff-cover`, `deptry`, `import-linter`, `vulture`, `bandit`, `semgrep`, and
+`pip-audit` install into the workspace/app Python environment. Standalone
+release assets such as `gitleaks`, `trufflehog`, `shellcheck`, `osv-scanner`,
+and `ktfmt` install under `.tools` with wrappers in `.tools/bin`. Formatter
+tools backed by other ecosystems, currently `purs-tidy` and `csharpier`, use
+local npm/dotnet tool installs when those system package managers are present.
+
+Direct downloads are verified against SHA-256 release asset metadata before
+being exposed in `.tools/bin`. Python-package signatures are not consistently
+published upstream, so Python tools are installed through pip with PyPI/HTTPS
+transport and reported separately in the install output.
 
 ## Shell Completion
 
@@ -712,6 +773,40 @@ Targets can be:
 - a bare configured project or repo ID
 - a configured project or repo ID prefixed with `:`
 - `:root` to walk every configured project path
+
+### `security scan`
+
+```bash
+dev security scan [TARGET ...]
+```
+
+Runs external security scanners outside the normal `dev check` path. This is
+opt-in because the tools can be slower, noisier, depend on local installation,
+or query vulnerability databases.
+
+Known tools:
+
+- `gitleaks`
+- `trufflehog`
+- `semgrep`
+- `bandit`
+- `shellcheck`
+- `osv-scanner`
+- `pip-audit`
+- `gradle-dependency-check`
+
+Examples:
+
+```bash
+dev security scan .
+dev security scan app-wabbit-dev
+dev security scan --tool gitleaks --tool shellcheck .
+dev security scan --json jeeves
+```
+
+Missing tools and non-applicable tools are reported as skipped. External command
+output is written to a temp log directory and summarized on stdout. Use `--json`
+for CI or scripted integrations.
 
 ### `contributors audit`
 

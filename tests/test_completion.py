@@ -1,141 +1,200 @@
 from __future__ import annotations
 
+import asyncio
 from collections import OrderedDict
 from types import SimpleNamespace
 
 
-def _completion_reply(words: list[str], cword: int):
-    from dev.cli import build_parser
-    from dev.tasks.completion import get_completion_reply
+def _run_typed_completion(words: list[str], cword: int, capsys) -> tuple[str, ...]:
+    from dev.typed_cli import maybe_run_typed_cli
 
-    parser, _commands = build_parser()
-    return get_completion_reply(parser, words, cword)
+    exit_code = asyncio.run(maybe_run_typed_cli(["__complete", str(cword), "--", *words], prog="dev"))
+    captured = capsys.readouterr()
 
-
-def test_bash_completion_script_registers_query_handler() -> None:
-    from dev.tasks.completion import bash_completion_script
-
-    script = bash_completion_script("wabbit-dev")
-
-    assert "complete -o bashdefault -o default -F _wabbit_dev_completion wabbit-dev" in script
-    assert 'completion query bash "$COMP_CWORD"' in script
+    assert exit_code == 0
+    assert captured.err == ""
+    return tuple(line.split("\t", 1)[0] for line in captured.out.splitlines() if line)
 
 
-def test_zsh_completion_script_registers_compdef() -> None:
-    from dev.tasks.completion import zsh_completion_script
+def _run_typed_command(args: list[str], capsys) -> str:
+    from dev.typed_cli import maybe_run_typed_cli
 
-    script = zsh_completion_script("wabbit-dev")
+    exit_code = asyncio.run(maybe_run_typed_cli(args, prog="dev"))
+    captured = capsys.readouterr()
 
-    assert "#compdef wabbit-dev" in script
-    assert "compdef _wabbit_dev_completion wabbit-dev" in script
-    assert "completion query zsh $((CURRENT - 1))" in script
-
-
-def test_completion_reply_lists_top_level_commands() -> None:
-    reply = _completion_reply(["wabbit-dev", ""], 1)
-
-    assert "completion" in reply.candidates
-    assert "doctor" in reply.candidates
-    assert "docs" in reply.candidates
-    assert "release" in reply.candidates
-    assert reply.allow_files is False
+    assert exit_code == 0
+    assert captured.err == ""
+    return captured.out
 
 
-def test_completion_reply_lists_project_subcommands() -> None:
-    reply = _completion_reply(["wabbit-dev", "project", ""], 2)
+def test_bash_completion_script_uses_typed_hidden_protocol(capsys) -> None:
+    script = _run_typed_command(["completion", "bash"], capsys)
 
-    assert reply.candidates == ("list", "show", "deps", "repo", "targets")
-    assert reply.allow_files is False
-
-
-def test_completion_reply_lists_docs_subcommands() -> None:
-    reply = _completion_reply(["wabbit-dev", "docs", ""], 2)
-
-    assert reply.candidates == ("check", "snippets")
-    assert reply.allow_files is False
+    assert "__complete \"$COMP_CWORD\"" in script
+    assert "complete -o bashdefault -o default -F _dev_completion 'dev'" in script
+    assert "completion query" not in script
 
 
-def test_completion_reply_suggests_project_and_repo_targets(monkeypatch) -> None:
-    import dev.tasks.completion as completion_task
+def test_zsh_completion_script_uses_typed_hidden_protocol(capsys) -> None:
+    script = _run_typed_command(["completion", "zsh"], capsys)
 
-    config = SimpleNamespace(
-        defined_projects=OrderedDict([("app-wabbit-dev", SimpleNamespace())]),
-        defined_repos=OrderedDict([("jeeves", SimpleNamespace())]),
-    )
-
-    monkeypatch.setattr(completion_task, "load_config", lambda: config)
-
-    reply = _completion_reply(["wabbit-dev", "build", ""], 2)
-
-    assert reply.candidates == ("app-wabbit-dev", "jeeves")
-    assert reply.allow_files is True
+    assert "#compdef dev" in script
+    assert "compdef _dev_completion 'dev'" in script
+    assert "__complete $((CURRENT - 1))" in script
+    assert "completion query" not in script
 
 
-def test_completion_reply_suggests_check_targets_and_colon_forms(monkeypatch) -> None:
-    import dev.tasks.completion as completion_task
+def test_completion_lists_top_level_commands(capsys) -> None:
+    candidates = _run_typed_completion(["dev", ""], 1, capsys)
 
-    config = SimpleNamespace(
-        defined_projects=OrderedDict([("app-wabbit-dev", SimpleNamespace())]),
-        defined_repos=OrderedDict([("jeeves", SimpleNamespace())]),
-    )
-
-    monkeypatch.setattr(completion_task, "load_config", lambda: config)
-    monkeypatch.setattr(completion_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck"])
-
-    reply = _completion_reply(["wabbit-dev", "check", ""], 2)
-
-    assert reply.allow_files is True
-    assert reply.candidates == ("list", "describe", ":root", "app-wabbit-dev", "jeeves", ":app-wabbit-dev", ":jeeves")
+    assert "completion" in candidates
+    assert "install" in candidates
+    assert "doctor" in candidates
+    assert "docs" in candidates
+    assert "release" in candidates
+    assert "security" in candidates
 
 
-def test_completion_reply_suggests_check_names_after_target(monkeypatch) -> None:
-    import dev.tasks.completion as completion_task
+def test_completion_lists_project_subcommands(capsys) -> None:
+    candidates = _run_typed_completion(["dev", "project", ""], 2, capsys)
 
-    monkeypatch.setattr(completion_task, "load_config", lambda: None)
-    monkeypatch.setattr(
-        completion_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck", "TextQualityCheck"]
-    )
-
-    reply = _completion_reply(["wabbit-dev", "check", "app-wabbit-dev", ""], 3)
-
-    assert reply.allow_files is False
-    assert reply.candidates == ("SpdxHeaderCheck", "TextQualityCheck")
+    assert "list" in candidates
+    assert "show" in candidates
+    assert "deps" in candidates
+    assert "repo" in candidates
+    assert "targets" in candidates
+    assert "versions" in candidates
 
 
-def test_completion_reply_suggests_check_names_for_describe(monkeypatch) -> None:
-    import dev.tasks.completion as completion_task
+def test_completion_lists_docs_subcommands(capsys) -> None:
+    candidates = _run_typed_completion(["dev", "docs", ""], 2, capsys)
 
-    monkeypatch.setattr(completion_task, "load_config", lambda: None)
-    monkeypatch.setattr(completion_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck"])
-
-    reply = _completion_reply(["wabbit-dev", "check", "describe", ""], 3)
-
-    assert reply.allow_files is False
-    assert reply.candidates == ("SpdxHeaderCheck",)
+    assert "check" in candidates
+    assert "snippets" in candidates
 
 
-def test_completion_reply_suggests_push_targets_and_dot(monkeypatch) -> None:
-    import dev.tasks.completion as completion_task
+def test_completion_lists_install_subcommands_and_tools(capsys) -> None:
+    candidates = _run_typed_completion(["dev", "install", ""], 2, capsys)
+
+    assert "app" in candidates
+    assert "completions" in candidates
+    assert "tools" in candidates
+
+    tool_candidates = _run_typed_completion(["dev", "install", "tools", "--tool", ""], 4, capsys)
+
+    assert "gitleaks" in tool_candidates
+    assert "ktfmt" in tool_candidates
+    assert "ruff" in tool_candidates
+    assert "clang-format" in tool_candidates
+    assert "purs-tidy" in tool_candidates
+    assert "csharpier" in tool_candidates
+
+
+def test_completion_lists_security_subcommands_and_tools(capsys) -> None:
+    candidates = _run_typed_completion(["dev", "security", ""], 2, capsys)
+
+    assert "scan" in candidates
+
+    tool_candidates = _run_typed_completion(["dev", "security", "scan", "--tool", ""], 4, capsys)
+
+    assert "gitleaks" in tool_candidates
+    assert "trufflehog" in tool_candidates
+    assert "gradle-dependency-check" in tool_candidates
+
+
+def test_completion_suggests_project_and_repo_targets(monkeypatch, capsys) -> None:
+    import dev.typed_cli as typed_cli
 
     config = SimpleNamespace(
         defined_projects=OrderedDict([("app-wabbit-dev", SimpleNamespace())]),
         defined_repos=OrderedDict([("jeeves", SimpleNamespace())]),
     )
 
-    monkeypatch.setattr(completion_task, "load_config", lambda: config)
+    monkeypatch.setattr(typed_cli, "_load_workspace_config", lambda: config)
 
-    reply = _completion_reply(["wabbit-dev", "push", ""], 2)
+    candidates = _run_typed_completion(["dev", "build", ""], 2, capsys)
 
-    assert reply.allow_files is True
-    assert reply.candidates == (".", "app-wabbit-dev", "jeeves")
+    assert "app-wabbit-dev" in candidates
+    assert "jeeves" in candidates
 
 
-def test_completion_reply_suggests_doctor_only_values(monkeypatch) -> None:
-    import dev.tasks.completion as completion_task
+def test_completion_suggests_check_targets_and_colon_forms(monkeypatch, capsys) -> None:
+    import dev.tasks.check as check_task
+    import dev.typed_cli as typed_cli
 
-    monkeypatch.setattr(completion_task, "doctor_only_choices", lambda: ("build", "gradle", "publish"))
+    config = SimpleNamespace(
+        defined_projects=OrderedDict([("app-wabbit-dev", SimpleNamespace())]),
+        defined_repos=OrderedDict([("jeeves", SimpleNamespace())]),
+    )
 
-    reply = _completion_reply(["wabbit-dev", "doctor", "--only", ""], 3)
+    monkeypatch.setattr(typed_cli, "_load_workspace_config", lambda: config)
+    monkeypatch.setattr(check_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck"])
 
-    assert reply.allow_files is False
-    assert reply.candidates == ("build", "gradle", "publish")
+    candidates = _run_typed_completion(["dev", "check", ""], 2, capsys)
+
+    assert "list" in candidates
+    assert "describe" in candidates
+    assert ":root" in candidates
+    assert "app-wabbit-dev" in candidates
+    assert "jeeves" in candidates
+    assert ":app-wabbit-dev" in candidates
+    assert ":jeeves" in candidates
+
+
+def test_completion_suggests_check_names_after_target(monkeypatch, capsys) -> None:
+    import dev.tasks.check as check_task
+    import dev.typed_cli as typed_cli
+
+    monkeypatch.setattr(typed_cli, "_load_workspace_config", lambda: None)
+    monkeypatch.setattr(check_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck", "TextQualityCheck"])
+
+    candidates = _run_typed_completion(["dev", "check", "app-wabbit-dev", ""], 3, capsys)
+
+    assert candidates == ("SpdxHeaderCheck", "TextQualityCheck")
+
+
+def test_completion_suggests_check_names_for_describe(monkeypatch, capsys) -> None:
+    import dev.tasks.check as check_task
+    import dev.typed_cli as typed_cli
+
+    monkeypatch.setattr(typed_cli, "_load_workspace_config", lambda: None)
+    monkeypatch.setattr(check_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck"])
+
+    candidates = _run_typed_completion(["dev", "check", "describe", ""], 3, capsys)
+
+    assert candidates == ("SpdxHeaderCheck",)
+
+
+def test_completion_suggests_push_targets_and_dot(monkeypatch, capsys) -> None:
+    import dev.typed_cli as typed_cli
+
+    config = SimpleNamespace(
+        defined_projects=OrderedDict([("app-wabbit-dev", SimpleNamespace())]),
+        defined_repos=OrderedDict([("jeeves", SimpleNamespace())]),
+    )
+
+    monkeypatch.setattr(typed_cli, "_load_workspace_config", lambda: config)
+
+    candidates = _run_typed_completion(["dev", "push", ""], 2, capsys)
+
+    assert "." in candidates
+    assert "app-wabbit-dev" in candidates
+    assert "jeeves" in candidates
+
+
+def test_completion_suggests_doctor_only_values(monkeypatch, capsys) -> None:
+    import dev.tasks.doctor as doctor_task
+
+    monkeypatch.setattr(doctor_task, "doctor_only_choices", lambda: ("build", "gradle", "publish"))
+
+    candidates = _run_typed_completion(["dev", "doctor", "--only", ""], 3, capsys)
+
+    assert candidates == ("build", "gradle", "publish")
+
+
+def test_completion_query_compatibility_command_uses_typed_grammar(capsys) -> None:
+    output = _run_typed_command(["completion", "query", "bash", "1", "dev", "do"], capsys)
+
+    candidates = tuple(line.split("\t", 1)[0] for line in output.splitlines() if line)
+    assert "docs" in candidates
+    assert "doctor" in candidates

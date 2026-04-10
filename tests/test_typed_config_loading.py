@@ -1120,6 +1120,7 @@ def test_intellij_plugin_metadata_and_private_publish_tokens_are_loaded(tmp_path
         "\n".join(
             [
                 '(github-token "dummy")',
+                '(github-ssh-key "~/.ssh/id_gh_example")',
                 '(jetbrains-marketplace-token "jb-token")',
                 '(pypi-token "pypi-token")',
                 "",
@@ -1127,6 +1128,7 @@ def test_intellij_plugin_metadata_and_private_publish_tokens_are_loaded(tmp_path
         ),
     )
 
+    assert config.github_ssh_key == "~/.ssh/id_gh_example"
     assert config.jetbrains_marketplace_token == "jb-token"
     assert config.pypi_token == "pypi-token"
 

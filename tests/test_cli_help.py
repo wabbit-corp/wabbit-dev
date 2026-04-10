@@ -20,6 +20,8 @@ async def test_root_help_includes_command_summaries(
     assert "Wabbit development toolkit." in output
     assert "completion" in output
     assert "Generate shell completion scripts." in output
+    assert "install" in output
+    assert "Install local developer entrypoints and shell integrations." in output
     assert "doctor" in output
     assert "Diagnose workspace, toolchain, and credential readiness." in output
     assert "docs" in output
@@ -30,6 +32,8 @@ async def test_root_help_includes_command_summaries(
     assert "Validate workspace configuration files." in output
     assert "release" in output
     assert "Verify release readiness for publishable projects." in output
+    assert "security" in output
+    assert "Run opt-in external security tooling." in output
     assert "project" in output
     assert "Inspect the configured project inventory." in output
     assert "check" in output
@@ -114,6 +118,43 @@ async def test_completion_parent_help_lists_shells(
 
 
 @pytest.mark.asyncio
+async def test_install_parent_help_lists_subcommands(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "install"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "app" in output
+    assert "completions" in output
+    assert "tools" in output
+    assert "dev install app" in output
+    assert "dev install tools" in output
+
+
+@pytest.mark.asyncio
+async def test_security_parent_help_lists_scan(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "security"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "scan" in output
+    assert "Run opt-in external security scanners" in output
+
+
+@pytest.mark.asyncio
 async def test_project_parent_help_lists_new_subcommands(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -131,6 +172,7 @@ async def test_project_parent_help_lists_new_subcommands(
     assert "deps" in output
     assert "repo" in output
     assert "targets" in output
+    assert "versions" in output
 
 
 @pytest.mark.asyncio
@@ -317,7 +359,8 @@ async def test_cli_completion_bash_prints_script(
     assert result == 0
     output = capsys.readouterr().out
     assert "complete -o bashdefault" in output
-    assert "completion query bash" in output
+    assert "__complete \"$COMP_CWORD\"" in output
+    assert "completion query bash" not in output
 
 
 @pytest.mark.asyncio
@@ -478,10 +521,9 @@ async def test_parent_help_alias_prints_parent_help(
 
     monkeypatch.setattr("sys.argv", ["dev.py", "project", "help"])
 
-    with pytest.raises(SystemExit) as excinfo:
-        await cli.async_main()
+    result = await cli.async_main()
 
-    assert excinfo.value.code == 0
+    assert result == 0
     output = capsys.readouterr().out
     assert "Explore the projects defined in root.clj" in output
 

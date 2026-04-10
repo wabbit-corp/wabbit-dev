@@ -1563,6 +1563,7 @@ class Config:
 
     openai_key: str | None = None
     github_token: str | None = None
+    github_ssh_key: str | None = None
     anthropic_key: str | None = None
     jetbrains_marketplace_token: str | None = None
     pypi_token: str | None = None
@@ -2668,6 +2669,10 @@ def load_config(start: Path | None = None) -> Config:
 
         if isinstance(command, config_typed.GithubTokenCommand):
             config.github_token = command.token
+            return
+
+        if isinstance(command, config_typed.GithubSshKeyCommand):
+            config.github_ssh_key = command.key
             return
 
         if isinstance(command, config_typed.JitpackCookieCommand):

@@ -47,8 +47,7 @@ __all__ = [
     "Settings",
 ]
 
-logger = logging.getLogger("jitpack_api")
-logger.setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 #
@@ -397,7 +396,7 @@ class JitPackAPI:
 
         path = f"/com/github/{group}/{project}/{version}/build.log"
 
-        logger.info(f"Getting build log for: group={group}, project={project}, version={version}")
+        logger.info("Getting build log for: group=%s, project=%s, version=%s", group, project, version)
 
         session = self._session
         if session is None:

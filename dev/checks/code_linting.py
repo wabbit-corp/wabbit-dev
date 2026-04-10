@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Sequence
+from pathlib import Path
 
 from dev.checks.base import FileCheck, FileContext, IssueType
 from dev.messages import error
+from dev.tool_paths import find_tool, workspace_root
 
 E_KTLINT_MISSING = IssueType("E_KTLINT_MISSING", "The 'ktlint' formatter is not installed.")
 E_KTFMT_MISSING = IssueType("E_KTFMT_MISSING", "The 'ktfmt' formatter is not installed.")
@@ -35,13 +37,7 @@ class KotlinFormattingCheck(FileCheck):
         if ctx.path.suffix != ".kt" or not ctx.path.is_file():
             return
 
-        cmd = [
-            "java",
-            "-jar",
-            "ktfmt-0.59-with-dependencies.jar",
-            "--kotlinlang-style",
-            "--set-exit-if-changed",
-        ]
+        cmd = [*_ktfmt_command(), "--kotlinlang-style", "--set-exit-if-changed"]
 
         try:
             result = subprocess.run(
@@ -63,7 +59,7 @@ class KotlinFormattingCheck(FileCheck):
             output = _formatter_output(result)
             if result.returncode == 0:
                 return
-            if "Unable to access jarfile" in output:
+            if "Unable to access jarfile" in output or "No such file or directory" in output:
                 ctx.add_issue(E_KTFMT_MISSING)
             elif result.returncode == 1:
                 ctx.add_issue(E_KOTLIN_NOT_FORMATTED, fix=fix)
@@ -72,6 +68,19 @@ class KotlinFormattingCheck(FileCheck):
 
         except FileNotFoundError:
             ctx.add_issue(E_KTFMT_MISSING)
+
+
+def _ktfmt_command() -> list[str]:
+    ktfmt = find_tool("ktfmt")
+    if ktfmt is not None:
+        return [str(ktfmt)]
+
+    for root in (Path.cwd(), workspace_root()):
+        jars = sorted(root.glob("ktfmt-*-with-dependencies.jar"))
+        if jars:
+            return ["java", "-jar", str(jars[-1])]
+
+    return ["ktfmt"]
 
 
 # class KotlinFormattingCheck(FileCheck):
@@ -141,9 +150,15 @@ class CppFormattingCheck(FileCheck):
         if ctx.path.suffix not in {".c", ".cpp", ".cc", ".h", ".hpp"} or not ctx.path.is_file():
             return
 
+        clang_format = find_tool("clang-format")
+        if clang_format is None:
+            ctx.add_issue(E_CLANG_FORMAT_MISSING)
+            return
+        cmd = [str(clang_format)]
+
         try:
             result = subprocess.run(
-                ["clang-format", "--dry-run", "--Werror", str(ctx.path)],
+                cmd + ["--dry-run", "--Werror", str(ctx.path)],
                 capture_output=True,
                 text=True,
             )
@@ -152,7 +167,7 @@ class CppFormattingCheck(FileCheck):
                 try:
                     # -i edits files in-place
                     subprocess.run(
-                        ["clang-format", "-i", str(ctx.path)],
+                        cmd + ["-i", str(ctx.path)],
                         capture_output=True,
                         text=True,
                     )
@@ -179,10 +194,16 @@ class PurescriptFormattingCheck(FileCheck):
         if ctx.path.suffix != ".purs" or not ctx.path.is_file():
             return
 
+        purs_tidy = find_tool("purs-tidy")
+        if purs_tidy is None:
+            ctx.add_issue(E_PURSTIDY_MISSING)
+            return
+        cmd = [str(purs_tidy)]
+
         try:
             # Use the dedicated 'check' command (preferred in current CLI)
             result = subprocess.run(
-                ["purs-tidy", "check", str(ctx.path)],
+                cmd + ["check", str(ctx.path)],
                 capture_output=True,
                 text=True,
             )
@@ -191,7 +212,7 @@ class PurescriptFormattingCheck(FileCheck):
                 try:
                     # Format in place
                     subprocess.run(
-                        ["purs-tidy", "format-in-place", str(ctx.path)],
+                        cmd + ["format-in-place", str(ctx.path)],
                         capture_output=True,
                         text=True,
                     )
@@ -234,7 +255,8 @@ class CSharpFormattingCheck(FileCheck):
             return
 
         dotnet_cmd = ["dotnet", "csharpier"]
-        legacy_cmd = ["csharpier"]  # legacy tool alias still used in some setups
+        managed_csharpier = find_tool("csharpier") or find_tool("dotnet-csharpier")
+        legacy_cmd = [str(managed_csharpier)] if managed_csharpier is not None else ["csharpier"]
 
         selected: str | None = None  # "dotnet" | "legacy"
 

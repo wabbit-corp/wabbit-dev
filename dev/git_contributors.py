@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, order=True)
@@ -40,13 +43,13 @@ def list_git_contributors(path: Path) -> dict[GitContributor, int]:
     try:
         output = _git_output(repo_root, "shortlog", "-sne", "--all")
     except subprocess.CalledProcessError as e:
-        print(f"Error: {e}")
+        LOGGER.warning("Could not list git contributors in %s: %s", repo_root, e)
         return {}
     except FileNotFoundError:
-        print("Error: git command not found. Make sure git is installed.")
+        LOGGER.warning("git command not found. Make sure git is installed.")
         return {}
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        LOGGER.warning("Unexpected error while listing git contributors in %s: %s", repo_root, e)
         return {}
 
     # Split the output into lines
@@ -82,10 +85,10 @@ def get_git_user_name(path: Path) -> str | None:
     except subprocess.CalledProcessError:
         return None
     except FileNotFoundError:
-        print("Error: git command not found. Make sure git is installed.")
+        LOGGER.warning("git command not found. Make sure git is installed.")
         return None
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        LOGGER.warning("Unexpected error while reading git user.name in %s: %s", repo_root, e)
         return None
 
 
@@ -100,10 +103,10 @@ def get_git_user_email(path: Path) -> str | None:
     except subprocess.CalledProcessError:
         return None
     except FileNotFoundError:
-        print("Error: git command not found. Make sure git is installed.")
+        LOGGER.warning("git command not found. Make sure git is installed.")
         return None
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        LOGGER.warning("Unexpected error while reading git user.email in %s: %s", repo_root, e)
         return None
 
 

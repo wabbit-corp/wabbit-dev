@@ -24,12 +24,12 @@ dev doctor
 Enable shell completion:
 
 ```bash
-source <(dev completion bash)
-autoload -Uz compinit && compinit && source <(dev completion zsh)
+dev install completions
 ```
 
-Persist one of those lines in your shell profile if you want completion on every
-new shell session.
+This writes completion scripts for both `dev` and `wabbit-dev` and registers
+managed shell rc snippets. Use `dev install completions --no-rc` if you only
+want the scripts written.
 
 ## Install from a Checkout
 
@@ -65,6 +65,13 @@ dev --help
 ```
 
 The editable install also provides `wabbit-dev --help` as an explicit alias.
+
+For a checkout-local install that stays tied to this workspace, run:
+
+```bash
+dev install app
+dev install completions
+```
 
 ## Workspace Expectations
 

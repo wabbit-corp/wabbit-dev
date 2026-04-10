@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import textwrap
 import time
 
@@ -9,6 +10,7 @@ import git
 from dev.ai import suggest_version_number
 from dev.caching import DEFAULT_CACHE_DB_PATH, NO_CACHE, NoCacheSentinel, cache
 from dev.config import GradleProject, Version
+from dev.git_env import configured_git_ssh
 from dev.jitpack import BuildStatus, JitPackAPI, JitPackAPIError, JitPackAuthError, JitPackNotFoundError
 from dev.messages import ask, error, info, success, warning
 from dev.tasks.publish_common import (
@@ -20,6 +22,8 @@ from dev.tasks.publish_common import (
     set_project_version_in_root_clj,
 )
 from dev.tasks.setup import RepoSetupContext, setup_project
+
+LOGGER = logging.getLogger(__name__)
 
 
 async def poll_jitpack_build_status(api: JitPackAPI, group_id: str, artifact_id: str, version: str) -> bool | None:
@@ -49,7 +53,7 @@ async def poll_jitpack_build_status(api: JitPackAPI, group_id: str, artifact_id:
 
         status = version_obj.status
         if last_status != status:
-            print(version_obj)
+            LOGGER.debug("JitPack version state: %s", version_obj)
             info(f"JitPack build status for {group_id}:{artifact_id}:{version}: {status}")
             last_status = status
         if status == BuildStatus.ERROR:
@@ -268,8 +272,9 @@ async def publish_gradle_project_to_jetpack(
 
     with Timer(f"Step 3: push for {proj.name}"):
         try:
-            repo.git.push("origin", "master")
-            repo.git.push("origin", f"refs/tags/{tag_name}")
+            with configured_git_ssh(repo.git, repo_setup_context.config):
+                repo.git.push("origin", "master")
+                repo.git.push("origin", f"refs/tags/{tag_name}")
             success(f"Pushed commit & tag {tag_name} for {proj.name}")
         except Exception as ex:
             error(f"Failed to push {proj.name}: {ex}")

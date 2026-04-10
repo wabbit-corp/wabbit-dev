@@ -9,11 +9,14 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import stat
 import sys  # Added for stderr
 
 from dev.checks.base import FileCheck, FileContext, IssueType
+
+LOGGER = logging.getLogger(__name__)
 
 # --- Configuration ---
 EXECUTABLE_EXTENSIONS = {
@@ -141,16 +144,16 @@ def remove_execute_permission(filepath: str) -> bool:
         # Only apply if the mode actually changed
         if new_mode != current_mode:
             os.chmod(filepath, new_mode)
-            print(f"FIXED: Removed execute permission from {filepath}")
+            LOGGER.info("Removed execute permission from %s", filepath)
             return True
         else:
             # No execute permission was set initially
             return True  # Considered success as the state is correct
     except OSError as e:
-        print(f"Error: Could not change permissions for {filepath}: {e}", file=sys.stderr)
+        LOGGER.error("Could not change permissions for %s: %s", filepath, e)
         return False
     except Exception as e:
-        print(f"Error: Unexpected error fixing {filepath}: {e}", file=sys.stderr)
+        LOGGER.error("Unexpected error fixing %s: %s", filepath, e)
         return False
 
 
@@ -161,13 +164,13 @@ def remove_ds_store(filepath: str) -> bool:
     """
     try:
         os.remove(filepath)
-        print(f"Removed: {filepath} (macOS system file)")
+        LOGGER.info("Removed macOS system file %s", filepath)
         return True
     except OSError as e:
-        print(f"Warning: Could not remove {filepath}: {e}", file=sys.stderr)
+        LOGGER.warning("Could not remove %s: %s", filepath, e)
         return False
     except Exception as e:
-        print(f"Warning: Unexpected error removing {filepath}: {e}", file=sys.stderr)
+        LOGGER.warning("Unexpected error removing %s: %s", filepath, e)
         return False
 
 
@@ -180,10 +183,9 @@ def find_and_process_files(root_dir: str, fix_files: bool = False) -> tuple[list
     fixed_count = 0
     error_count = 0
 
-    print(f"Scanning directory: {os.path.abspath(root_dir)}")
+    LOGGER.info("Scanning directory: %s", os.path.abspath(root_dir))
     if fix_files:
-        print("Fix mode enabled: Attempting to remove execute permissions from suspicious files.")
-    print("-" * 30)
+        LOGGER.info("Fix mode enabled: attempting to remove execute permissions from suspicious files.")
 
     # trufflehog git file://./kotlin-base58
 
@@ -204,7 +206,7 @@ def find_and_process_files(root_dir: str, fix_files: bool = False) -> tuple[list
                 if is_suspicious_executable(filepath):
                     _, ext = os.path.splitext(filename)
                     suspicious_files_found.append(filepath)
-                    print(f"Suspicious: {filepath} (Extension: {ext}, Executable, No Shebang)")
+                    LOGGER.info("Suspicious executable file mode: %s (extension: %s)", filepath, ext)
 
                     # If fix mode is enabled, attempt to remove execute permission
                     if fix_files:
@@ -214,14 +216,10 @@ def find_and_process_files(root_dir: str, fix_files: bool = False) -> tuple[list
                             error_count += 1
 
             except OSError as e:
-                print(f"Warning: Could not access {filepath}: {e}", file=sys.stderr)
+                LOGGER.warning("Could not access %s: %s", filepath, e)
             except Exception as e:
-                print(
-                    f"Warning: Unexpected error processing {filepath}: {e}",
-                    file=sys.stderr,
-                )
+                LOGGER.warning("Unexpected error processing %s: %s", filepath, e)
 
-    print("-" * 30)
     return suspicious_files_found, fixed_count, error_count
 
 
