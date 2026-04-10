@@ -928,6 +928,10 @@ def _write_gradle_root_files(
         setup_kotlin.mark_executable(root_path / "gradlew")
         dev.io.copy(
             ctx.repo_template / "gradle-files" / "gradle" / "wrapper" / "gradle-wrapper.jar",
+        dev.io.copy(
+            ctx.repo_template / "gradle-files" / "scripts" / "build_pages_markdown_site.py",
+            root_path / "scripts" / "build_pages_markdown_site.py",
+        )
             root_path / "gradle" / "wrapper" / "gradle-wrapper.jar",
         )
         dev.io.copy(

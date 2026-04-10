@@ -80,6 +80,21 @@ def test_gradle_properties_template_marks_file_as_generated() -> None:
     assert "dev setup <project-or-repo>" in content
 
 
+def test_gradle_pages_markdown_site_helper_script_exists() -> None:
+    script_path = (
+        Path(__file__).resolve().parents[2]
+        / "data-repo-template"
+        / "gradle-files"
+        / "scripts"
+        / "build_pages_markdown_site.py"
+    )
+
+    content = script_path.read_text(encoding="utf-8")
+
+    assert script_path.is_file()
+    assert content.startswith("#!/usr/bin/env python3\n")
+
+
 def test_settings_templates_place_plugin_builds_under_plugin_management() -> None:
     settings_template_path = (
         Path(__file__).resolve().parents[2] / "data-repo-template" / "gradle-files" / "settings.gradle.kts.jinja2"

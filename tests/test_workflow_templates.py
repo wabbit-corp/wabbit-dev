@@ -13,9 +13,20 @@ def test_gradle_docs_deploy_template_uses_gh_pages_publish() -> None:
 
     assert "actions/configure-pages@v5" in text
     assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in text
+    assert "actions/setup-python@v5" in text
+    assert "mkdocs==1.6.1" in text
+    assert 'python3 scripts/build_pages_markdown_site.py --output-dir "$SITE_DIR/docs"' in text
     assert "actions/upload-pages-artifact@v4" in text
     assert "actions/deploy-pages@v4" in text
     assert "peaceiris/actions-gh-pages@v4" not in text
+
+
+def test_gradle_docs_quality_template_builds_markdown_site() -> None:
+    text = _template_text("data-repo-template/gradle-files/.github/workflows/docs-quality.yml.jinja2")
+
+    assert "actions/setup-python@v5" in text
+    assert "mkdocs==1.6.1" in text
+    assert 'python3 scripts/build_pages_markdown_site.py --output-dir "$RUNNER_TEMP/pages-markdown"' in text
 
 
 def test_python_docs_deploy_template_uses_pages_artifact_publish() -> None:

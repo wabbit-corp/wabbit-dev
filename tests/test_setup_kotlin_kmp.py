@@ -1124,6 +1124,11 @@ def test_setup_gradle_project_workflow_context_includes_release_and_docs_command
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_setup_side_effects(monkeypatch)
+    import dev.io as dev_io
+
+    copy_calls: list[tuple[object, object]] = []
+    monkeypatch.setattr(dev_io, "copy", lambda src, dst: copy_calls.append((src, dst)))
+
     project = _make_project(tmp_path / "kotlin-demo", platforms=["jvm"])
     project.path.mkdir(parents=True, exist_ok=True)
     project.github_repo = "wabbit-corp/kotlin-demo"
@@ -1165,6 +1170,7 @@ def test_setup_gradle_project_workflow_context_includes_release_and_docs_command
     assert (project.path / ".github" / "workflows" / "docs-deploy.yml").read_text(encoding="utf-8") == (
         "build/dokka/html\n"
     )
+    assert any(str(dst).endswith("/scripts/build_pages_markdown_site.py") for _src, dst in copy_calls)
 
 
 def test_write_gradle_repo_root_workflows_uses_nested_task_selectors_and_repo_relative_docs_output(

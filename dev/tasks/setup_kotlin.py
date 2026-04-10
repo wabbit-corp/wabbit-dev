@@ -1900,6 +1900,10 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
         dev.io.copy(ctx.repo_template / "gradle-files" / "gradlew.bat", project.path / "gradlew.bat")
         mark_executable(project.path / "gradlew")
         dev.io.copy(
+            ctx.repo_template / "gradle-files" / "scripts" / "build_pages_markdown_site.py",
+            project.path / "scripts" / "build_pages_markdown_site.py",
+        )
+        dev.io.copy(
             ctx.repo_template / "gradle-files" / "gradle" / "wrapper" / "gradle-wrapper.jar",
             project.path / "gradle" / "wrapper" / "gradle-wrapper.jar",
         )
