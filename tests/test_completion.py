@@ -4,6 +4,14 @@ from collections import OrderedDict
 from types import SimpleNamespace
 
 
+def _completion_reply(words: list[str], cword: int):
+    from dev.cli import build_parser
+    from dev.tasks.completion import get_completion_reply
+
+    parser, _commands = build_parser()
+    return get_completion_reply(parser, words, cword)
+
+
 def test_bash_completion_script_registers_query_handler() -> None:
     from dev.tasks.completion import bash_completion_script
 
@@ -20,13 +28,11 @@ def test_zsh_completion_script_registers_compdef() -> None:
 
     assert "#compdef wabbit-dev" in script
     assert "compdef _wabbit_dev_completion wabbit-dev" in script
-    assert 'completion query zsh $((CURRENT - 1))' in script
+    assert "completion query zsh $((CURRENT - 1))" in script
 
 
 def test_completion_reply_lists_top_level_commands() -> None:
-    from dev.tasks.completion import get_completion_reply
-
-    reply = get_completion_reply(["wabbit-dev", ""], 1)
+    reply = _completion_reply(["wabbit-dev", ""], 1)
 
     assert "completion" in reply.candidates
     assert "doctor" in reply.candidates
@@ -36,18 +42,14 @@ def test_completion_reply_lists_top_level_commands() -> None:
 
 
 def test_completion_reply_lists_project_subcommands() -> None:
-    from dev.tasks.completion import get_completion_reply
-
-    reply = get_completion_reply(["wabbit-dev", "project", ""], 2)
+    reply = _completion_reply(["wabbit-dev", "project", ""], 2)
 
     assert reply.candidates == ("list", "show", "deps", "repo", "targets")
     assert reply.allow_files is False
 
 
 def test_completion_reply_lists_docs_subcommands() -> None:
-    from dev.tasks.completion import get_completion_reply
-
-    reply = get_completion_reply(["wabbit-dev", "docs", ""], 2)
+    reply = _completion_reply(["wabbit-dev", "docs", ""], 2)
 
     assert reply.candidates == ("check", "snippets")
     assert reply.allow_files is False
@@ -57,13 +59,13 @@ def test_completion_reply_suggests_project_and_repo_targets(monkeypatch) -> None
     import dev.tasks.completion as completion_task
 
     config = SimpleNamespace(
-        defined_projects=OrderedDict([("app-wabbit-dev", object())]),
-        defined_repos=OrderedDict([("jeeves", object())]),
+        defined_projects=OrderedDict([("app-wabbit-dev", SimpleNamespace())]),
+        defined_repos=OrderedDict([("jeeves", SimpleNamespace())]),
     )
 
     monkeypatch.setattr(completion_task, "load_config", lambda: config)
 
-    reply = completion_task.get_completion_reply(["wabbit-dev", "build", ""], 2)
+    reply = _completion_reply(["wabbit-dev", "build", ""], 2)
 
     assert reply.candidates == ("app-wabbit-dev", "jeeves")
     assert reply.allow_files is True
@@ -73,14 +75,14 @@ def test_completion_reply_suggests_check_targets_and_colon_forms(monkeypatch) ->
     import dev.tasks.completion as completion_task
 
     config = SimpleNamespace(
-        defined_projects=OrderedDict([("app-wabbit-dev", object())]),
-        defined_repos=OrderedDict([("jeeves", object())]),
+        defined_projects=OrderedDict([("app-wabbit-dev", SimpleNamespace())]),
+        defined_repos=OrderedDict([("jeeves", SimpleNamespace())]),
     )
 
     monkeypatch.setattr(completion_task, "load_config", lambda: config)
     monkeypatch.setattr(completion_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck"])
 
-    reply = completion_task.get_completion_reply(["wabbit-dev", "check", ""], 2)
+    reply = _completion_reply(["wabbit-dev", "check", ""], 2)
 
     assert reply.allow_files is True
     assert reply.candidates == ("list", "describe", ":root", "app-wabbit-dev", "jeeves", ":app-wabbit-dev", ":jeeves")
@@ -90,9 +92,11 @@ def test_completion_reply_suggests_check_names_after_target(monkeypatch) -> None
     import dev.tasks.completion as completion_task
 
     monkeypatch.setattr(completion_task, "load_config", lambda: None)
-    monkeypatch.setattr(completion_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck", "TextQualityCheck"])
+    monkeypatch.setattr(
+        completion_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck", "TextQualityCheck"]
+    )
 
-    reply = completion_task.get_completion_reply(["wabbit-dev", "check", "app-wabbit-dev", ""], 3)
+    reply = _completion_reply(["wabbit-dev", "check", "app-wabbit-dev", ""], 3)
 
     assert reply.allow_files is False
     assert reply.candidates == ("SpdxHeaderCheck", "TextQualityCheck")
@@ -104,7 +108,7 @@ def test_completion_reply_suggests_check_names_for_describe(monkeypatch) -> None
     monkeypatch.setattr(completion_task, "load_config", lambda: None)
     monkeypatch.setattr(completion_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck"])
 
-    reply = completion_task.get_completion_reply(["wabbit-dev", "check", "describe", ""], 3)
+    reply = _completion_reply(["wabbit-dev", "check", "describe", ""], 3)
 
     assert reply.allow_files is False
     assert reply.candidates == ("SpdxHeaderCheck",)
@@ -114,13 +118,13 @@ def test_completion_reply_suggests_push_targets_and_dot(monkeypatch) -> None:
     import dev.tasks.completion as completion_task
 
     config = SimpleNamespace(
-        defined_projects=OrderedDict([("app-wabbit-dev", object())]),
-        defined_repos=OrderedDict([("jeeves", object())]),
+        defined_projects=OrderedDict([("app-wabbit-dev", SimpleNamespace())]),
+        defined_repos=OrderedDict([("jeeves", SimpleNamespace())]),
     )
 
     monkeypatch.setattr(completion_task, "load_config", lambda: config)
 
-    reply = completion_task.get_completion_reply(["wabbit-dev", "push", ""], 2)
+    reply = _completion_reply(["wabbit-dev", "push", ""], 2)
 
     assert reply.allow_files is True
     assert reply.candidates == (".", "app-wabbit-dev", "jeeves")
@@ -131,7 +135,7 @@ def test_completion_reply_suggests_doctor_only_values(monkeypatch) -> None:
 
     monkeypatch.setattr(completion_task, "doctor_only_choices", lambda: ("build", "gradle", "publish"))
 
-    reply = completion_task.get_completion_reply(["wabbit-dev", "doctor", "--only", ""], 3)
+    reply = _completion_reply(["wabbit-dev", "doctor", "--only", ""], 3)
 
     assert reply.allow_files is False
     assert reply.candidates == ("build", "gradle", "publish")

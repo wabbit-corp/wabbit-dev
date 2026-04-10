@@ -8,9 +8,7 @@ from dev.generated_files import prepend_generated_comment
 from dev.io import write_text_file
 
 
-def test_write_text_file_reports_generated_pyproject_guidance(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_write_text_file_reports_generated_pyproject_guidance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import dev.io as dev_io
 
     messages: list[str] = []

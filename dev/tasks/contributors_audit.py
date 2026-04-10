@@ -37,9 +37,7 @@ def audit_contributors() -> int:
         scanned += 1
         contributors = list_git_contributors(repo_root)
         unexpected = {
-            contributor: commit_count
-            for contributor, commit_count in contributors.items()
-            if contributor != expected
+            contributor: commit_count for contributor, commit_count in contributors.items() if contributor != expected
         }
         if not unexpected:
             continue

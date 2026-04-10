@@ -114,8 +114,7 @@ def test_write_wabbit_legal_files_renders_mixed_license_notice_when_test_license
         licenses={
             "MIT": "MIT body for {{ project_name }}\n",
             "LicenseRef-Wabbit-Public-Test-License": (
-                "# Wabbit Public Tests License\n"
-                "Custom test license for {{ project_name }}\n"
+                "# Wabbit Public Tests License\n" "Custom test license for {{ project_name }}\n"
             ),
         },
         coc=jinja2.Template("CODE OF CONDUCT {{ company_short_name }} {{ legal_contact_email }}\n"),
@@ -143,9 +142,9 @@ def test_write_wabbit_legal_files_renders_mixed_license_notice_when_test_license
     assert "`test/**`" in notice_text
     assert "Published artifacts must not include files covered by the test license." in notice_text
 
-    test_license_text = (
-        tmp_path / "LICENSES" / "LicenseRef-Wabbit-Public-Test-License-1.1.md"
-    ).read_text(encoding="utf-8")
+    test_license_text = (tmp_path / "LICENSES" / "LicenseRef-Wabbit-Public-Test-License-1.1.md").read_text(
+        encoding="utf-8"
+    )
     assert "Custom test license for demo-proj" in test_license_text
 
 
@@ -169,8 +168,7 @@ def test_write_wabbit_legal_files_copies_test_license_into_existing_test_directo
         licenses={
             "MIT": "MIT body for {{ project_name }}\n",
             "LicenseRef-Wabbit-Public-Test-License": (
-                "# Wabbit Public Tests License\n"
-                "Custom test license for {{ project_name }}\n"
+                "# Wabbit Public Tests License\n" "Custom test license for {{ project_name }}\n"
             ),
         },
         coc=jinja2.Template("CODE OF CONDUCT {{ company_short_name }} {{ legal_contact_email }}\n"),

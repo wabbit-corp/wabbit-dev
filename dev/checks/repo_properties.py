@@ -115,8 +115,10 @@ class RepoMetadataHygieneCheck(RepoCheck):
 
         issues: list[Issue] = []
         repo_root = plan.repo_root
+
         def fix_repo_metadata() -> None:
             rerun_setup_for_repo_root(repo_root)
+
         if plan.requires_editorconfig and not (repo_root / ".editorconfig").is_file():
             issues.append(E_MISSING_EDITORCONFIG.at(repo_root).fixable(fix_repo_metadata))
 

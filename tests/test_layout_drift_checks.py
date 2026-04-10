@@ -40,7 +40,7 @@ def test_kmp_source_layout_drift_check_reports_requested_drift_cases(tmp_path: P
                 ':version "0.1.0" '
                 ':buildModel "kmp" '
                 ':targets [{"kind": "jvm"} {"kind": "js"}] '
-                ':sourceSets {'
+                ":sourceSets {"
                 '"jsMain": {"kotlinSrcDirs": ["src/webShared/kotlin"]} '
                 '"declaredMain": {"kotlinSrcDirs": ["src/emptyShared/kotlin"]}'
                 "})",
@@ -81,7 +81,7 @@ def test_kmp_source_set_naming_style_check_flags_ambiguous_native_aliases_only(t
                 ':version "0.1.0" '
                 ':buildModel "kmp" '
                 ':targets [{"kind": "iosArm64"} {"kind": "macosArm64" "name": "clientNative"} {"kind": "linuxX64"}] '
-                ':sourceSets {'
+                ":sourceSets {"
                 '"clientNativeTest": {"dependsOn": ["commonTest"]} '
                 '"posixNativeMain": {"dependsOn": ["commonMain"]}'
                 "})",
@@ -140,7 +140,7 @@ def test_kmp_single_target_and_pass_through_checks_flag_narrow_or_empty_custom_s
                 ':version "0.1.0" '
                 ':buildModel "kmp" '
                 ':targets [{"kind": "macosArm64"}] '
-                ':sourceSets {'
+                ":sourceSets {"
                 '"hostMain": {"dependsOn": ["commonMain"]} '
                 '"relayMain": {"dependsOn": ["commonMain"]} '
                 '"macosArm64Main": {"dependsOn": ["hostMain"]}'
@@ -153,7 +153,9 @@ def test_kmp_single_target_and_pass_through_checks_flag_narrow_or_empty_custom_s
     (project.path / "src" / "hostMain" / "kotlin").mkdir(parents=True, exist_ok=True)
     (project.path / "src" / "hostMain" / "kotlin" / "Host.kt").write_text("class Host\n", encoding="utf-8")
     (project.path / "src" / "macosArm64Main" / "kotlin").mkdir(parents=True, exist_ok=True)
-    (project.path / "src" / "macosArm64Main" / "kotlin" / "Platform.kt").write_text("class Platform\n", encoding="utf-8")
+    (project.path / "src" / "macosArm64Main" / "kotlin" / "Platform.kt").write_text(
+        "class Platform\n", encoding="utf-8"
+    )
 
     single_target_issues = KmpSingleTargetAbstractionCheck().check(project.path, project)
     pass_through_issues = KmpPassThroughSourceSetCheck().check(project.path, project)
@@ -175,7 +177,7 @@ def test_kmp_file_suffix_boundary_and_alias_meaning_mismatch_checks_flag_confusi
                 ':version "0.1.0" '
                 ':buildModel "kmp" '
                 ':targets [{"kind": "macosArm64"}] '
-                ':sourceSets {'
+                ":sourceSets {"
                 '"iosSupportMain": {"dependsOn": ["commonMain"]} '
                 '"macosArm64Main": {"dependsOn": ["iosSupportMain"]}'
                 "})",
@@ -223,7 +225,7 @@ def test_kmp_alias_meaning_mismatch_understands_compound_boundaries(tmp_path: Pa
                 ':version "0.1.0" '
                 ':buildModel "kmp" '
                 ':targets [{"kind": "jvm"} {"kind": "android-kmp-library" "namespace": "one.wabbit.demo" "compileSdk": 34 "minSdk": 21}] '
-                ':sourceSets {'
+                ":sourceSets {"
                 '"jvmAndAndroidMain": {"dependsOn": ["commonMain"]} '
                 '"jvmMain": {"dependsOn": ["jvmAndAndroidMain"]} '
                 '"androidMain": {"dependsOn": ["jvmAndAndroidMain"]}'
@@ -308,9 +310,9 @@ def test_gradle_publication_metadata_check_reports_missing_license_and_build_met
                 ':description "Demo publishable lib" '
                 ':repo "wabbit-corp/demo-publish" '
                 ':license "MIT" '
-                ':publish true '
+                ":publish true "
                 ':publishTarget "maven-central" '
-                ':features [(jvm-kotlin-library)])',
+                ":features [(jvm-kotlin-library)])",
                 "",
             ]
         ),
@@ -343,7 +345,7 @@ def test_gradle_publication_metadata_check_skips_intellij_marketplace_projects(t
                 ':description "Demo IntelliJ plugin" '
                 ':repo "wabbit-corp/demo-ij" '
                 ':license "MIT" '
-                ':publish true '
+                ":publish true "
                 ':publishTarget "jetbrains-marketplace" '
                 ':features [(intellij-plugin "Demo IJ")])',
                 "",

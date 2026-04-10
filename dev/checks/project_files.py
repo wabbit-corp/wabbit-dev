@@ -27,6 +27,7 @@
       in the project's README and metadata files.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 from dev.check_fixers import can_regenerate_with_setup, rerun_setup_for_project
@@ -63,11 +64,14 @@ class GenericProjectStructureCheck(ProjectCheck):
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         issues: list[Issue] = []
         writes_repo_root_files = project is None or path.resolve() == project.effective_repo_root.resolve()
-        fix_generated_structure = (
-            (lambda: rerun_setup_for_project(project))
-            if can_regenerate_with_setup(project)
-            else None
-        )
+        fix_generated_structure: Callable[[], None] | None = None
+        if project is not None and can_regenerate_with_setup(project):
+            managed_project = project
+
+            def rerun_generated_structure_setup() -> None:
+                rerun_setup_for_project(managed_project)
+
+            fix_generated_structure = rerun_generated_structure_setup
 
         readme_path = path / "README.md"
 

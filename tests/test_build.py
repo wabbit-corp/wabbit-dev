@@ -100,8 +100,18 @@ def test_build_publishes_local_compiler_plugin_before_build(tmp_path: Path, monk
 
     commands: list[tuple[Path, list[str]]] = []
 
-    monkeypatch.setattr(build_module, "load_config", lambda: config)
-    monkeypatch.setattr(build_module, "toposort_projects", lambda _projects, target_project=None: ["consumer"])
+    def fake_load_config() -> Config:
+        return config
+
+    def fake_toposort_projects(
+        _projects: dict[str, GradleProject],
+        target_project: str | list[str] | tuple[str, ...] | None = None,
+    ) -> list[str]:
+        del target_project
+        return ["consumer"]
+
+    monkeypatch.setattr(build_module, "load_config", fake_load_config)
+    monkeypatch.setattr(build_module, "toposort_projects", fake_toposort_projects)
 
     def fake_run(command: list[str], cwd: Path, check: bool) -> SimpleNamespace:
         del check
@@ -124,11 +134,15 @@ def test_build_publishes_local_compiler_plugin_before_build(tmp_path: Path, monk
     ]
 
 
-def test_build_json_output_reports_python_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+def test_build_json_output_reports_python_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     from mu.parser import parse
 
     import dev.tasks.build as build_module
-    from dev.config import Config, OwnershipType, PythonProject
+    from dev.config import Config, OwnershipType, Project, PythonProject
 
     project_path = tmp_path / "alpha"
     project_path.mkdir()
@@ -160,9 +174,23 @@ def test_build_json_output_reports_python_project(tmp_path: Path, monkeypatch: p
     config = Config(raw=parse("()"))
     config.defined_projects["alpha"] = project
 
-    monkeypatch.setattr(build_module, "load_config", lambda: config)
-    monkeypatch.setattr(build_module, "resolve_project_ids", lambda _config, targets: ["alpha"])
-    monkeypatch.setattr(build_module, "toposort_projects", lambda _projects, target_project=None: ["alpha"])
+    def fake_load_config() -> Config:
+        return config
+
+    def fake_resolve_project_ids(_config: Config, targets: list[str]) -> list[str]:
+        assert targets == ["alpha"]
+        return ["alpha"]
+
+    def fake_toposort_projects(
+        _projects: dict[str, Project],
+        target_project: str | list[str] | tuple[str, ...] | None = None,
+    ) -> list[str]:
+        del target_project
+        return ["alpha"]
+
+    monkeypatch.setattr(build_module, "load_config", fake_load_config)
+    monkeypatch.setattr(build_module, "resolve_project_ids", fake_resolve_project_ids)
+    monkeypatch.setattr(build_module, "toposort_projects", fake_toposort_projects)
 
     result = build_module.build(["alpha"], json_output=True)
 

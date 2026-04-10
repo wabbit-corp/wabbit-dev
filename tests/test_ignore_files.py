@@ -53,9 +53,7 @@ def test_ignore_matcher_supports_extra_metadata_predicates(tmp_path: Path) -> No
 
     matcher = IgnoreMatcher(
         tmp_path,
-        extra_predicates=(
-            lambda path, is_dir: not is_dir and path == generated_file.resolve(),
-        ),
+        extra_predicates=(lambda path, is_dir: not is_dir and path == generated_file.resolve(),),
     )
 
     assert matcher.matches(generated_file, is_dir=False) is True
@@ -64,9 +62,7 @@ def test_ignore_matcher_supports_extra_metadata_predicates(tmp_path: Path) -> No
 def test_read_ignore_patterns_skips_issue_directives(tmp_path: Path) -> None:
     checkignore = tmp_path / ".checkignore"
     checkignore.write_text(
-        "build/\n"
-        "check:ignore E_TEST_VALUE_MATCH sample.py\n"
-        "# comment\n",
+        "build/\n" "check:ignore E_TEST_VALUE_MATCH sample.py\n" "# comment\n",
         encoding="utf-8",
     )
 
@@ -81,9 +77,7 @@ def test_parse_checkignore_issue_directive_supports_optional_value() -> None:
             matcher=None,
         )
     )
-    assert parse_checkignore_issue_directive(
-        "check:ignore * src/*.py value=10.0.0.0"
-    ) == CheckIgnoreIssueDirective(
+    assert parse_checkignore_issue_directive("check:ignore * src/*.py value=10.0.0.0") == CheckIgnoreIssueDirective(
         issue_id="*",
         pathspec="src/*.py",
         matcher=CheckIgnoreIssueMatcher(value="10.0.0.0"),

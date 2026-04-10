@@ -19,4 +19,3 @@ def test_text_quality_bom_issue_is_fixable_for_valid_utf8_payload(tmp_path: Path
 
     bom_issues[0].fix()
     assert not path.read_bytes().startswith(b"\xef\xbb\xbf")
-

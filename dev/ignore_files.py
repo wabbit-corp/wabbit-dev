@@ -10,10 +10,7 @@ import pathspec
 type ExtraIgnorePredicate = Callable[[Path, bool], bool]
 
 _CHECKIGNORE_ISSUE_RE = re.compile(
-    r"^check:ignore\s+"
-    r"(?P<issue_id>\*|E_[A-Z0-9_]+)\s+"
-    r"(?P<pathspec>\S+)"
-    r"(?:\s+(?P<matcher>.*\S))?\s*$"
+    r"^check:ignore\s+" r"(?P<issue_id>\*|E_[A-Z0-9_]+)\s+" r"(?P<pathspec>\S+)" r"(?:\s+(?P<matcher>.*\S))?\s*$"
 )
 
 
@@ -83,9 +80,7 @@ def read_ignore_patterns(path: Path) -> list[str]:
     return [
         line.strip()
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines()
-        if line.strip()
-        and not line.strip().startswith("#")
-        and not is_checkignore_issue_directive(line)
+        if line.strip() and not line.strip().startswith("#") and not is_checkignore_issue_directive(line)
     ]
 
 

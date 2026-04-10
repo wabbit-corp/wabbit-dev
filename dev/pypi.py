@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 from dev.caching import DEFAULT_CACHE_DB_PATH, cache
+from dev.json_utils import as_dict
 
 
 @dataclass
@@ -13,23 +14,24 @@ class PyPiProjectMetadata:
     releases: list[str]
 
     @classmethod
-    def parse(cls, payload: object) -> "PyPiProjectMetadata":
-        if not isinstance(payload, dict):
+    def parse(cls, payload: object) -> PyPiProjectMetadata:
+        payload_dict = as_dict(payload)
+        if payload_dict is None:
             raise ValueError("PyPI metadata payload must be a JSON object.")
 
-        info = payload.get("info")
-        releases_payload = payload.get("releases")
+        info = as_dict(payload_dict.get("info"))
+        releases_payload = as_dict(payload_dict.get("releases"))
 
         latest_version: str | None = None
-        if isinstance(info, dict):
+        if info is not None:
             raw_latest = info.get("version")
             if isinstance(raw_latest, str) and raw_latest.strip():
                 latest_version = raw_latest.strip()
 
         releases: list[str] = []
-        if isinstance(releases_payload, dict):
+        if releases_payload is not None:
             for release_name in releases_payload.keys():
-                if isinstance(release_name, str) and release_name.strip():
+                if release_name.strip():
                     releases.append(release_name.strip())
 
         return cls(

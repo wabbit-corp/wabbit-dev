@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import os
 import subprocess
 import sys
 import tarfile
@@ -10,12 +9,14 @@ import tempfile
 import zipfile
 from contextlib import nullcontext, redirect_stdout
 from email import policy
+from email.message import EmailMessage
 from email.parser import BytesParser
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
 
 from dev.build_order import toposort_projects
 from dev.config import (
+    Config,
     DataProject,
     Dependency,
     DependencyTarget,
@@ -27,13 +28,17 @@ from dev.config import (
     load_config,
 )
 from dev.failure_context import contextualize_failure
+from dev.json_types import JSONObject, JSONValue
 from dev.maven import MavenMetadata
 from dev.messages import error, info, success, warning
 from dev.python_sdist_policy import python_check_manifest_ignore_patterns
 from dev.repo_resolution import inferred_project_targets, resolve_project_ids
+from dev.tasks.build import gradle_command, gradle_task_name
 from dev.tasks.publish import determine_publish_target
 
-MAVEN_CENTRAL_BASE_URL = "https://repo1.maven.org/maven2/"  # check:ignore E_HARDCODED_URL value=https://repo1.maven.org/maven2/
+MAVEN_CENTRAL_BASE_URL = (
+    "https://repo1.maven.org/maven2/"  # check:ignore E_HARDCODED_URL value=https://repo1.maven.org/maven2/
+)
 
 
 class ReleaseVerifyError(Exception):
@@ -48,21 +53,6 @@ def _project_kind(project: Project) -> str:
     return type(project).__name__.removesuffix("Project").lower()
 
 
-def _gradle_command(gradle_root: Path) -> list[str]:
-    wrapper_path = gradle_root / "gradlew"
-    if wrapper_path.is_file():
-        if os.name == "nt":
-            return ["./gradlew.bat"]
-        return ["./gradlew"]
-    return ["gradle"]
-
-
-def _gradle_task_name(project: GradleProject, task_name: str) -> str:
-    if project.effective_gradle_root != project.path:
-        return f":{project.effective_gradle_project_name}:{task_name}"
-    return task_name
-
-
 def _iter_project_dependencies(project: GradleProject) -> list[Dependency]:
     dependencies = list(project.resolved_dependencies)
     for source_set_dependencies in project.source_set_dependencies.values():
@@ -70,10 +60,10 @@ def _iter_project_dependencies(project: GradleProject) -> list[Dependency]:
     return dependencies
 
 
-def _direct_gradle_dependency_projects(config: object, project: GradleProject) -> list[GradleProject]:
+def _direct_gradle_dependency_projects(config: Config, project: GradleProject) -> list[GradleProject]:
     dependency_projects: list[GradleProject] = []
     seen: set[str] = set()
-    defined_projects = getattr(config, "defined_projects", {})
+    defined_projects = config.defined_projects
 
     for dependency in _iter_project_dependencies(project):
         target = dependency.target
@@ -90,7 +80,7 @@ def _direct_gradle_dependency_projects(config: object, project: GradleProject) -
     return dependency_projects
 
 
-def _reachable_gradle_dependency_projects(config: object, project: GradleProject) -> list[GradleProject]:
+def _reachable_gradle_dependency_projects(config: Config, project: GradleProject) -> list[GradleProject]:
     reachable: list[GradleProject] = []
     seen: set[str] = set()
     queue = _direct_gradle_dependency_projects(config, project)
@@ -113,13 +103,7 @@ def _dependency_coordinate_on_maven_central(project: GradleProject) -> tuple[str
     return project.group_name, project.effective_artifact_id, str(version)
 
 
-def _http_status_code(ex: Exception) -> int | None:
-    response = getattr(ex, "response", None)
-    status_code = getattr(response, "status_code", None)
-    return status_code if isinstance(status_code, int) else None
-
-
-def _cross_repo_gradle_dependencies_for_prod(config: object, project: GradleProject) -> list[GradleProject]:
+def _cross_repo_gradle_dependencies_for_prod(config: Config, project: GradleProject) -> list[GradleProject]:
     current_repo_root = project.effective_repo_root.resolve()
     return [
         dependency_project
@@ -138,17 +122,17 @@ def _fetch_maven_central_metadata(group_id: str, artifact_id: str) -> MavenMetad
     return MavenMetadata.parse(response.text)
 
 
-def _maven_central_preflight_for_gradle_project(config: object, project: GradleProject) -> dict[str, object]:
-    checked: list[dict[str, object]] = []
-    missing: list[dict[str, object]] = []
-    unavailable: list[dict[str, object]] = []
+def _maven_central_preflight_for_gradle_project(config: Config, project: GradleProject) -> JSONObject:
+    checked: list[JSONObject] = []
+    missing: list[JSONObject] = []
+    unavailable: list[JSONObject] = []
 
     for dependency_project in _cross_repo_gradle_dependencies_for_prod(config, project):
         project_id = dependency_project.project_id or dependency_project.name
         publish_target = determine_publish_target(dependency_project)
         coordinate = _dependency_coordinate_on_maven_central(dependency_project)
 
-        base_entry: dict[str, object] = {
+        base_entry: JSONObject = {
             "projectId": project_id,
             "path": str(dependency_project.path.resolve()),
             "publishTarget": publish_target,
@@ -181,7 +165,14 @@ def _maven_central_preflight_for_gradle_project(config: object, project: GradleP
         try:
             metadata = _fetch_maven_central_metadata(group_id, artifact_id)
         except Exception as ex:
-            status_code = _http_status_code(ex)
+            status_code: int | None = None
+            try:
+                import requests
+
+                if isinstance(ex, requests.HTTPError) and ex.response is not None:
+                    status_code = ex.response.status_code
+            except ModuleNotFoundError:
+                status_code = None
             if status_code == 404:
                 missing.append(
                     {
@@ -258,11 +249,11 @@ def _run_python_module(
     cwd: Path,
     redirect_output: bool,
 ) -> None:
-    run_kwargs: dict[str, object] = {}
+    command = [sys.executable, "-m", module, *args]
     if redirect_output:
-        run_kwargs["stdout"] = sys.stderr
-        run_kwargs["stderr"] = sys.stderr
-    subprocess.run([sys.executable, "-m", module, *args], cwd=cwd, check=True, **run_kwargs)
+        subprocess.run(command, cwd=cwd, check=True, stdout=sys.stderr, stderr=sys.stderr)
+        return
+    subprocess.run(command, cwd=cwd, check=True)
 
 
 def _require_python_module(module: str) -> None:
@@ -304,21 +295,17 @@ def _expected_metadata_urls(project: PythonProject) -> set[str]:
     return expected
 
 
-def _parse_metadata_urls(metadata: object) -> set[str]:
-    home_page = metadata.get("Home-page") if hasattr(metadata, "get") else None
+def _parse_metadata_urls(metadata: EmailMessage) -> set[str]:
+    home_page = metadata.get("Home-page")
     values: set[str] = set()
-    normalized = _normalized_url(home_page if isinstance(home_page, str) else None)
+    normalized = _normalized_url(home_page)
     if normalized is not None:
         values.add(normalized)
-    get_all = getattr(metadata, "get_all", None)
-    if callable(get_all):
-        for value in get_all("Project-URL", []):
-            if not isinstance(value, str):
-                continue
-            _label, _comma, url = value.partition(",")
-            normalized_url = _normalized_url(url)
-            if normalized_url is not None:
-                values.add(normalized_url)
+    for value in metadata.get_all("Project-URL", []):
+        _label, _comma, url = value.partition(",")
+        normalized_url = _normalized_url(url)
+        if normalized_url is not None:
+            values.add(normalized_url)
     return values
 
 
@@ -336,7 +323,7 @@ def _wheel_contains_test_modules(names: list[str]) -> list[str]:
     return suspicious
 
 
-def _read_wheel_metadata(wheel_path: Path) -> tuple[object, list[str], str]:
+def _read_wheel_metadata(wheel_path: Path) -> tuple[EmailMessage, list[str], str]:
     with zipfile.ZipFile(wheel_path) as archive:
         names = archive.namelist()
         metadata_path = next((name for name in names if name.endswith(".dist-info/METADATA")), None)
@@ -363,7 +350,7 @@ def _sdist_contains(entries: list[str], *, basename: str) -> bool:
     return any(PurePosixPath(entry).name.casefold() == expected for entry in entries)
 
 
-def _summarize_python_artifacts(project: PythonProject, out_dir: Path) -> dict[str, object]:
+def _summarize_python_artifacts(project: PythonProject, out_dir: Path) -> JSONObject:
     wheels = sorted(out_dir.glob("*.whl"))
     sdists = sorted([*out_dir.glob("*.tar.gz"), *out_dir.glob("*.zip")])
     if not wheels:
@@ -387,18 +374,18 @@ def _summarize_python_artifacts(project: PythonProject, out_dir: Path) -> dict[s
     metadata, wheel_entries, metadata_path = _read_wheel_metadata(wheel_path)
     sdist_entries = _sdist_entries(sdist_path)
 
-    license_value = metadata.get("License") if hasattr(metadata, "get") else None
-    license_expression = metadata.get("License-Expression") if hasattr(metadata, "get") else None
-    classifiers = metadata.get_all("Classifier", []) if hasattr(metadata, "get_all") else []
+    license_value = metadata.get("License")
+    license_expression = metadata.get("License-Expression")
+    classifiers = metadata.get_all("Classifier", [])
     has_license_metadata = bool(license_value or license_expression) or any(
-        isinstance(value, str) and value.startswith("License ::") for value in classifiers
+        value.startswith("License ::") for value in classifiers
     )
     if not has_license_metadata:
         raise ReleaseVerifyError(f"{wheel_path.name} is missing license metadata in METADATA.")
 
-    description_content_type = metadata.get("Description-Content-Type") if hasattr(metadata, "get") else None
-    description_body = metadata.get_payload() if hasattr(metadata, "get_payload") else ""
-    if not isinstance(description_content_type, str) or not description_content_type.strip():
+    description_content_type = metadata.get("Description-Content-Type")
+    description_body = metadata.get_payload()
+    if description_content_type is None or not description_content_type.strip():
         raise ReleaseVerifyError(f"{wheel_path.name} is missing Description-Content-Type metadata for the README.")
     if not isinstance(description_body, str) or not description_body.strip():
         raise ReleaseVerifyError(f"{wheel_path.name} is missing the rendered long description body.")
@@ -442,8 +429,8 @@ def _verify_python_project(
     project: PythonProject,
     *,
     redirect_output: bool,
-) -> dict[str, object]:
-    result: dict[str, object] = {
+) -> JSONObject:
+    result: JSONObject = {
         "projectId": project.project_id or project.name,
         "kind": "python",
         "path": str(project.path.resolve()),
@@ -485,7 +472,8 @@ def _verify_python_project(
         built_artifacts = sorted(str(path.resolve()) for path in out_dir.iterdir() if path.is_file())
         if not built_artifacts:
             raise ReleaseVerifyError(f"No build artifacts were produced for {project.name}.")
-        result["artifacts"] = {"built": built_artifacts}
+        artifacts: JSONObject = {"built": built_artifacts}
+        result["artifacts"] = artifacts
 
         _run_python_module(
             "twine",
@@ -502,20 +490,20 @@ def _verify_python_project(
             cwd=project.path,
             redirect_output=redirect_output,
         )
-        result["artifacts"].update(_summarize_python_artifacts(project, out_dir))
+        artifacts.update(_summarize_python_artifacts(project, out_dir))
 
     result["status"] = "success"
     return result
 
 
 def _verify_gradle_project(
-    config: object,
+    config: Config,
     project: GradleProject,
     *,
     redirect_output: bool,
-) -> dict[str, object]:
+) -> JSONObject:
     publish_target = determine_publish_target(project)
-    result: dict[str, object] = {
+    result: JSONObject = {
         "projectId": project.project_id or project.name,
         "kind": "gradle",
         "path": str(project.path.resolve()),
@@ -545,29 +533,27 @@ def _verify_gradle_project(
 
     if publish_target == "maven-central":
         if project.is_kmp:
-            tasks = [_gradle_task_name(project, "publishKotlinMultiplatformPublicationToMavenLocal")]
+            tasks = [gradle_task_name(project, "publishKotlinMultiplatformPublicationToMavenLocal")]
         else:
-            tasks = [_gradle_task_name(project, "build"), _gradle_task_name(project, "publishToMavenLocal")]
+            tasks = [gradle_task_name(project, "build"), gradle_task_name(project, "publishToMavenLocal")]
     elif publish_target == "intellij-marketplace":
-        tasks = [_gradle_task_name(project, "verifyPlugin"), _gradle_task_name(project, "buildPlugin")]
+        tasks = [gradle_task_name(project, "verifyPlugin"), gradle_task_name(project, "buildPlugin")]
     else:
-        tasks = [_gradle_task_name(project, "build")]
+        tasks = [gradle_task_name(project, "build")]
 
     gradle_root = project.effective_gradle_root
-    command = [*_gradle_command(gradle_root), "--no-daemon", *tasks]
+    command = [*gradle_command(gradle_root), "--no-daemon", *tasks]
     result["command"] = command
     result["gradleRoot"] = str(gradle_root.resolve())
 
     overlay_state = _disable_local_overlay(gradle_root)
     result["localOverlayPresentBeforeVerify"] = overlay_state is not None
 
-    run_kwargs: dict[str, object] = {}
-    if redirect_output:
-        run_kwargs["stdout"] = sys.stderr
-        run_kwargs["stderr"] = sys.stderr
-
     try:
-        subprocess.run(command, cwd=gradle_root, check=True, **run_kwargs)
+        if redirect_output:
+            subprocess.run(command, cwd=gradle_root, check=True, stdout=sys.stderr, stderr=sys.stderr)
+        else:
+            subprocess.run(command, cwd=gradle_root, check=True)
     finally:
         _restore_local_overlay(overlay_state)
 
@@ -575,36 +561,64 @@ def _verify_gradle_project(
     return result
 
 
-def _update_release_summary(payload: dict[str, object]) -> None:
-    results = payload.get("results", [])
-    assert isinstance(results, list)
+def _json_string(value: JSONValue | None) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _update_release_summary(payload: JSONObject) -> None:
+    results = payload.get("results")
+    if not isinstance(results, list):
+        payload["summary"] = {
+            "total": 0,
+            "success": 0,
+            "failed": 0,
+            "skipped": 0,
+            "unsupported": 0,
+        }
+        return
+
+    success_count = 0
+    failed_count = 0
+    skipped_count = 0
+    unsupported_count = 0
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        match _json_string(result.get("status")):
+            case "success":
+                success_count += 1
+            case "failed":
+                failed_count += 1
+            case "skipped":
+                skipped_count += 1
+            case "unsupported":
+                unsupported_count += 1
+            case _:
+                continue
     payload["summary"] = {
         "total": len(results),
-        "success": sum(1 for result in results if isinstance(result, dict) and result.get("status") == "success"),
-        "failed": sum(1 for result in results if isinstance(result, dict) and result.get("status") == "failed"),
-        "skipped": sum(1 for result in results if isinstance(result, dict) and result.get("status") == "skipped"),
-        "unsupported": sum(
-            1 for result in results if isinstance(result, dict) and result.get("status") == "unsupported"
-        ),
+        "success": success_count,
+        "failed": failed_count,
+        "skipped": skipped_count,
+        "unsupported": unsupported_count,
     }
 
 
 def _command_failure_message(ex: subprocess.CalledProcessError) -> str:
-    command = ex.cmd if isinstance(ex.cmd, list) else [str(ex.cmd)]
-    if len(command) >= 3 and command[1] == "-m":
-        return f"{command[2]} failed with exit code {ex.returncode}."
     return f"Verification command failed with exit code {ex.returncode}."
 
 
 def release_verify(projects: str | list[str] | None = None, *, json_output: bool = False) -> int:
     requested_projects = [projects] if isinstance(projects, str) else projects
-    payload: dict[str, object] = {
+    payload: JSONObject = {
         "requestedTargets": list(requested_projects or []),
         "inferredTargets": [],
         "resolvedTargets": [],
         "topologicalOrder": [],
         "results": [],
     }
+    results_payload: list[JSONObject] = []
+    payload["results"] = results_payload
 
     def run() -> int:
         config = load_config()
@@ -646,6 +660,7 @@ def release_verify(projects: str | list[str] | None = None, *, json_output: bool
         failures = 0
         for name in order:
             project = config.defined_projects[name]
+            result: JSONObject
             try:
                 match project:
                     case PythonProject():
@@ -663,9 +678,9 @@ def release_verify(projects: str | list[str] | None = None, *, json_output: bool
                         }
                     case _:
                         result = {
-                            "projectId": getattr(project, "project_id", None) or getattr(project, "name", name),
+                            "projectId": project.project_id or project.name,
                             "kind": _project_kind(project),
-                            "path": str(project.path.resolve()) if isinstance(getattr(project, "path", None), Path) else None,
+                            "path": str(project.path.resolve()),
                             "publishTarget": determine_publish_target(project),
                             "status": "unsupported",
                             "reason": "unknown-project-type",
@@ -680,7 +695,6 @@ def release_verify(projects: str | list[str] | None = None, *, json_output: bool
                     "error": str(ex),
                 }
             except subprocess.CalledProcessError as ex:
-                command = ex.cmd if isinstance(ex.cmd, list) else [str(ex.cmd)]
                 result = {
                     "projectId": project.project_id or project.name,
                     "kind": _project_kind(project),
@@ -689,7 +703,6 @@ def release_verify(projects: str | list[str] | None = None, *, json_output: bool
                     "status": "failed",
                     "error": _command_failure_message(ex),
                     "returnCode": ex.returncode,
-                    "command": command,
                 }
             except FileNotFoundError as ex:
                 result = {
@@ -701,8 +714,8 @@ def release_verify(projects: str | list[str] | None = None, *, json_output: bool
                     "error": str(ex),
                 }
 
-            payload["results"].append(result)
-            status = result.get("status")
+            results_payload.append(result)
+            status = _json_string(result.get("status"))
             if status == "success":
                 if not json_output:
                     success(f"Release verification passed for {name}.")

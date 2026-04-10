@@ -65,6 +65,10 @@ class DoctorContext:
             self._config = None
         return self._config
 
+    @property
+    def config_error(self) -> str | None:
+        return self._config_error
+
 
 def _first_present(*values: str | None) -> str | None:
     for value in values:
@@ -74,7 +78,7 @@ def _first_present(*values: str | None) -> str | None:
 
 
 def _in_virtualenv() -> bool:
-    return sys.prefix != getattr(sys, "base_prefix", sys.prefix) or bool(os.environ.get("VIRTUAL_ENV"))
+    return sys.prefix != sys.base_prefix or bool(os.environ.get("VIRTUAL_ENV"))
 
 
 def _determine_publish_target(project: Project) -> str:
@@ -243,7 +247,7 @@ def _config_finding(ctx: DoctorContext) -> DoctorFinding:
         key="config",
         label="Config load",
         status=DoctorStatus.FAIL,
-        detail=f"Failed to parse workspace config: {ctx._config_error}",
+        detail=f"Failed to parse workspace config: {ctx.config_error}",
         fix="Fix the config error and re-run `dev config check`.",
     )
 
@@ -375,11 +379,7 @@ def _contributors_identity_finding(ctx: DoctorContext) -> DoctorFinding:
 
 
 def _publish_target_projects(config: Config, target_name: str, ctx: DoctorContext) -> list[Project]:
-    return [
-        project
-        for project in _selected_projects(config, ctx)
-        if _determine_publish_target(project) == target_name
-    ]
+    return [project for project in _selected_projects(config, ctx) if _determine_publish_target(project) == target_name]
 
 
 def _publish_pypi_finding(ctx: DoctorContext) -> DoctorFinding:
@@ -458,10 +458,7 @@ def _publish_maven_central_finding(ctx: DoctorContext) -> DoctorFinding:
         label="Publish / Maven Central",
         status=DoctorStatus.FAIL,
         detail=f"Missing Maven Central publishing material: {', '.join(missing)}.",
-        fix=(
-            "Set the missing values in root.private.clj or export the matching "
-            "`MAVEN_*` environment variables."
-        ),
+        fix=("Set the missing values in root.private.clj or export the matching " "`MAVEN_*` environment variables."),
     )
 
 
@@ -768,8 +765,7 @@ def doctor(
         return 1
     if warnings_count:
         warning(
-            f"{heading('Doctor summary')}: "
-            f"{accent(warnings_count, 'yellow')} warning(s), no blocking failures."
+            f"{heading('Doctor summary')}: " f"{accent(warnings_count, 'yellow')} warning(s), no blocking failures."
         )
         return 0
 

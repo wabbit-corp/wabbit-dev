@@ -24,7 +24,9 @@ def test_commit_openai_finding_requires_configured_key(tmp_path, monkeypatch: py
     (tmp_path / "root.clj").write_text("()", encoding="utf-8")
     (tmp_path / "root.private.clj").write_text("()", encoding="utf-8")
 
-    monkeypatch.setattr(doctor_task, "load_config", lambda start=None: SimpleNamespace(openai_key=None, defined_projects={}))
+    monkeypatch.setattr(
+        doctor_task, "load_config", lambda start=None: SimpleNamespace(openai_key=None, defined_projects={})
+    )
 
     findings = collect_doctor_findings(check_ids=("commit-openai",), ctx=DoctorContext(cwd=tmp_path))
 
@@ -48,7 +50,9 @@ def test_workspace_root_finding_passes_for_nested_subdirectory(tmp_path) -> None
     assert str(workspace_root) in findings[0].detail
 
 
-def test_preflight_for_command_prints_doctor_hint(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_preflight_for_command_prints_doctor_hint(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     import dev.tasks.doctor as doctor_task
     from dev.tasks.doctor import DoctorFinding, DoctorStatus
 
@@ -86,7 +90,9 @@ def test_resolve_doctor_check_ids_expands_command_groups() -> None:
     assert "publish-jitpack" in check_ids
 
 
-def test_doctor_json_output_includes_summary(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_doctor_json_output_includes_summary(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     import dev.tasks.doctor as doctor_task
     from dev.tasks.doctor import DoctorFinding, DoctorStatus
 

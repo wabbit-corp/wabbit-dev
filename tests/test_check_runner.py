@@ -473,8 +473,7 @@ def test_checkignore_issue_directive_supports_field_regex_matching(
     sample = tmp_path / "demo.py"
     sample.write_text("HOST = '10.0.0.0'\n", encoding="utf-8")
     (tmp_path / ".checkignore").write_text(
-        r"check:ignore E_TEST_VALUE_MATCH demo.py literal~10\.0\..+"
-        "\n",
+        r"check:ignore E_TEST_VALUE_MATCH demo.py literal~10\.0\..+" "\n",
         encoding="utf-8",
     )
 
@@ -638,7 +637,6 @@ def test_duplicate_files_check_respects_repo_gitignore_and_checkignore(
     assert ".venv" not in output
     assert "site/" not in output
     assert "tmp-test" not in output
-
 
 
 def test_ignore_finding_config_suppresses_matching_value(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

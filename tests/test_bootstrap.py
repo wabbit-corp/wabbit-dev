@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 def test_build_workspace_venv_reexec_argv_for_script_mode(tmp_path: Path) -> None:
     from dev import bootstrap
@@ -47,7 +49,7 @@ def test_build_workspace_venv_reexec_argv_for_module_mode(tmp_path: Path) -> Non
 
 def test_build_workspace_venv_reexec_argv_for_script_mode_falls_back_to_module_when_dev_script_missing(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from dev import bootstrap
 

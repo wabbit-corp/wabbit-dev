@@ -44,14 +44,6 @@ def tool_dev_script() -> Path:
     return _tool_repo_root() / "dev.py"
 
 
-def _relative_command_path(path: Path, workspace_root: Path) -> str:
-    try:
-        relative = path.relative_to(workspace_root)
-    except ValueError:
-        return str(path)
-    return f"./{relative.as_posix()}"
-
-
 def build_workspace_venv_reexec_argv(
     *,
     argv: list[str] | None = None,

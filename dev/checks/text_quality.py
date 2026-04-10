@@ -27,6 +27,7 @@
 import enum
 import re
 import unicodedata  # Needed for Unicode checks
+from collections.abc import Callable
 from pathlib import Path
 
 from dev.checks.base import (
@@ -290,14 +291,18 @@ class TextQualityCheck(FileCheck):
 
         is_invalid_encoding = False
         if content_bytes.startswith(b"\xef\xbb\xbf"):  # UTF-8 BOM
-            bom_fix = None
+            fix_bom: Callable[[], None] | None = None
             try:
                 content_bytes[3:].decode("utf-8")
-                def bom_fix() -> None:
+
+                def apply_bom_fix() -> None:
                     fix_utf8_bom(ctx.path)
+
+                fix_bom = apply_bom_fix
+
             except UnicodeDecodeError:
-                bom_fix = None
-            ctx.add_issue(E_BOM_AT_START, fix=bom_fix)
+                fix_bom = None
+            ctx.add_issue(E_BOM_AT_START, fix=fix_bom)
         elif content_bytes.startswith(b"\xff\xfe\x00\x00") or content_bytes.startswith(
             b"\x00\x00\xfe\xff"
         ):  # UTF-32 BOM

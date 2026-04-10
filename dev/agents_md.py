@@ -72,13 +72,7 @@ def _project_type_label(project: Project | object) -> str | None:
 
 
 def _configured_project_types(repo_projects: Sequence[Project | object]) -> list[str]:
-    return sorted(
-        {
-            label
-            for project in repo_projects
-            if (label := _project_type_label(project)) is not None
-        }
-    )
+    return sorted({label for project in repo_projects if (label := _project_type_label(project)) is not None})
 
 
 def _docs_systems(repo_projects: Sequence[Project | object]) -> list[str]:
@@ -142,9 +136,7 @@ def render_repo_agents_facts_block(config: Config, repo_root: Path, repo_project
 
     reference_docs = _reference_docs(repo_root)
     if reference_docs:
-        fact_lines.append(
-            f"- Repo reference docs: {', '.join(f'`{doc_name}`' for doc_name in reference_docs)}."
-        )
+        fact_lines.append(f"- Repo reference docs: {', '.join(f'`{doc_name}`' for doc_name in reference_docs)}.")
 
     fact_lines.append(AGENTS_MANAGED_FACTS_END)
     return _normalize_markdown("\n".join(fact_lines))

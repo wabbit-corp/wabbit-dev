@@ -41,4 +41,3 @@ def rerun_setup_for_repo_root(repo_root: Path) -> None:
     )
     if rc != 0:
         raise RuntimeError(f"dev setup failed for {_setup_target_for_repo_root(repo_root)!r}")
-

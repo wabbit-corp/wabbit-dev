@@ -10,7 +10,18 @@ from dev.banner import create_banner
 
 def _patch_default_font(monkeypatch: pytest.MonkeyPatch) -> None:
     default_font = ImageFont.load_default()
-    monkeypatch.setattr("dev.banner.ImageFont.truetype", lambda *_args, **_kwargs: default_font)
+
+    def fake_truetype(
+        _font: str | bytes | Path | None,
+        _size: float = 10,
+        index: int = 0,
+        encoding: str = "",
+        layout_engine: ImageFont.Layout | None = None,
+    ) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
+        del _font, _size, index, encoding, layout_engine
+        return default_font
+
+    monkeypatch.setattr("dev.banner.ImageFont.truetype", fake_truetype)
 
 
 def _read_rgba_signature(path: Path) -> tuple[tuple[int, int], bytes]:
@@ -19,7 +30,9 @@ def _read_rgba_signature(path: Path) -> tuple[tuple[int, int], bytes]:
         return rgba.size, rgba.tobytes()
 
 
-def test_create_banner_skips_rewrite_when_existing_png_pixels_match(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_banner_skips_rewrite_when_existing_png_pixels_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _patch_default_font(monkeypatch)
 
     icon_path = tmp_path / "icon.png"

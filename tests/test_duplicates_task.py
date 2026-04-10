@@ -11,7 +11,6 @@ import pytest
 
 from dev.tasks import duplicates as duplicates_task
 
-
 ENCRYPTED_ZIP_BASE64 = (
     "UEsDBAoACQAAABaxh1yMsuviEwAAAAcAAAAIABwAZmlsZS50eHRVVAkAA6u41WmruNVpdXgLAAEE9QEAAAQUAAAAgK6VQC12"
     "EbPzEIwdiJ9sf/mjaVBLBwiMsuviEwAAAAcAAABQSwECHgMKAAkAAAAWsYdcjLLr4hMAAAAHAAAACAAYAAAAAAABAAAApIEA"
@@ -76,10 +75,7 @@ def test_find_duplicate_directory_groups_across_directories_up_to_ignored_files(
 
     expected_paths = sorted([str(left.resolve()), str(right.resolve())])
     assert any(
-        group.paths == expected_paths
-        and group.tree_size == 11
-        and group.file_count == 2
-        and group.directory_count == 2
+        group.paths == expected_paths and group.tree_size == 11 and group.file_count == 2 and group.directory_count == 2
         for group in groups
     )
 
@@ -270,9 +266,7 @@ def test_zip_contents_can_match_directory_tree(tmp_path: Path) -> None:
     assert any(group.paths == expected_paths and group.tree_size == 11 for group in report.tree_groups)
 
 
-def test_zip_only_candidates_use_metadata_before_member_reads(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_zip_only_candidates_use_metadata_before_member_reads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     archive_a = tmp_path / "a.zip"
     archive_b = tmp_path / "b.zip"
 

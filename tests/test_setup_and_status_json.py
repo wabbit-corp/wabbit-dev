@@ -16,6 +16,7 @@ def test_setup_json_output_reports_selected_projects(tmp_path: Path, monkeypatch
         project_id="demo",
         repo_id=None,
         path=tmp_path / "demo",
+        github_repo=None,
     )
     project.path.mkdir()
 
@@ -62,9 +63,7 @@ def test_status_json_output_reports_repo_status(tmp_path: Path, monkeypatch, cap
     class FakeRepo:
         def __init__(self, *_args, **_kwargs) -> None:
             self.untracked_files = ["notes.txt"]
-            self.git = SimpleNamespace(
-                status=lambda *_args: "M  src/main.py\n M README.md\n?? notes.txt\n"
-            )
+            self.git = SimpleNamespace(status=lambda *_args: "M  src/main.py\n M README.md\n?? notes.txt\n")
 
         def close(self) -> None:
             return None

@@ -274,10 +274,7 @@ def test_gradle_kmp_allows_default_hierarchy_without_explicit_source_sets(tmp_pa
         "\n".join(
             [
                 '(default-maven-project-group "one.wabbit")',
-                "("
-                'gradle "demo-kmp" '
-                ':version "0.1.0" '
-                ':targets [{"kind": "jvm"} {"kind": "iosArm64"}])',
+                "(" 'gradle "demo-kmp" ' ':version "0.1.0" ' ':targets [{"kind": "jvm"} {"kind": "iosArm64"}])',
                 "",
             ]
         ),
@@ -326,7 +323,7 @@ def test_gradle_kmp_supports_kotlin_compose_plugin_feature(tmp_path: Path) -> No
                 ':version "0.1.0" '
                 ':buildModel "kmp" '
                 ':targets [{"kind": "js" "browser": true}] '
-                ':features [(kotlin-compose-plugin)])',
+                ":features [(kotlin-compose-plugin)])",
                 "",
             ]
         ),
@@ -373,14 +370,14 @@ def test_gradle_kmp_supports_js_wasm_targets_and_custom_source_set_dirs(tmp_path
                 'gradle "demo-kmp" '
                 ':version "0.1.0" '
                 ':buildModel "kmp" '
-                ':targets ['
+                ":targets ["
                 '{"kind": "jvm"} '
                 '{"kind": "js" "browser": true "browserTest": "chromeHeadless"} '
                 '{"kind": "wasmJs" "browser": true "browserTest": "chromeHeadless" "executable": true}'
-                '] '
+                "] "
                 ':kotlinFreeCompilerArgs ["-Xexpect-actual-classes"] '
                 ':dokkaSuppressSourceSets ["wasmJsMain"] '
-                ':sourceSets {'
+                ":sourceSets {"
                 '"jsMain": {"dependencies": ["npm:onnxruntime-web:1.24.3"] "kotlinSrcDirs": ["src/webShared/kotlin"]} '
                 '"wasmJsMain": {"dependencies": ["kotlin-stdlib" "npm:onnxruntime-web:1.24.3"] "kotlinSrcDirs": ["src/webShared/kotlin"]}'
                 "})",
@@ -496,15 +493,9 @@ def test_add_default_gradle_plugin_applies_to_subsequent_projects_only(tmp_path:
             [
                 '(default-maven-project-group "one.wabbit")',
                 '(define-kotlin-plugin "acyclic-gradle" "one.wabbit.acyclic:0.0.1")',
-                "("
-                'gradle "before" '
-                ':version "0.1.0" '
-                ':features [(jvm-kotlin-library)])',
+                "(" 'gradle "before" ' ':version "0.1.0" ' ":features [(jvm-kotlin-library)])",
                 '(add-default-gradle-plugin "acyclic-gradle")',
-                "("
-                'gradle "after" '
-                ':version "0.1.0" '
-                ':features [(jvm-kotlin-library)])',
+                "(" 'gradle "after" ' ':version "0.1.0" ' ":features [(jvm-kotlin-library)])",
                 "",
             ]
         ),
@@ -627,11 +618,7 @@ def test_gradle_project_loads_shadow_jar_feature(tmp_path: Path) -> None:
         "\n".join(
             [
                 '(default-maven-project-group "one.wabbit")',
-                "("
-                'gradle "demo" '
-                ':version "0.1.0" '
-                ':features [(shadow-jar :jar "demo-all.jar")]'
-                ")",
+                "(" 'gradle "demo" ' ':version "0.1.0" ' ':features [(shadow-jar :jar "demo-all.jar")]' ")",
                 "",
             ]
         ),
@@ -681,7 +668,7 @@ def test_gradle_project_accepts_kapt_dependency_modifier(tmp_path: Path) -> None
                 "("
                 'gradle "demo" '
                 ':version "0.1.0" '
-                ':features [(jvm-kotlin-library)] '
+                ":features [(jvm-kotlin-library)] "
                 ':dependencies [(dep "velocity-api" "kapt")])',
                 "",
             ]
@@ -1214,7 +1201,7 @@ def test_loads_maven_central_secret_config_and_repo_docs_project(tmp_path: Path)
                 '(repo "jeeves" :repo "wabbit-corp/jeeves" :docsProject "api" :projects [',
                 '  (gradle "api" :version "0.0.1" :features [(jvm-kotlin-library)])',
                 '  (python "audio-backend" :version "0.0.1")',
-                '])',
+                "])",
                 "",
             ]
         ),

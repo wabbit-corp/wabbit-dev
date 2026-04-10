@@ -33,8 +33,7 @@ def push(targets: str | list[str] | None = None, *, dry_run: bool = False) -> in
         info(f"Dry run: would push {len(repo_targets)} repository/repositories")
         for resolved_target in repo_targets:
             print(
-                f"  {accent(resolved_target.name)}: "
-                f"{muted('origin master + tags')} ({muted(resolved_target.path)})"
+                f"  {accent(resolved_target.name)}: " f"{muted('origin master + tags')} ({muted(resolved_target.path)})"
             )
         return 0
 

@@ -134,11 +134,15 @@ class Module:
             return False
 
         for parameter in signature.parameters.values():
-            if parameter.kind in (
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                inspect.Parameter.KEYWORD_ONLY,
-            ) and parameter.default is inspect.Parameter.empty:
+            if (
+                parameter.kind
+                in (
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
+                )
+                and parameter.default is inspect.Parameter.empty
+            ):
                 return True
         return False
 

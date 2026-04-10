@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 import jinja2
 
@@ -298,8 +298,10 @@ def _make_dependency_strings(ctx: GradleSetupContext, project: Project) -> tuple
     project_dependencies: list[str] = []
     for dep in project.resolved_dependencies:
         target = dep.target
-        if isinstance(target, MavenDependencyTarget) or isinstance(target, JarFileDependencyTarget) or isinstance(
-            target, NpmDependencyTarget
+        if (
+            isinstance(target, MavenDependencyTarget)
+            or isinstance(target, JarFileDependencyTarget)
+            or isinstance(target, NpmDependencyTarget)
         ):
             other_dependencies.append(_render_dependency_for_mode(ctx, project, dep))
             continue
@@ -507,8 +509,9 @@ def _kotlin_compiler_gradle_plugin_context(project: GradleProject) -> dict[str, 
     if plugin_context is None:
         raise ValueError(f"{project.name} uses kotlin-compiler-gradle-plugin but has no gradle_plugin_id")
 
-    plugin_tail = project.gradle_plugin_id.rsplit(".", 1)[-1] if project.gradle_plugin_id is not None else project.name
-    version_package = feature.versionPackage or f"{_package_safe_name(project.gradle_plugin_id)}.gradle"
+    plugin_id = project.gradle_plugin_id or project.name
+    plugin_tail = plugin_id.rsplit(".", 1)[-1]
+    version_package = feature.versionPackage or f"{_package_safe_name(plugin_id)}.gradle"
     version_class_name = feature.versionClassName or f"{_pascal_case(plugin_tail) or 'Plugin'}GradlePluginVersion"
     version_constant_name = feature.versionConstantName or f"{_snake_case_upper(plugin_tail)}_GRADLE_PLUGIN_VERSION"
 
@@ -816,11 +819,11 @@ def _source_set_entries(
         f"{(target.name or ('macosArm64' if target.kind == 'macosArm64' else 'macosX64' if target.kind == 'macosX64' else target.kind))}{suffix}": (
             "appleMain"
             if suffix == "Main" and target.kind in ("macosArm64", "macosX64")
-            else "appleTest"
-            if suffix == "Test" and target.kind in ("macosArm64", "macosX64")
-            else "nativeMain"
-            if suffix == "Main"
-            else "nativeTest"
+            else (
+                "appleTest"
+                if suffix == "Test" and target.kind in ("macosArm64", "macosX64")
+                else "nativeMain" if suffix == "Main" else "nativeTest"
+            )
         )
         for target in _effective_targets(project)
         if target.kind in ("macosArm64", "macosX64", "linuxX64", "mingwX64")
@@ -961,8 +964,7 @@ def _source_set_entries(
         )
     accessor_by_name = {str(entry["name"]): str(entry["accessor"]) for entry in entries}
     for entry in entries:
-        depends_on = entry["depends_on"]
-        assert isinstance(depends_on, list)
+        depends_on = list(cast(list[str], entry["depends_on"]))
         entry["depends_on_refs"] = [
             f"{parent}.get()" if accessor_by_name.get(parent) == "getting" else parent for parent in depends_on
         ]
@@ -1010,17 +1012,11 @@ def _github_pages_url(repo_full_name: str) -> str:
 
 
 def _supports_gradle_maven_central(project: GradleProject) -> bool:
-    return (
-        _is_maven_central_publishable_project(project)
-        and not _is_nested_gradle_project(project)
-    )
+    return _is_maven_central_publishable_project(project) and not _is_nested_gradle_project(project)
 
 
 def _supports_gradle_dokka_docs(project: GradleProject) -> bool:
-    return (
-        _is_dokka_docs_project(project)
-        and not _is_nested_gradle_project(project)
-    )
+    return _is_dokka_docs_project(project) and not _is_nested_gradle_project(project)
 
 
 def _is_maven_central_publishable_project(project: GradleProject) -> bool:
@@ -1165,7 +1161,9 @@ def _gradle_workflow_context_for_projects(
         _workflow_task_name(project, "publishAndReleaseToMavenCentral") for project in publish_projects
     ]
     snapshot_publish_tasks = [_workflow_task_name(project, "assertSnapshotVersion") for project in snapshot_projects]
-    snapshot_publish_tasks.extend(_workflow_task_name(project, "publishToMavenCentral") for project in snapshot_projects)
+    snapshot_publish_tasks.extend(
+        _workflow_task_name(project, "publishToMavenCentral") for project in snapshot_projects
+    )
 
     docs_tasks: list[str] = []
     docs_output_dir = "build/dokka/html"
@@ -1200,7 +1198,9 @@ def _compiler_plugin_repo_workflow_context(
 ) -> dict[str, str | bool]:
     publish_projects = [project for project in projects if _is_maven_central_publishable_project(project)]
     compiler_plugin_projects = [
-        project for project in publish_projects if isinstance(project.resolved_features.get("kotlin-compiler-plugin"), KotlinCompilerPlugin)
+        project
+        for project in publish_projects
+        if isinstance(project.resolved_features.get("kotlin-compiler-plugin"), KotlinCompilerPlugin)
     ]
     if not compiler_plugin_projects:
         raise ValueError("Compiler-plugin workflow context requires at least one compiler plugin project")
@@ -1214,12 +1214,16 @@ def _compiler_plugin_repo_workflow_context(
     if github_repo is None:
         raise ValueError(f"{repo_definition.repo_id} requires github_repo for workflow generation")
 
-    core_release_validation_tasks = [_workflow_task_name(project, "assertReleaseVersion") for project in core_publish_projects]
+    core_release_validation_tasks = [
+        _workflow_task_name(project, "assertReleaseVersion") for project in core_publish_projects
+    ]
     core_release_publish_tasks = [
         _workflow_task_name(project, "publishAndReleaseToMavenCentral") for project in core_publish_projects
     ]
     core_snapshot_tasks = [_workflow_task_name(project, "assertSnapshotVersion") for project in core_publish_projects]
-    core_snapshot_tasks.extend(_workflow_task_name(project, "publishToMavenCentral") for project in core_publish_projects)
+    core_snapshot_tasks.extend(
+        _workflow_task_name(project, "publishToMavenCentral") for project in core_publish_projects
+    )
 
     compiler_release_validation_tasks = [
         _workflow_task_name(project, "assertReleaseVersion") for project in compiler_plugin_projects
@@ -1228,7 +1232,9 @@ def _compiler_plugin_repo_workflow_context(
     compiler_release_publish_tasks = [
         _workflow_task_name(project, "publishAndReleaseToMavenCentral") for project in compiler_plugin_projects
     ]
-    compiler_snapshot_tasks = [_workflow_task_name(project, "assertSnapshotVersion") for project in compiler_plugin_projects]
+    compiler_snapshot_tasks = [
+        _workflow_task_name(project, "assertSnapshotVersion") for project in compiler_plugin_projects
+    ]
     compiler_snapshot_tasks.extend(
         _workflow_task_name(project, "publishToMavenCentral") for project in compiler_plugin_projects
     )
@@ -1245,9 +1251,7 @@ def _compiler_plugin_repo_workflow_context(
             [_workflow_task_name(project, "printBaseVersion") for project in base_version_projects],
             quiet=True,
         ),
-        "core_release_validation_command": _workflow_command(
-            core_release_validation_tasks or ["assertReleaseVersion"]
-        ),
+        "core_release_validation_command": _workflow_command(core_release_validation_tasks or ["assertReleaseVersion"]),
         "core_release_build_command": _workflow_command(["build"]),
         "core_release_publish_command": _workflow_command(["build", *core_release_publish_tasks]),
         "core_snapshot_publish_command": _workflow_command(["build", *core_snapshot_tasks]),
@@ -1324,7 +1328,7 @@ def _write_gradle_workflows(ctx: GradleSetupContext, project: GradleProject, *, 
         dev.io.delete_if_exists(docs_deploy_path)
 
 
-def _write_gradle_repo_root_workflows(
+def write_gradle_repo_root_workflows(
     ctx: GradleSetupContext,
     *,
     root_path: Path,
@@ -1360,7 +1364,9 @@ def _write_gradle_repo_root_workflows(
             )
 
     compiler_plugin_projects = [
-        project for project in publish_projects if isinstance(project.resolved_features.get("kotlin-compiler-plugin"), KotlinCompilerPlugin)
+        project
+        for project in publish_projects
+        if isinstance(project.resolved_features.get("kotlin-compiler-plugin"), KotlinCompilerPlugin)
     ]
     use_compiler_plugin_workflows = (
         repo_github_repo is not None
@@ -1370,6 +1376,7 @@ def _write_gradle_repo_root_workflows(
     )
 
     if use_compiler_plugin_workflows:
+        assert repo_definition is not None
         workflow_context = _compiler_plugin_repo_workflow_context(
             root_path=root_path,
             repo_definition=repo_definition,
@@ -1378,12 +1385,16 @@ def _write_gradle_repo_root_workflows(
         )
         dev.io.write_text_file(
             release_publish_path,
-            clean_text(render_template(ctx.gradle_compiler_plugin_release_publish_workflow_template, **workflow_context)),
+            clean_text(
+                render_template(ctx.gradle_compiler_plugin_release_publish_workflow_template, **workflow_context)
+            ),
         )
         if any(project.publish_snapshots for project in publish_projects):
             dev.io.write_text_file(
                 snapshot_publish_path,
-                clean_text(render_template(ctx.gradle_compiler_plugin_snapshot_publish_workflow_template, **workflow_context)),
+                clean_text(
+                    render_template(ctx.gradle_compiler_plugin_snapshot_publish_workflow_template, **workflow_context)
+                ),
             )
         else:
             dev.io.delete_if_exists(snapshot_publish_path)
@@ -1491,7 +1502,7 @@ def _nested_gradle_project_keeps_license(ctx: GradleSetupContext, project: Gradl
     return len(normalized_licenses) != 1
 
 
-def _mark_executable(path: Path) -> None:
+def mark_executable(path: Path) -> None:
     if not path.exists():
         return
     current_mode = path.stat().st_mode
@@ -1710,10 +1721,9 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
     kotlin_compiler_plugin_context = _kotlin_compiler_plugin_context(project)
     kotlin_compiler_gradle_plugin_context = _kotlin_compiler_gradle_plugin_context(project)
     intellij_feature = template_features.get("intellij-plugin")
-    use_intellij_platform_gradle_plugin_v2 = (
-        isinstance(intellij_feature, IntellijPlugin)
-        and _uses_intellij_platform_gradle_plugin_v2(intellij_feature)
-    )
+    use_intellij_platform_gradle_plugin_v2 = isinstance(
+        intellij_feature, IntellijPlugin
+    ) and _uses_intellij_platform_gradle_plugin_v2(intellij_feature)
     _materialize_gradle_plugin_version_resources(project)
 
     if project.is_kmp:
@@ -1830,6 +1840,10 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
 
     if nested_gradle_project:
         _cleanup_nested_gradle_project_files(project)
+        dev.io.write_text_file(
+            project.path / ".gitignore",
+            clean_text(render_template(ctx.gradle_gitignore_template)),
+        )
         if not _nested_gradle_project_keeps_license(ctx, project):
             dev.io.delete_if_exists(project.path / "LICENSE.md")
             dev.io.delete_if_exists(project.path / "LICENSES")
@@ -1884,7 +1898,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
 
         dev.io.copy(ctx.repo_template / "gradle-files" / "gradlew", project.path / "gradlew")
         dev.io.copy(ctx.repo_template / "gradle-files" / "gradlew.bat", project.path / "gradlew.bat")
-        _mark_executable(project.path / "gradlew")
+        mark_executable(project.path / "gradlew")
         dev.io.copy(
             ctx.repo_template / "gradle-files" / "gradle" / "wrapper" / "gradle-wrapper.jar",
             project.path / "gradle" / "wrapper" / "gradle-wrapper.jar",

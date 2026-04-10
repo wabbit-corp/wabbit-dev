@@ -19,7 +19,7 @@ import zipfile
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
-from typing import BinaryIO, NamedTuple
+from typing import BinaryIO, NamedTuple, Protocol, cast
 
 type IgnorePathPredicate = Callable[[str, bool], bool]
 
@@ -80,11 +80,17 @@ class TreeStats:
 
 
 class NullProgress:
-    def update(self, _count: int = 1) -> None:
+    def update(self, count: int = 1) -> None:
         pass
 
     def close(self) -> None:
         pass
+
+
+class ProgressReporter(Protocol):
+    def update(self, count: int = 1) -> None: ...
+
+    def close(self) -> None: ...
 
 
 class SimpleProgress:
@@ -164,7 +170,7 @@ def file_group_sort_key(group: FileGroup) -> tuple[int, int, int, list[str]]:
     )
 
 
-def tree_group_sort_key(group: TreeGroup) -> tuple[int, int, int, int, list[str]]:
+def tree_group_sort_key(group: TreeGroup) -> tuple[int, int, int, int, int, list[str]]:
     return (
         -duplicate_space_savings(group.tree_size, group.total_count),
         -group.tree_size,
@@ -182,14 +188,17 @@ def should_render_progress() -> bool:
     return os.environ.get("TERM", "") != "dumb"
 
 
-def create_progress(desc: str, *, total: int | None, unit: str) -> object:
+def create_progress(desc: str, *, total: int | None, unit: str) -> ProgressReporter:
     if not should_render_progress():
         return NullProgress()
     try:
         from tqdm import tqdm
     except ImportError:
         return SimpleProgress(desc, total, unit)
-    return tqdm(total=total, desc=desc, unit=unit, dynamic_ncols=True, file=sys.stderr, leave=False)
+    return cast(
+        ProgressReporter,
+        tqdm(total=total, desc=desc, unit=unit, dynamic_ncols=True, file=sys.stderr, leave=False),
+    )
 
 
 @dataclass
@@ -377,12 +386,14 @@ class ArchiveTree:
         record = self.file_records[entry_id]
         if record.small_hash is None:
             self.populate_missing_small_hashes([entry_id])
+        assert record.small_hash is not None
         return record.small_hash
 
     def get_file_full_hash(self, entry_id: str) -> bytes:
         record = self.file_records[entry_id]
         if record.full_hash is None:
             self.populate_missing_full_hashes([entry_id])
+        assert record.full_hash is not None
         return record.full_hash
 
     def populate_missing_small_hashes(self, entry_ids: Iterable[str] | None = None) -> None:
@@ -407,7 +418,9 @@ class ArchiveTree:
         return hashobj.digest()
 
     def _populate_missing_hashes(self, entry_ids: Iterable[str] | None, *, first_chunk_only: bool) -> None:
-        target_ids = sorted(set(entry_ids or self.file_records), key=lambda entry_id: self.file_records[entry_id].member_name)
+        target_ids = sorted(
+            set(entry_ids or self.file_records), key=lambda entry_id: self.file_records[entry_id].member_name
+        )
         if first_chunk_only:
             missing_ids = [entry_id for entry_id in target_ids if self.file_records[entry_id].small_hash is None]
         else:
@@ -422,7 +435,7 @@ class ArchiveTree:
                     record = self.file_records[entry_id]
                     try:
                         with zf.open(record.member_name) as f:
-                            digest = self._read_member_hash(f, first_chunk_only=first_chunk_only)
+                            digest = self._read_member_hash(cast(BinaryIO, f), first_chunk_only=first_chunk_only)
                     except (OSError, KeyError, RuntimeError, zipfile.BadZipFile):
                         digest = self._get_unreadable_member_hash(
                             record.member_name,
@@ -502,13 +515,10 @@ def get_sparse_stream_hash(fobj: BinaryIO, size: int) -> bytes:
 
 
 def get_stream_hash(fobj: BinaryIO) -> bytes:
-    try:
-        return hashlib.file_digest(fobj, "sha256").digest()
-    except AttributeError:
-        hashobj = hashlib.sha256()
-        for chunk in chunk_reader(fobj):
-            hashobj.update(chunk)
-        return hashobj.digest()
+    hashobj = hashlib.sha256()
+    for chunk in chunk_reader(fobj):
+        hashobj.update(chunk)
+    return hashobj.digest()
 
 
 def get_hash(filename: str, first_chunk_only: bool = False) -> bytes:
@@ -526,8 +536,8 @@ def get_head_hash(filename: str) -> bytes:
 def get_zip_member_hash(archive_path: str, member_name: str, first_chunk_only: bool = False) -> bytes:
     with zipfile.ZipFile(archive_path) as zf, zf.open(member_name) as f:
         if first_chunk_only:
-            return get_head_stream_hash(f)
-        return get_stream_hash(f)
+            return get_head_stream_hash(cast(BinaryIO, f))
+        return get_stream_hash(cast(BinaryIO, f))
 
 
 def zip_info_is_encrypted(info: zipfile.ZipInfo) -> bool:
@@ -551,9 +561,13 @@ def encode_int(value: int) -> bytes:
     return value.to_bytes(16, "big", signed=False)
 
 
-def update_hash_part(hashobj: object, data: bytes) -> None:
-    hashobj.update(encode_int(len(data)))  # type: ignore[attr-defined]
-    hashobj.update(data)  # type: ignore[attr-defined]
+class HashUpdater(Protocol):
+    def update(self, data: bytes, /) -> object: ...
+
+
+def update_hash_part(hashobj: HashUpdater, data: bytes) -> None:
+    hashobj.update(encode_int(len(data)))
+    hashobj.update(data)
 
 
 def group_duplicate_paths(
@@ -824,9 +838,7 @@ def build_archive_summary(
 
 
 def iter_zip_archives(index: FilesystemTreeIndex) -> list[str]:
-    archive_paths = sorted(
-        path for path in index.file_records if os.path.basename(path).lower().endswith(".zip")
-    )
+    archive_paths = sorted(path for path in index.file_records if os.path.basename(path).lower().endswith(".zip"))
     return archive_paths
 
 
@@ -1016,9 +1028,7 @@ def split_weak_groups_for_encrypted_zips(
 
     for group in weak_groups:
         sorted_group = sorted(group)
-        encrypted_zip_paths = [
-            path for path in sorted_group if is_encrypted_zip_root(path, archive_summaries)
-        ]
+        encrypted_zip_paths = [path for path in sorted_group if is_encrypted_zip_root(path, archive_summaries)]
         if not encrypted_zip_paths:
             strong_eligible_groups.append(sorted_group)
             continue
@@ -1172,7 +1182,9 @@ def find_duplicate_tree_groups_in_index(
 
     zip_metadata_groups: list[list[str]] = []
     zip_metadata_candidates = flatten_groups(zip_only_weak_groups)
-    progress = create_progress("Hashing zip tree candidates (metadata)", total=len(zip_metadata_candidates), unit="trees")
+    progress = create_progress(
+        "Hashing zip tree candidates (metadata)", total=len(zip_metadata_candidates), unit="trees"
+    )
     try:
         zip_metadata_groups = build_groups_by_key(
             zip_only_weak_groups,
@@ -1276,7 +1288,9 @@ def find_duplicate_tree_groups_in_index(
             preload_zip_tree_hashes(group, archive_trees, first_chunk_only=False)
             confirmed_groups = group_duplicate_paths(
                 group,
-                lambda path: get_tree_fingerprint(path, DIR_FINGERPRINT_STRONG, index, archive_summaries, archive_trees),
+                lambda path: get_tree_fingerprint(
+                    path, DIR_FINGERPRINT_STRONG, index, archive_summaries, archive_trees
+                ),
                 progress=progress,
             )
             for confirmed_group in confirmed_groups:

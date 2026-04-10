@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 from dev.checks.base import FileCheck, FileContext, IssueType
 from dev.licenses import python_spdx_for_license
@@ -11,9 +11,7 @@ E_INCORRECT_SPDX_HEADER = IssueType(
     "File is missing the expected SPDX header ({expected}).",
 )
 
-_SPDX_HEADER_RE = re.compile(
-    r"^(?P<prefix>\s*(?://|#|--)\s*)SPDX-License-Identifier:\s*(?P<identifier>[^\s]+)\s*$"
-)
+_SPDX_HEADER_RE = re.compile(r"^(?P<prefix>\s*(?://|#|--)\s*)SPDX-License-Identifier:\s*(?P<identifier>[^\s]+)\s*$")
 
 _COMMENT_PREFIX_BY_SUFFIX: dict[str, str] = {
     ".c": "//",

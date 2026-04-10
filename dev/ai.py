@@ -6,13 +6,16 @@ import re
 import shlex
 import subprocess
 import textwrap
+from collections.abc import Sequence
 from pathlib import Path
+from typing import NoReturn, Protocol
 
 import jinja2
 import openai
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
     ChatCompletionMessage,
+    ChatCompletionMessageFunctionToolCall,
     ChatCompletionMessageFunctionToolCallParam,
     ChatCompletionMessageParam,
     ChatCompletionToolMessageParam,
@@ -28,7 +31,8 @@ from dev.caching import DEFAULT_CACHE_DB_PATH, cache
 from dev.config import load_config
 from dev.file_properties import get_expected_file_properties
 from dev.io import read_ignore_file, read_text_file, walk_files
-from dev.json_utils import as_dict, as_list
+from dev.json_types import JSONValue
+from dev.json_utils import as_dict, as_list, as_string_list
 
 # Keep this prompt aligned with AGENTS.md > Commit Message Policy.
 SUGGEST_COMMIT_PROMPT = textwrap.dedent("""
@@ -102,6 +106,51 @@ GIT_TOOL_ALLOWED_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 
+class ChatCompletionMessageLike(Protocol):
+    @property
+    def content(self) -> str | None: ...
+
+    @property
+    def tool_calls(self) -> Sequence[ChatCompletionMessageFunctionToolCall] | None: ...
+
+
+class ChatCompletionChoiceLike(Protocol):
+    @property
+    def message(self) -> ChatCompletionMessageLike: ...
+
+    @property
+    def finish_reason(self) -> str | None: ...
+
+
+class ChatCompletionResponseLike(Protocol):
+    @property
+    def choices(self) -> list[ChatCompletionChoiceLike]: ...
+
+
+class ChatCompletionsLike(Protocol):
+    def create(
+        self,
+        *,
+        messages: list[ChatCompletionMessageParam],
+        model: str,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        tools: list[ChatCompletionToolParam] | None = None,
+        tool_choice: str | None = None,
+    ) -> ChatCompletionResponseLike: ...
+
+
+class ChatNamespaceLike(Protocol):
+    @property
+    def completions(self) -> ChatCompletionsLike: ...
+
+
+class OpenAIChatClientLike(Protocol):
+    @property
+    def chat(self) -> ChatNamespaceLike: ...
+
+
 def ensure_semver_impact_line(commit_message: str) -> str:
     message = commit_message.strip()
     if not message:
@@ -147,6 +196,10 @@ def _render_readme_prompt_template(template_text: str, *, project_id: str, notes
             "default-company-email",
         ),
     )
+
+
+def render_readme_prompt_template(template_text: str, *, project_id: str, notes: str) -> str:
+    return _render_readme_prompt_template(template_text, project_id=project_id, notes=notes)
 
 
 def run_safe_git_tool_command(command: str, /, repo_path: Path | str | None) -> dict[str, object]:
@@ -213,7 +266,9 @@ def _extract_full_commit_message(message_content: str | None) -> str:
     return stripped
 
 
-def _assistant_message_to_param(message: ChatCompletionMessage) -> ChatCompletionAssistantMessageParam:
+def _assistant_message_to_param(
+    message: ChatCompletionMessageLike | ChatCompletionMessage,
+) -> ChatCompletionAssistantMessageParam:
     assistant_message: ChatCompletionAssistantMessageParam = {"role": "assistant"}
 
     if message.content is not None:
@@ -222,7 +277,7 @@ def _assistant_message_to_param(message: ChatCompletionMessage) -> ChatCompletio
     if message.tool_calls:
         tool_calls: list[ChatCompletionMessageFunctionToolCallParam] = []
         for tool_call in message.tool_calls:
-            if tool_call.type != "function":
+            if not isinstance(tool_call, ChatCompletionMessageFunctionToolCall):
                 continue
             tool_calls.append(
                 {
@@ -363,7 +418,9 @@ def suggest_commit_name(modified: str, /, api_key: str, repo_path: Path | str | 
         )
 
     if final_message_content is None:
-        raise RuntimeError("suggest_commit_name failed: model did not return a final commit message after 8 tool rounds")
+        raise RuntimeError(
+            "suggest_commit_name failed: model did not return a final commit message after 8 tool rounds"
+        )
 
     return ensure_semver_impact_line(_extract_full_commit_message(final_message_content))
 
@@ -509,7 +566,7 @@ def answer_about_file(
     question: str,
     /,
     api_key: str | None = None,
-    client: openai.Client | None = None,
+    client: openai.Client | OpenAIChatClientLike | None = None,
 ) -> str:
     if client is None:
         assert api_key is not None, "API key is required"
@@ -593,6 +650,10 @@ def _agent_tools() -> list[ChatCompletionToolParam]:
     ]
 
 
+def agent_tools() -> list[ChatCompletionToolParam]:
+    return _agent_tools()
+
+
 def _summarize_agent_tool_arguments(tool_name: str, tool_arguments: object) -> str:
     tool_arguments_obj = as_dict(tool_arguments)
     if tool_arguments_obj is None:
@@ -600,7 +661,7 @@ def _summarize_agent_tool_arguments(tool_name: str, tool_arguments: object) -> s
 
     if tool_name == "request_to_developer":
         raw_paths = tool_arguments_obj.get("paths")
-        paths = raw_paths if isinstance(raw_paths, list) else []
+        paths = as_string_list(raw_paths)
         task_or_question = tool_arguments_obj.get("task_or_question")
         task_length = len(task_or_question) if isinstance(task_or_question, str) else 0
         return f"paths_count={len(paths)} task_chars={task_length}"
@@ -624,7 +685,7 @@ def _summarize_agent_tool_result(result: object) -> str:
     return f"type={type(result).__name__}"
 
 
-def _raise_agent_call_error(message: str) -> None:
+def _raise_agent_call_error(message: str) -> NoReturn:
     raise RuntimeError(f"agent_call failed: {message}")
 
 
@@ -649,7 +710,7 @@ def agent_call(
     task: str,
     /,
     api_key: str | None = None,
-    client: openai.Client | None = None,
+    client: openai.Client | OpenAIChatClientLike | None = None,
 ) -> str:
     if client is None:
         assert api_key is not None, "API key is required"
@@ -697,8 +758,7 @@ def agent_call(
         if escaped_paths:
             return {
                 "error": (
-                    f"Paths escape repository root: {escaped_paths}. "
-                    "Please provide repository-relative file paths."
+                    f"Paths escape repository root: {escaped_paths}. " "Please provide repository-relative file paths."
                 )
             }
 
@@ -772,7 +832,7 @@ def agent_call(
                 tool_name = tool_function.name
                 invalid_arguments_error: str | None = None
                 try:
-                    tool_arguments: object = json.loads(tool_function.arguments)
+                    tool_arguments: JSONValue | None = json.loads(tool_function.arguments)
                 except json.JSONDecodeError as ex:
                     tool_arguments = None
                     invalid_arguments_error = ex.msg
@@ -784,66 +844,72 @@ def agent_call(
                 )
 
                 if tool_arguments is None:
-                    result: object = {
+                    result: JSONValue = {
                         "error": f"Invalid JSON tool arguments for {tool_name}: {invalid_arguments_error or 'invalid JSON'}",
                     }
                     logging.info("Tool %s returned %s", tool_name, _summarize_agent_tool_result(result))
-                    msg: ChatCompletionToolMessageParam = {
+                    invalid_json_message: ChatCompletionToolMessageParam = {
                         "tool_call_id": tool_id,
                         "role": "tool",
                         "content": json.dumps(result, ensure_ascii=False),
                     }
-                    messages.append(msg)
+                    messages.append(invalid_json_message)
                     continue
 
-                tool_arguments_obj = as_dict(tool_arguments)
-
                 if tool_name == "request_to_developer":
-                    raw_paths = None if tool_arguments_obj is None else tool_arguments_obj.get("paths")
-                    question = None if tool_arguments_obj is None else tool_arguments_obj.get("task_or_question")
-                    if not isinstance(raw_paths, list) or not all(isinstance(path, str) for path in raw_paths):
-                        result = {"error": "Missing or invalid tool argument: paths"}
-                    elif not isinstance(question, str):
-                        result = {"error": "Missing or invalid tool argument: task_or_question"}
-                    else:
-                        result = answer(raw_paths, question)
+                    match tool_arguments:
+                        case {"paths": list() as raw_paths, "task_or_question": str() as question}:
+                            paths: list[str] = []
+                            invalid_paths = False
+                            for raw_path in raw_paths:
+                                if isinstance(raw_path, str):
+                                    paths.append(raw_path)
+                                else:
+                                    invalid_paths = True
+                                    break
+                            if invalid_paths or not paths:
+                                result = {"error": "Missing or invalid tool argument: paths"}
+                            else:
+                                result = answer(paths, question)
+                        case _:
+                            result = {"error": "Missing or invalid tool argument: paths"}
 
                     logging.info("Tool %s returned %s", tool_name, _summarize_agent_tool_result(result))
 
-                    msg: ChatCompletionToolMessageParam = {
+                    tool_message: ChatCompletionToolMessageParam = {
                         "tool_call_id": tool_id,
                         "role": "tool",
                         "content": json.dumps(result, ensure_ascii=False),
                     }
 
-                    messages.append(msg)
+                    messages.append(tool_message)
 
                 elif tool_name == "answer":
-                    if tool_arguments_obj is None or "result" not in tool_arguments_obj:
-                        result = {"error": "Missing tool argument: result"}
-                        logging.info("Tool %s returned %s", tool_name, _summarize_agent_tool_result(result))
-                        msg = {
-                            "tool_call_id": tool_id,
-                            "role": "tool",
-                            "content": json.dumps(result, ensure_ascii=False),
-                        }
-                        messages.append(msg)
-                        continue
-
-                    result = tool_arguments_obj["result"]
-                    if isinstance(result, str):
-                        pending_answer_result = result
-                    else:
-                        pending_answer_result = json.dumps(result, ensure_ascii=False)
+                    match tool_arguments:
+                        case {"result": result_value}:
+                            if isinstance(result_value, str):
+                                pending_answer_result = result_value
+                            else:
+                                pending_answer_result = json.dumps(result_value, ensure_ascii=False)
+                        case _:
+                            result = {"error": "Missing tool argument: result"}
+                            logging.info("Tool %s returned %s", tool_name, _summarize_agent_tool_result(result))
+                            missing_result_tool_message: ChatCompletionToolMessageParam = {
+                                "tool_call_id": tool_id,
+                                "role": "tool",
+                                "content": json.dumps(result, ensure_ascii=False),
+                            }
+                            messages.append(missing_result_tool_message)
+                            continue
                 else:
                     result = {"error": f"Unknown tool: {tool_name}"}
                     logging.info("Tool %s returned %s", tool_name, _summarize_agent_tool_result(result))
-                    msg = {
+                    unknown_tool_message: ChatCompletionToolMessageParam = {
                         "tool_call_id": tool_id,
                         "role": "tool",
                         "content": json.dumps(result, ensure_ascii=False),
                     }
-                    messages.append(msg)
+                    messages.append(unknown_tool_message)
 
             if pending_answer_result is not None:
                 return pending_answer_result

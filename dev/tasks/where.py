@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TypedDict
 
 from dev.config import find_workspace_root, load_config
 from dev.messages import accent, command_text, heading, muted
@@ -26,13 +27,37 @@ REPO_DEFAULT_COMMANDS: tuple[str, ...] = (
     "status",
 )
 
+
+class CurrentProjectPayload(TypedDict):
+    projectId: str
+    path: str
+
+
+class CurrentRepoPayload(TypedDict):
+    target: str
+    repoId: str | None
+    path: str
+
+
+class WherePayload(TypedDict):
+    cwd: str
+    workspaceRoot: str | None
+    configError: str | None
+    currentProject: CurrentProjectPayload | None
+    currentRepo: CurrentRepoPayload | None
+    defaultProjectTarget: str | None
+    defaultRepoTarget: str | None
+    projectDefaultCommands: list[str]
+    repoDefaultCommands: list[str]
+
+
 def _path_string(path: Path | None) -> str | None:
     if path is None:
         return None
     return str(path.resolve())
 
 
-def where_payload() -> dict[str, object]:
+def where_payload() -> WherePayload:
     config_error: str | None = None
     config = None
     workspace_root = find_workspace_root()
@@ -46,27 +71,27 @@ def where_payload() -> dict[str, object]:
     default_project_targets = inferred_project_targets(config, None) if config is not None else None
     default_repo_targets = inferred_repo_targets(config, None) if config is not None else None
 
+    current_project: CurrentProjectPayload | None = None
+    if context.current_project_id is not None and context.current_project_path is not None:
+        current_project = {
+            "projectId": context.current_project_id,
+            "path": str(context.current_project_path.resolve()),
+        }
+
+    current_repo: CurrentRepoPayload | None = None
+    if context.current_repo_target is not None and context.current_repo_path is not None:
+        current_repo = {
+            "target": context.current_repo_target,
+            "repoId": context.current_repo_id,
+            "path": str(context.current_repo_path.resolve()),
+        }
+
     return {
         "cwd": str(context.cwd),
         "workspaceRoot": _path_string(context.workspace_root),
         "configError": config_error,
-        "currentProject": (
-            {
-                "projectId": context.current_project_id,
-                "path": _path_string(context.current_project_path),
-            }
-            if context.current_project_id is not None and context.current_project_path is not None
-            else None
-        ),
-        "currentRepo": (
-            {
-                "target": context.current_repo_target,
-                "repoId": context.current_repo_id,
-                "path": _path_string(context.current_repo_path),
-            }
-            if context.current_repo_target is not None and context.current_repo_path is not None
-            else None
-        ),
+        "currentProject": current_project,
+        "currentRepo": current_repo,
         "defaultProjectTarget": default_project_targets[0] if default_project_targets else None,
         "defaultRepoTarget": default_repo_targets[0] if default_repo_targets else None,
         "projectDefaultCommands": list(PROJECT_DEFAULT_COMMANDS),
@@ -86,7 +111,7 @@ def render_where_lines() -> list[str]:
         lines.append(f"{accent('Config load error', 'red')}: {config_error}")
 
     current_project = payload["currentProject"]
-    if isinstance(current_project, dict):
+    if current_project is not None:
         lines.append(
             f"{heading('Current project')}: "
             f"{accent(current_project['projectId'])} ({muted(current_project['path'])})"
@@ -95,11 +120,8 @@ def render_where_lines() -> list[str]:
         lines.append(f"{heading('Current project')}: -")
 
     current_repo = payload["currentRepo"]
-    if isinstance(current_repo, dict):
-        lines.append(
-            f"{heading('Current repo')}: "
-            f"{accent(current_repo['target'])} ({muted(current_repo['path'])})"
-        )
+    if current_repo is not None:
+        lines.append(f"{heading('Current repo')}: " f"{accent(current_repo['target'])} ({muted(current_repo['path'])})")
     else:
         lines.append(f"{heading('Current repo')}: -")
 

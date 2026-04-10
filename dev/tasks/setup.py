@@ -1,4 +1,5 @@
 import dataclasses
+import inspect
 import io
 import json
 import os
@@ -190,8 +191,6 @@ def setup_project(
             if project.github_repo not in ctx.known_repo_names:
                 error(f"Remote repository {project.github_repo} does not exist")
                 return
-        else:
-            warning("GitHub API unavailable; skipping remote existence check.")
 
         # Each project should have a .git directory
         if is_github_repo_set:
@@ -417,6 +416,17 @@ def _managed_html_comment(text: str, *, body_lines: list[str]) -> str:
     )
 
 
+def _repo_root_gitignore_text(ctx: RepoSetupContext, repo_projects: list[Project]) -> str:
+    sections = [render_template(ctx.gitignore_template).strip()]
+    if any(isinstance(project, GradleProject) for project in repo_projects):
+        sections.append(render_template(ctx.gradle_gitignore_template).strip())
+    if any(isinstance(project, PythonProject) for project in repo_projects):
+        sections.append(render_template(ctx.python_gitignore_template).strip())
+    if any(isinstance(project, PurescriptProject) for project in repo_projects):
+        sections.append(render_template(ctx.purescript_gitignore_template).strip())
+    return clean_text("\n\n".join(section for section in sections if section))
+
+
 def _write_repo_metadata_files(ctx: RepoSetupContext, projects: list[Project]) -> list[str]:
     repo_roots = {project_repo_root(project).resolve() for project in projects}
     written_roots: list[str] = []
@@ -439,6 +449,8 @@ def _write_repo_metadata_files(ctx: RepoSetupContext, projects: list[Project]) -
 
         wrote_any = False
         repo_root.mkdir(parents=True, exist_ok=True)
+        dev.io.write_text_file(repo_root / ".gitignore", _repo_root_gitignore_text(ctx, repo_projects))
+        wrote_any = True
         if plan.requires_editorconfig:
             editorconfig_text = _managed_hash_comment(
                 render_template(ctx.editorconfig_template, line_length=plan.editorconfig_line_length),
@@ -712,7 +724,9 @@ def _workspace_dependency_substitutions(
 ) -> list[WorkspaceDependencySubstitution]:
     substitutions: list[WorkspaceDependencySubstitution] = []
     seen: set[str] = set()
-    reachable_keys = {_gradle_project_key(project) for project in _collect_reachable_gradle_projects(config, included_projects)}
+    reachable_keys = {
+        _gradle_project_key(project) for project in _collect_reachable_gradle_projects(config, included_projects)
+    }
 
     for project in included_projects:
         project_key = _gradle_project_key(project)
@@ -907,7 +921,7 @@ def _write_gradle_root_files(
         )
         dev.io.copy(ctx.repo_template / "gradle-files" / "gradlew", root_path / "gradlew")
         dev.io.copy(ctx.repo_template / "gradle-files" / "gradlew.bat", root_path / "gradlew.bat")
-        setup_kotlin._mark_executable(root_path / "gradlew")
+        setup_kotlin.mark_executable(root_path / "gradlew")
         dev.io.copy(
             ctx.repo_template / "gradle-files" / "gradle" / "wrapper" / "gradle-wrapper.jar",
             root_path / "gradle" / "wrapper" / "gradle-wrapper.jar",
@@ -932,7 +946,8 @@ def _repo_gradle_workflow_java_version(ctx: RepoSetupContext, projects: list[Gra
     if not projects:
         return ctx.config.java_version
     return max(
-        setup_kotlin.java_version_for_features(ctx.config.java_version, project.resolved_features) for project in projects
+        setup_kotlin.java_version_for_features(ctx.config.java_version, project.resolved_features)
+        for project in projects
     )
 
 
@@ -969,7 +984,7 @@ def setup_gradle_repo_root(ctx: RepoSetupContext, project: GradleProject) -> Non
         defined_docs_project = ctx.config.defined_projects.get(repo_definition.docs_project_id)
         if isinstance(defined_docs_project, GradleProject):
             docs_project = defined_docs_project
-    setup_kotlin._write_gradle_repo_root_workflows(
+    setup_kotlin.write_gradle_repo_root_workflows(
         ctx,
         root_path=repo_definition.path,
         repo_github_repo=repo_definition.github_repo,
@@ -1273,7 +1288,12 @@ def commit_repo_changes(
             repo.index.commit(commit_name)
 
 
-def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupContext:
+def create_repo_setup_context(
+    config: Config,
+    mode: RepoSetupMode,
+    *,
+    require_github_api: bool = False,
+) -> RepoSetupContext:
     from github import Github
     from github.GithubException import GithubException
     from requests.exceptions import RequestException
@@ -1284,7 +1304,8 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
     is_github_api_available = False
 
     if not config.github_token:
-        warning("GitHub token not set; proceeding without GitHub API.")
+        if require_github_api:
+            warning("GitHub token not set; proceeding without GitHub API.")
     else:
         try:
             gh = Github(login_or_token=config.github_token, retry=0)
@@ -1307,11 +1328,14 @@ def create_repo_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupC
 
             is_github_api_available = True
         except TimeoutError as ex:
-            warning(f"GitHub API timed out; proceeding without API: {ex}")
+            if require_github_api:
+                warning(f"GitHub API timed out; proceeding without API: {ex}")
         except (GithubException, RequestException, OSError) as ex:
-            warning(f"GitHub API unavailable; proceeding without API: {ex}")
+            if require_github_api:
+                warning(f"GitHub API unavailable; proceeding without API: {ex}")
         except ValueError as ex:
-            warning(f"GitHub API error; proceeding without API: {ex}")
+            if require_github_api:
+                warning(f"GitHub API error; proceeding without API: {ex}")
 
     if not is_github_api_available:
         all_repos = []
@@ -1458,7 +1482,6 @@ def setup(
 
     def run() -> int:
         config = load_config()
-        ctx = create_repo_setup_context(config, mode)
         effective_selected_projects_input = inferred_project_targets(config, selected_projects_input)
         if selected_projects_input is None and effective_selected_projects_input is not None:
             payload["inferredTargets"] = list(effective_selected_projects_input)
@@ -1479,6 +1502,12 @@ def setup(
         payload["selectedProjectIds"] = list(selected_project_names)
         selected_projects = [config.defined_projects[name] for name in selected_project_names]
         payload["projects"] = [project_payload(project_item) for project_item in selected_projects]
+        requires_github_api = any(project_item.github_repo is not None for project_item in selected_projects)
+        create_ctx_signature = inspect.signature(create_repo_setup_context)
+        if "require_github_api" in create_ctx_signature.parameters:
+            ctx = create_repo_setup_context(config, mode, require_github_api=requires_github_api)
+        else:
+            ctx = create_repo_setup_context(config, mode)
 
         if effective_selected_projects_input is None:
             info(f"Setting up projects in {mode.value} mode")
@@ -1489,7 +1518,9 @@ def setup(
                 target_label = ", ".join(effective_selected_projects_input)
             info(f"Setting up {target_label} and its dependencies in {mode.value} mode")
 
-        gradle_projects = [project_item for project_item in selected_projects if isinstance(project_item, GradleProject)]
+        gradle_projects = [
+            project_item for project_item in selected_projects if isinstance(project_item, GradleProject)
+        ]
         if gradle_projects:
             if effective_selected_projects_input is None:
                 workspace_seed_projects = gradle_projects
@@ -1581,7 +1612,9 @@ def setup(
             if effective_selected_projects_input is None and gradle_projects:
                 overlay_roots.add(Path("."))
             overlay_roots.update(project_item.effective_gradle_root for project_item in gradle_projects)
-            payload["localOverlayRootsRemoved"] = [str(overlay_root.resolve()) for overlay_root in sorted(overlay_roots)]
+            payload["localOverlayRootsRemoved"] = [
+                str(overlay_root.resolve()) for overlay_root in sorted(overlay_roots)
+            ]
             for overlay_root in sorted(overlay_roots):
                 _delete_gradle_local_overlay(root_path=overlay_root)
 

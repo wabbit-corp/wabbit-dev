@@ -10,8 +10,8 @@ from dev.config import (
     GradleProject,
     Project,
     PythonProject,
-    _source_set_is_allowed_for_platforms,
     load_config,
+    source_set_is_allowed_for_platforms,
 )
 from dev.ignore_files import IgnoreMatcher
 from dev.licenses import license_display_name, license_spdx_url
@@ -342,47 +342,45 @@ class KmpSourceLayoutDriftCheck(ProjectCheck):
         issues: list[Issue] = []
         known_source_set_names = kmp_known_source_set_names(project)
         declared_source_roots = {
-            root_path
-            for source_roots in kmp_declared_source_root_paths(project).values()
-            for root_path in source_roots
+            root_path for source_roots in kmp_declared_source_root_paths(project).values() for root_path in source_roots
         }
 
         for source_root in existing_custom_kmp_source_roots(project):
             if source_root not in declared_source_roots:
                 issues.append(
-                    E_KMP_CUSTOM_SOURCE_ROOT_UNDECLARED.make(relative_path=_relative_to_project(project, source_root)).at(
-                        source_root
-                    )
+                    E_KMP_CUSTOM_SOURCE_ROOT_UNDECLARED.make(
+                        relative_path=_relative_to_project(project, source_root)
+                    ).at(source_root)
                 )
 
         for source_roots in kmp_declared_source_root_paths(project).values():
             for source_root in source_roots:
                 if not source_root.exists():
                     issues.append(
-                        E_KMP_DECLARED_SOURCE_ROOT_MISSING.make(relative_path=_relative_to_project(project, source_root)).at(
-                            source_root
-                        )
+                        E_KMP_DECLARED_SOURCE_ROOT_MISSING.make(
+                            relative_path=_relative_to_project(project, source_root)
+                        ).at(source_root)
                     )
                     continue
                 if not _has_source_files(source_root):
                     issues.append(
-                        E_KMP_DECLARED_SOURCE_ROOT_EMPTY.make(relative_path=_relative_to_project(project, source_root)).at(
-                            source_root
-                        )
+                        E_KMP_DECLARED_SOURCE_ROOT_EMPTY.make(
+                            relative_path=_relative_to_project(project, source_root)
+                        ).at(source_root)
                     )
 
         for source_set_name, source_set_dir in kmp_source_set_directories(project).items():
             if source_set_name in known_source_set_names:
                 if (
                     source_set_name in CANONICAL_KMP_SOURCE_SET_REQUIREMENTS
-                    and not _source_set_is_allowed_for_platforms(source_set_name, project.platforms)
+                    and not source_set_is_allowed_for_platforms(source_set_name, project.platforms)
                 ):
                     issues.append(
                         E_KMP_PLATFORM_SOURCE_SET_WITHOUT_TARGET.make(source_set=source_set_name).at(source_set_dir)
                     )
                 continue
             if source_set_name in CANONICAL_KMP_SOURCE_SET_REQUIREMENTS:
-                if not _source_set_is_allowed_for_platforms(source_set_name, project.platforms):
+                if not source_set_is_allowed_for_platforms(source_set_name, project.platforms):
                     issues.append(
                         E_KMP_PLATFORM_SOURCE_SET_WITHOUT_TARGET.make(source_set=source_set_name).at(source_set_dir)
                     )
@@ -665,18 +663,18 @@ class GradleManifestResourceDriftCheck(ProjectCheck):
         for manifest_path in existing_android_manifest_paths(project):
             if manifest_path not in expected_manifests:
                 issues.append(
-                    E_GRADLE_UNDECLARED_MANIFEST_PATH.make(relative_path=_relative_to_project(project, manifest_path)).at(
-                        manifest_path
-                    )
+                    E_GRADLE_UNDECLARED_MANIFEST_PATH.make(
+                        relative_path=_relative_to_project(project, manifest_path)
+                    ).at(manifest_path)
                 )
 
         expected_resource_roots = expected_gradle_resource_roots(project)
         for resource_root in existing_gradle_resource_roots(project):
             if resource_root not in expected_resource_roots:
                 issues.append(
-                    E_GRADLE_UNDECLARED_RESOURCE_ROOT.make(relative_path=_relative_to_project(project, resource_root)).at(
-                        resource_root
-                    )
+                    E_GRADLE_UNDECLARED_RESOURCE_ROOT.make(
+                        relative_path=_relative_to_project(project, resource_root)
+                    ).at(resource_root)
                 )
 
         return issues
@@ -700,9 +698,7 @@ class GradlePublicationMetadataDriftCheck(ProjectCheck):
 
         issues: list[Issue] = []
         fix_publication_metadata = (
-            (lambda: rerun_setup_for_project(project))
-            if can_regenerate_with_setup(project)
-            else None
+            (lambda: rerun_setup_for_project(project)) if can_regenerate_with_setup(project) else None
         )
         repo_license_path = project.effective_repo_root / "LICENSE.md"
         if not repo_license_path.is_file():
@@ -744,7 +740,9 @@ class PythonPackageLayoutDriftCheck(ProjectCheck):
 
         issues: list[Issue] = []
         declared_packages, declared_includes = parse_pyproject_poetry_paths(project.path)
-        discovered_packages = {package_path.name: package_path for package_path in discover_python_package_roots(project.path)}
+        discovered_packages = {
+            package_path.name: package_path for package_path in discover_python_package_roots(project.path)
+        }
 
         for package_name, package_path in discovered_packages.items():
             if package_name not in declared_packages:
@@ -757,7 +755,9 @@ class PythonPackageLayoutDriftCheck(ProjectCheck):
         for include_path_name, include_path in declared_includes.items():
             if not include_path.exists():
                 issues.append(
-                    E_PYTHON_DECLARED_INCLUDE_PATH_MISSING.make(path=include_path_name).at(project.path / include_path_name)
+                    E_PYTHON_DECLARED_INCLUDE_PATH_MISSING.make(path=include_path_name).at(
+                        project.path / include_path_name
+                    )
                 )
 
         return issues
@@ -825,14 +825,14 @@ class RepoMetadataPlacementDriftCheck(RepoCheck):
         expected_paths = expected_repo_metadata_paths_for_plan(plan)
         ignore_matcher = IgnoreMatcher(repo_root)
         issues: list[Issue] = []
+
         def fix_repo_metadata() -> None:
             rerun_setup_for_repo_root(repo_root)
+
         for current_root, dirnames, filenames in os.walk(repo_root):
             current_path = Path(current_root)
             dirnames[:] = [
-                dirname
-                for dirname in dirnames
-                if not ignore_matcher.matches(current_path / dirname, is_dir=True)
+                dirname for dirname in dirnames if not ignore_matcher.matches(current_path / dirname, is_dir=True)
             ]
             for filename in filenames:
                 if filename not in MONITORED_REPO_METADATA_FILENAMES:
@@ -864,11 +864,7 @@ class TestLicenseCoverageCheck(ProjectCheck):
 
         layout = build_project_layout(project)
         issues: list[Issue] = []
-        fix_test_licenses = (
-            (lambda: rerun_setup_for_project(project))
-            if can_regenerate_with_setup(project)
-            else None
-        )
+        fix_test_licenses = (lambda: rerun_setup_for_project(project)) if can_regenerate_with_setup(project) else None
         if project.test_license is not None:
             for test_root in layout.test_license_roots:
                 license_path = test_root / "LICENSE.md"

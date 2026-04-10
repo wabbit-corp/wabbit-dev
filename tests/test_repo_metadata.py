@@ -51,7 +51,11 @@ def test_write_repo_metadata_files_generates_editorconfig_and_github_bundle(tmp_
 
     ctx = SimpleNamespace(
         config=config,
+        gitignore_template=jinja2.Template(".DS_Store\nThumbs.db\n/tmp/\n"),
         editorconfig_template=jinja2.Template("root = true\n\n[*.py]\nmax_line_length = {{ line_length }}\n"),
+        gradle_gitignore_template=jinja2.Template("/build\n"),
+        python_gitignore_template=jinja2.Template("__pycache__/\n"),
+        purescript_gitignore_template=jinja2.Template("output/\n"),
         github_codeowners_template=jinja2.Template(
             "{% for owner in code_owners -%}\n# {{ owner.name }} <{{ owner.email }}>\n{% endfor -%}\n* {% for owner in code_owners %}{{ owner.email }}{% endfor %}\n"
         ),
@@ -64,6 +68,11 @@ def test_write_repo_metadata_files_generates_editorconfig_and_github_bundle(tmp_
     written_roots = setup_module._write_repo_metadata_files(ctx, [project])
 
     assert written_roots == [str(repo_root.resolve())]
+    gitignore_text = (repo_root / ".gitignore").read_text(encoding="utf-8")
+    assert ".DS_Store" in gitignore_text
+    assert "Thumbs.db" in gitignore_text
+    assert "/tmp/" in gitignore_text
+    assert "__pycache__/" in gitignore_text
     assert (repo_root / ".editorconfig").is_file()
     assert (repo_root / ".github" / "CODEOWNERS").is_file()
     assert (repo_root / ".github" / "SECURITY.md").is_file()

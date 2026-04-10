@@ -48,8 +48,8 @@ def test_gradle_snapshot_publish_template_skips_release_versions_on_push() -> No
 def test_gradle_release_publish_template_checks_tag_ref_type_explicitly() -> None:
     text = _template_text("data-repo-template/gradle-files/.github/workflows/release-publish.yml.jinja2")
 
-    assert 'git fetch --force --tags origin' in text
-    assert 'git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format=\'%(objecttype)\'' in text
+    assert "git fetch --force --tags origin" in text
+    assert "git for-each-ref \"refs/tags/${GITHUB_REF_NAME}\" --format='%(objecttype)'" in text
     assert 'git cat-file -t "${GITHUB_REF_NAME}"' not in text
 
 

@@ -15,7 +15,9 @@ from dev.repo_resolution import (
 )
 
 
-def _python_project(path: Path, *, project_id: str, repo_id: str | None = None, repo_root: Path | None = None) -> PythonProject:
+def _python_project(
+    path: Path, *, project_id: str, repo_id: str | None = None, repo_root: Path | None = None
+) -> PythonProject:
     return PythonProject(
         path=path,
         name=path.name,
@@ -62,7 +64,12 @@ def test_resolve_workspace_context_prefers_current_project(tmp_path: Path) -> No
         project_ids=["jeeves/client"],
     )
     config.defined_projects = OrderedDict(
-        [("jeeves/client", _python_project(project_path, project_id="jeeves/client", repo_id="jeeves", repo_root=repo_root))]
+        [
+            (
+                "jeeves/client",
+                _python_project(project_path, project_id="jeeves/client", repo_id="jeeves", repo_root=repo_root),
+            )
+        ]
     )
 
     context = resolve_workspace_context(nested_path, config=config)
@@ -96,7 +103,12 @@ def test_inferred_targets_use_repo_when_outside_project_but_inside_repo(tmp_path
         project_ids=["jeeves/client"],
     )
     config.defined_projects = OrderedDict(
-        [("jeeves/client", _python_project(project_path, project_id="jeeves/client", repo_id="jeeves", repo_root=repo_root))]
+        [
+            (
+                "jeeves/client",
+                _python_project(project_path, project_id="jeeves/client", repo_id="jeeves", repo_root=repo_root),
+            )
+        ]
     )
 
     context = resolve_workspace_context(docs_path, config=config)
@@ -126,7 +138,12 @@ def test_resolve_project_ids_errors_include_resolved_context(tmp_path: Path, mon
         project_ids=["jeeves/client"],
     )
     config.defined_projects = OrderedDict(
-        [("jeeves/client", _python_project(project_path, project_id="jeeves/client", repo_id="jeeves", repo_root=repo_root))]
+        [
+            (
+                "jeeves/client",
+                _python_project(project_path, project_id="jeeves/client", repo_id="jeeves", repo_root=repo_root),
+            )
+        ]
     )
 
     monkeypatch.chdir(project_path)

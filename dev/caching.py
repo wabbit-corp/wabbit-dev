@@ -481,7 +481,7 @@ def cache(
         def _get_shared_cashier_for_use() -> Cashier | None:
             try:
                 return get_cashier_instance(path=resolved_cache_path)
-            except Exception as ex:
+            except Exception:
                 logger.error(
                     "Failed to obtain Cashier instance for %s used by %s during operation.",
                     resolved_cache_path,
@@ -567,9 +567,9 @@ def cache(
 
                 if cache_directive is NO_CACHE:
                     logger.debug(
-                            "Skipping cache set based on ttl_policy_func result (NO_CACHE) for key=%s",
-                            key,
-                        )
+                        "Skipping cache set based on ttl_policy_func result (NO_CACHE) for key=%s",
+                        key,
+                    )
                     # Do not cache
                 else:
                     # Directive is None or a TTL number

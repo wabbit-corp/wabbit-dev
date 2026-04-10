@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -111,7 +112,7 @@ def build_project_layout(project: Project) -> ProjectLayout:
     )
 
 
-def expected_repo_root_legal_paths(repo_root: Path, projects: list[Project]) -> set[Path]:
+def expected_repo_root_legal_paths(repo_root: Path, projects: Sequence[Project]) -> set[Path]:
     expected_paths = {
         repo_root / "LICENSE.md",
         repo_root / "legal" / "cla" / "v1.0.0" / "CLA.md",
@@ -304,7 +305,7 @@ def wabbit_repo_projects(repo_root: Path) -> list[Project]:
     return repo_projects_for_root(config, repo_root)
 
 
-def build_repo_layout(repo_root: Path, projects: list[Project]) -> RepoLayout:
+def build_repo_layout(repo_root: Path, projects: Sequence[Project]) -> RepoLayout:
     expected_legal_paths: set[Path] = expected_repo_root_legal_paths(repo_root, projects)
     for project in projects:
         expected_legal_paths.update(build_project_layout(project).expected_legal_paths)
@@ -315,7 +316,7 @@ def build_repo_layout(repo_root: Path, projects: list[Project]) -> RepoLayout:
     )
 
 
-def find_misplaced_legal_files(repo_root: Path, projects: list[Project]) -> list[Path]:
+def find_misplaced_legal_files(repo_root: Path, projects: Sequence[Project]) -> list[Path]:
     if not projects:
         return []
     repo_layout = build_repo_layout(repo_root, projects)
@@ -324,11 +325,7 @@ def find_misplaced_legal_files(repo_root: Path, projects: list[Project]) -> list
 
     for current_root, dirnames, filenames in os.walk(repo_layout.repo_root):
         current_path = Path(current_root)
-        dirnames[:] = [
-            dirname
-            for dirname in dirnames
-            if not matcher.matches(current_path / dirname, is_dir=True)
-        ]
+        dirnames[:] = [dirname for dirname in dirnames if not matcher.matches(current_path / dirname, is_dir=True)]
         for filename in filenames:
             if filename not in MONITORED_LEGAL_FILENAMES:
                 continue
@@ -356,7 +353,7 @@ def delete_path_and_empty_parents(path: Path, *, stop_at: Path) -> None:
         break
 
 
-def cleanup_misplaced_legal_files(repo_root: Path, projects: list[Project]) -> list[Path]:
+def cleanup_misplaced_legal_files(repo_root: Path, projects: Sequence[Project]) -> list[Path]:
     misplaced = find_misplaced_legal_files(repo_root, projects)
     for path in misplaced:
         delete_path_and_empty_parents(path, stop_at=repo_root)

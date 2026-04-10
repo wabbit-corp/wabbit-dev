@@ -12,7 +12,6 @@ import argparse
 import os
 import stat
 import sys  # Added for stderr
-from pathlib import Path
 
 from dev.checks.base import FileCheck, FileContext, IssueType
 
@@ -125,11 +124,7 @@ def is_suspicious_executable(filepath: str) -> bool:
 
     _, ext = os.path.splitext(filepath)
     ext_lower = ext.lower()
-    return not (
-        has_shebang(filepath)
-        or is_elf_exe_mach(filepath) is not None
-        or ext_lower in EXECUTABLE_EXTENSIONS
-    )
+    return not (has_shebang(filepath) or is_elf_exe_mach(filepath) is not None or ext_lower in EXECUTABLE_EXTENSIONS)
 
 
 def remove_execute_permission(filepath: str) -> bool:
@@ -240,9 +235,13 @@ class SuspiciousExecutableFileModeCheck(FileCheck):
             return
         if not is_suspicious_executable(str(ctx.path)):
             return
+
+        def clear_execute_permission() -> None:
+            remove_execute_permission(str(ctx.path))
+
         ctx.add_issue(
             E_SUSPICIOUS_EXECUTABLE_FILE_MODE,
-            fix=lambda: remove_execute_permission(str(ctx.path)),
+            fix=clear_execute_permission,
         )
 
 

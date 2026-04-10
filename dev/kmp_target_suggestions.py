@@ -247,7 +247,9 @@ def _newly_activated_source_sets(candidate_platform: str, current_platforms: lis
         platform in APPLE_KMP_PLATFORMS for platform in current_platforms
     ):
         source_sets.extend(["appleMain", "appleTest"])
-    if candidate_platform in _IOS_KMP_PLATFORMS and not any(platform in _IOS_KMP_PLATFORMS for platform in current_platforms):
+    if candidate_platform in _IOS_KMP_PLATFORMS and not any(
+        platform in _IOS_KMP_PLATFORMS for platform in current_platforms
+    ):
         source_sets.extend(["iosMain", "iosTest"])
 
     source_sets.extend(_DIRECT_SOURCE_SETS_BY_PLATFORM.get(candidate_platform, ()))
@@ -312,7 +314,9 @@ def find_kmp_target_expansion_suggestions(project: GradleProject, config: Config
             continue
 
         newly_activated_source_sets = _newly_activated_source_sets(candidate_platform, current_platforms)
-        if any(_source_set_has_kotlin_sources(project, source_set_name) for source_set_name in newly_activated_source_sets):
+        if any(
+            _source_set_has_kotlin_sources(project, source_set_name) for source_set_name in newly_activated_source_sets
+        ):
             continue
 
         suggestions.append(

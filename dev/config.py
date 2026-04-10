@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from inspect import signature
 from pathlib import Path
-from typing import TypeGuard, Union, cast
+from typing import Protocol, TypeGuard, Union, cast
 
 from mu.exec import Quoted
 from mu.parser import parse
@@ -573,7 +573,9 @@ def resolve_kotlin_plugin_compiler_plugin_project(
 ) -> "GradleProject | None":
     if definition.compiler_plugin is None:
         return None
-    project_name = definition.compiler_plugin[1:] if definition.compiler_plugin.startswith(":") else definition.compiler_plugin
+    project_name = (
+        definition.compiler_plugin[1:] if definition.compiler_plugin.startswith(":") else definition.compiler_plugin
+    )
     project = config.defined_projects.get(project_name)
     if project is None:
         return None
@@ -1418,9 +1420,7 @@ def _normalize_gradle_targets(
 
         if browser_test is not None:
             if browser is False:
-                raise ValueError(
-                    f"{project_name}.targets[{target_index}] browserTest requires browser=true"
-                )
+                raise ValueError(f"{project_name}.targets[{target_index}] browserTest requires browser=true")
             browser = True
 
         if browser_test is not None and browser_test != "chromeHeadless":
@@ -1552,6 +1552,10 @@ def _source_set_is_allowed_for_platforms(source_set: str, platforms: list[str]) 
     return requirement in platforms
 
 
+def source_set_is_allowed_for_platforms(source_set: str, platforms: list[str]) -> bool:
+    return _source_set_is_allowed_for_platforms(source_set, platforms)
+
+
 @dataclass
 class Config:
     raw: Document
@@ -1636,9 +1640,13 @@ def project_repo_root(project: Project | object) -> Path:
 def load_config(start: Path | None = None) -> Config:
     parse_params = signature(parse).parameters
 
+    class ParseWithKeywordOptions(Protocol):
+        def __call__(self, text: str, **kwargs: object) -> Document: ...
+
     def parse_document(text: str) -> Document:
         if "no_spans" in parse_params:
-            return parse(text, no_spans=False)
+            parser_with_kwargs = cast(ParseWithKeywordOptions, parse)
+            return parser_with_kwargs(text, no_spans=False)
         return parse(text)
 
     workspace_root = find_workspace_root(start)
@@ -1694,7 +1702,7 @@ def load_config(start: Path | None = None) -> Config:
 
         values = getattr(expr, "values", None)
         if isinstance(values, list):
-            for item in values:
+            for item in cast(list[object], values):
                 nested = _extract_expr_span(item)
                 if nested is not None:
                     return nested
@@ -2072,9 +2080,7 @@ def load_config(start: Path | None = None) -> Config:
                         "kmp-android-library; keep only the target or make the values identical"
                     )
             elif "android" not in project.platforms:
-                raise ValueError(
-                    f"{project.name} enables kmp-android-library but does not declare an android target"
-                )
+                raise ValueError(f"{project.name} enables kmp-android-library but does not declare an android target")
 
         jvm_runs_feature = project.resolved_features.get("kmp-jvm-runs")
         if jvm_runs_feature is not None and "jvm" not in project.platforms:
@@ -2117,7 +2123,9 @@ def load_config(start: Path | None = None) -> Config:
             if project.docs_enabled and project.docs_system not in (None, "mkdocs"):
                 raise ValueError(f"{project.name} is a Python project and must use docsSystem 'mkdocs'")
         elif project.docs_enabled:
-            raise ValueError(f"{project.name} enables docs, but {type(project).__name__} does not support docs generation")
+            raise ValueError(
+                f"{project.name} enables docs, but {type(project).__name__} does not support docs generation"
+            )
 
         def is_publishable(input_project: Project) -> bool:
             return input_project.publish and input_project.github_repo is not None and (not input_project.quarantine)
@@ -2572,8 +2580,10 @@ def load_config(start: Path | None = None) -> Config:
                 command.publishTarget,
                 default_target=default_publish_target,
             )
-            publish_snapshots = command.publishSnapshots if command.publishSnapshots is not None else (
-                publish_target == "maven-central"
+            publish_snapshots = (
+                command.publishSnapshots
+                if command.publishSnapshots is not None
+                else (publish_target == "maven-central")
             )
             if publish_snapshots and publish_target != "maven-central":
                 raise ValueError(
@@ -2858,7 +2868,9 @@ def load_config(start: Path | None = None) -> Config:
             if command.docsProject is not None:
                 docs_project_id = _project_id_for(command.docsProject, repo_id)
                 if docs_project_id not in nested_project_ids:
-                    raise ValueError(f"Repo {repo_id}.docsProject refers to unknown nested project {command.docsProject}")
+                    raise ValueError(
+                        f"Repo {repo_id}.docsProject refers to unknown nested project {command.docsProject}"
+                    )
 
             config.defined_repos[repo_id] = RepoDefinition(
                 repo_id=repo_id,

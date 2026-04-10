@@ -37,9 +37,12 @@ class JvmSelectionCriteria:
     order: JvmOrder = "latest"
 
 
-class _JvmPolicyProject(Protocol):
-    jvm_policy: str | None
-    jvm_task_policies: Mapping[str, str]
+class JvmPolicyProject(Protocol):
+    @property
+    def jvm_policy(self) -> str | None: ...
+
+    @property
+    def jvm_task_policies(self) -> Mapping[str, str]: ...
 
 
 def _trim_version(version: Sequence[int]) -> VersionTuple:
@@ -303,7 +306,7 @@ def criteria_from_policy_name(policy_name: str) -> JvmSelectionCriteria:
 
 
 def resolve_project_jvm_policy(
-    project: _JvmPolicyProject,
+    project: JvmPolicyProject,
     *,
     task_name: str | None,
     repo_policy: str | None,
@@ -416,6 +419,7 @@ def select_jvm(
 
 __all__ = [
     "InstalledJvm",
+    "JvmPolicyProject",
     "JvmSelectionCriteria",
     "compare_versions",
     "criteria_from_policy_name",

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from dev.checks.base import FileContext
-from dev.checks.chinese_firewall import CensoredKeywords, E_CENSORED_KEYWORD
+from dev.checks.chinese_firewall import E_CENSORED_KEYWORD, CensoredKeywords
 from dev.checks.trufflehog import E_HIGH_ENTROPY_STRING, HighEntropyStringCheck
 
 

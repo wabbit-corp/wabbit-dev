@@ -13,12 +13,14 @@ from dev.build_order import toposort_projects
 from dev.config import (
     Config,
     GradleProject,
+    Project,
     PythonProject,
     get_gradle_plugin_applications,
     load_config,
     resolve_kotlin_plugin_compiler_plugin_project,
 )
 from dev.failure_context import contextualize_failure
+from dev.json_types import JSONObject, JSONValue
 from dev.messages import error, info, success, warning
 from dev.repo_resolution import inferred_project_targets, resolve_project_ids
 
@@ -44,26 +46,26 @@ def _python_source_files(root: Path) -> Iterator[Path]:
 
     for dirpath, dirnames, filenames in os.walk(root):
         path = Path(dirpath)
-        dirnames[:] = [
-            dirname for dirname in dirnames if dirname not in ignore_dirs and not dirname.startswith(".")
-        ]
+        dirnames[:] = [dirname for dirname in dirnames if dirname not in ignore_dirs and not dirname.startswith(".")]
         for filename in filenames:
             if not filename.endswith(".py"):
                 continue
             yield path / filename
 
 
-def _project_kind(project: object) -> str:
-    if isinstance(project, GradleProject):
-        return "gradle"
-    if isinstance(project, PythonProject):
-        return "python"
-    return type(project).__name__.removesuffix("Project").lower()
+def _project_kind(project: Project) -> str:
+    match project:
+        case GradleProject():
+            return "gradle"
+        case PythonProject():
+            return "python"
+        case _:
+            return type(project).__name__.removesuffix("Project").lower()
 
 
-def _compile_python_project(project: PythonProject, *, emit_messages: bool = True) -> tuple[bool, dict[str, object]]:
+def _compile_python_project(project: PythonProject, *, emit_messages: bool = True) -> tuple[bool, JSONObject]:
     source_count = 0
-    details: dict[str, object] = {
+    details: JSONObject = {
         "kind": "python",
         "path": str(project.path.resolve()),
         "sourceCount": 0,
@@ -90,7 +92,7 @@ def _compile_python_project(project: PythonProject, *, emit_messages: bool = Tru
     return True, details
 
 
-def _gradle_command(gradle_root: Path) -> list[str]:
+def gradle_command(gradle_root: Path) -> list[str]:
     wrapper_path = gradle_root / "gradlew"
     if wrapper_path.is_file():
         if os.name == "nt":
@@ -99,21 +101,21 @@ def _gradle_command(gradle_root: Path) -> list[str]:
     return ["gradle"]
 
 
-def _gradle_task_name(project: GradleProject, task: str) -> str:
+def gradle_task_name(project: GradleProject, task: str) -> str:
     if project.effective_gradle_root == project.path:
         return task
     return f":{project.effective_gradle_project_name}:{task}"
 
 
-def _build_gradle_project(
+def build_gradle_project(
     project: GradleProject,
     *,
     emit_messages: bool = True,
     redirect_output: bool = False,
-) -> tuple[bool, dict[str, object]]:
+) -> tuple[bool, JSONObject]:
     gradle_root = project.effective_gradle_root
-    command = [*_gradle_command(gradle_root), "--no-daemon", _gradle_task_name(project, "build")]
-    details: dict[str, object] = {
+    command = [*gradle_command(gradle_root), "--no-daemon", gradle_task_name(project, "build")]
+    details: JSONObject = {
         "kind": "gradle",
         "gradleRoot": str(gradle_root.resolve()),
         "command": command,
@@ -121,11 +123,10 @@ def _build_gradle_project(
     if emit_messages:
         info(f"Running Gradle build for {project.name}: {' '.join(command)}")
     try:
-        run_kwargs: dict[str, object] = {}
         if redirect_output:
-            run_kwargs["stdout"] = sys.stderr
-            run_kwargs["stderr"] = sys.stderr
-        subprocess.run(command, cwd=gradle_root, check=True, **run_kwargs)
+            subprocess.run(command, cwd=gradle_root, check=True, stdout=sys.stderr, stderr=sys.stderr)
+        else:
+            subprocess.run(command, cwd=gradle_root, check=True)
     except subprocess.CalledProcessError as ex:
         details["error"] = f"Build failed with exit code {ex.returncode}."
         details["returnCode"] = ex.returncode
@@ -147,7 +148,7 @@ def _publish_local_compiler_plugins(
     published: set[str],
     emit_messages: bool = True,
     redirect_output: bool = False,
-) -> tuple[bool, list[dict[str, object]], str | None]:
+) -> tuple[bool, list[JSONObject], str | None]:
     if not (project.effective_gradle_root / "settings.local.gradle.kts").is_file():
         return True, [], None
 
@@ -158,15 +159,20 @@ def _publish_local_compiler_plugins(
         candidate = resolve_kotlin_plugin_compiler_plugin_project(config, definition)
         if candidate is None:
             continue
-        if candidate.project_id in seen or candidate.project_id in published:
+        candidate_key = candidate.project_id or str(candidate.path.resolve())
+        if candidate_key in seen or candidate_key in published:
             continue
-        seen.add(candidate.project_id)
+        seen.add(candidate_key)
         compiler_projects.append(candidate)
 
-    actions: list[dict[str, object]] = []
+    actions: list[JSONObject] = []
     for compiler_project in compiler_projects:
         gradle_root = compiler_project.effective_gradle_root
-        command = [*_gradle_command(gradle_root), "--no-daemon", _gradle_task_name(compiler_project, "publishToMavenLocal")]
+        command = [
+            *gradle_command(gradle_root),
+            "--no-daemon",
+            gradle_task_name(compiler_project, "publishToMavenLocal"),
+        ]
         actions.append(
             {
                 "projectId": compiler_project.project_id,
@@ -177,32 +183,57 @@ def _publish_local_compiler_plugins(
         if emit_messages:
             info(f"Publishing local compiler plugin for {project.name}: {' '.join(command)}")
         try:
-            run_kwargs: dict[str, object] = {}
             if redirect_output:
-                run_kwargs["stdout"] = sys.stderr
-                run_kwargs["stderr"] = sys.stderr
-            subprocess.run(command, cwd=gradle_root, check=True, **run_kwargs)
+                subprocess.run(command, cwd=gradle_root, check=True, stdout=sys.stderr, stderr=sys.stderr)
+            else:
+                subprocess.run(command, cwd=gradle_root, check=True)
         except subprocess.CalledProcessError as ex:
             message = f"{compiler_project.name}: publishToMavenLocal failed with exit code {ex.returncode}"
             if emit_messages:
                 error(message)
             return False, actions, message
         except FileNotFoundError:
-            message = f"{compiler_project.name}: gradle wrapper or command not found (checked: {gradle_root / 'gradlew'})"
+            message = (
+                f"{compiler_project.name}: gradle wrapper or command not found (checked: {gradle_root / 'gradlew'})"
+            )
             if emit_messages:
                 error(message)
             return False, actions, message
-        published.add(compiler_project.project_id)
+        published.add(compiler_project.project_id or str(compiler_project.path.resolve()))
 
     return True, actions, None
 
 
-def _update_build_summary(payload: dict[str, object]) -> None:
-    results = payload.get("results", [])
-    assert isinstance(results, list)
-    success_count = sum(1 for result in results if isinstance(result, dict) and result.get("status") == "success")
-    skipped_count = sum(1 for result in results if isinstance(result, dict) and result.get("status") == "skipped")
-    failed_count = sum(1 for result in results if isinstance(result, dict) and result.get("status") == "failed")
+def _json_string(value: JSONValue | None) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _update_build_summary(payload: JSONObject) -> None:
+    results = payload.get("results")
+    if not isinstance(results, list):
+        payload["summary"] = {
+            "total": 0,
+            "success": 0,
+            "skipped": 0,
+            "failed": 0,
+        }
+        return
+
+    success_count = 0
+    skipped_count = 0
+    failed_count = 0
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        match _json_string(result.get("status")):
+            case "success":
+                success_count += 1
+            case "skipped":
+                skipped_count += 1
+            case "failed":
+                failed_count += 1
+            case _:
+                continue
     payload["summary"] = {
         "total": len(results),
         "success": success_count,
@@ -213,12 +244,13 @@ def _update_build_summary(payload: dict[str, object]) -> None:
 
 def build(projects: str | list[str] | None = None, *, json_output: bool = False) -> int:
     requested_projects = [projects] if isinstance(projects, str) else projects
-    payload: dict[str, object] = {
+    results_payload: list[JSONObject] = []
+    payload: JSONObject = {
         "requestedTargets": list(requested_projects or []),
         "inferredTargets": [],
         "resolvedTargets": [],
         "topologicalOrder": [],
-        "results": [],
+        "results": results_payload,
     }
 
     def run() -> int:
@@ -252,9 +284,14 @@ def build(projects: str | list[str] | None = None, *, json_output: bool = False)
             _update_build_summary(payload)
             return 1
 
-        target_project = config.defined_projects[selected_project_names[0]] if selected_project_names else None
+        if selected_project_names is None:
+            target_project_name = None
+        else:
+            target_project_name = selected_project_names[0]
+        target_project = config.defined_projects[target_project_name] if target_project_name is not None else None
         if target_project is not None and not isinstance(target_project, (GradleProject, PythonProject)):
-            message = f"Project {selected_project_names[0]} is not buildable in this command."
+            assert target_project_name is not None
+            message = f"Project {target_project_name} is not buildable in this command."
             payload["error"] = message
             error(message)
             _update_build_summary(payload)
@@ -279,17 +316,16 @@ def build(projects: str | list[str] | None = None, *, json_output: bool = False)
 
         for name in order:
             project = config.defined_projects[name]
-            result: dict[str, object] = {
+            result: JSONObject = {
                 "projectId": name,
                 "kind": _project_kind(project),
             }
-            if hasattr(project, "path") and isinstance(project.path, Path):
-                result["path"] = str(project.path.resolve())
+            result["path"] = str(project.path.resolve())
 
             if project.quarantine:
                 result["status"] = "skipped"
                 result["reason"] = "quarantined"
-                payload["results"].append(result)
+                results_payload.append(result)
                 warning(f"Skipping {name}: quarantined")
                 continue
 
@@ -307,12 +343,12 @@ def build(projects: str | list[str] | None = None, *, json_output: bool = False)
                     if not ok_publish:
                         result["status"] = "failed"
                         result["error"] = publish_error
-                        payload["results"].append(result)
+                        results_payload.append(result)
                         payload["error"] = f"Build failed for {name}."
                         error(f"Build failed for {name}.")
                         _update_build_summary(payload)
                         return 1
-                    ok, details = _build_gradle_project(
+                    ok, details = build_gradle_project(
                         project,
                         emit_messages=not json_output,
                         redirect_output=json_output,
@@ -324,20 +360,20 @@ def build(projects: str | list[str] | None = None, *, json_output: bool = False)
                         message = f"{name} is not buildable by this command."
                         result["status"] = "failed"
                         result["error"] = message
-                        payload["results"].append(result)
+                        results_payload.append(result)
                         payload["error"] = message
                         error(message)
                         _update_build_summary(payload)
                         return 1
                     result["status"] = "skipped"
                     result["reason"] = "unsupported"
-                    payload["results"].append(result)
+                    results_payload.append(result)
                     warning(f"Skipping unsupported project type for build: {name}")
                     continue
 
             result.update(details)
             result["status"] = "success" if ok else "failed"
-            payload["results"].append(result)
+            results_payload.append(result)
 
             if not ok:
                 payload["error"] = f"Build failed for {name}."
@@ -346,9 +382,7 @@ def build(projects: str | list[str] | None = None, *, json_output: bool = False)
                 return 1
 
         _update_build_summary(payload)
-        executed_count = sum(
-            1 for result in payload["results"] if isinstance(result, dict) and result.get("status") == "success"
-        )
+        executed_count = sum(1 for result in results_payload if _json_string(result.get("status")) == "success")
         if executed_count == 0:
             warning(
                 "No build command executed for "
@@ -367,4 +401,4 @@ def build(projects: str | list[str] | None = None, *, json_output: bool = False)
     return exit_code
 
 
-__all__ = ["build"]
+__all__ = ["build", "build_gradle_project", "gradle_command", "gradle_task_name"]

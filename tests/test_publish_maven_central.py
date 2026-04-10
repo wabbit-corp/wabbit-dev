@@ -86,7 +86,9 @@ def _make_gradle_project(path: Path) -> GradleProject:
 
 
 @pytest.mark.asyncio
-async def test_publish_maven_central_runs_standalone_gradle_tasks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_publish_maven_central_runs_standalone_gradle_tasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import dev.tasks.publish_maven_central as publish_module
 
     project = _make_gradle_project(tmp_path / "kotlin-demo")
@@ -137,7 +139,9 @@ async def test_publish_maven_central_runs_standalone_gradle_tasks(tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_publish_maven_central_runs_repo_managed_scoped_tasks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_publish_maven_central_runs_repo_managed_scoped_tasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import dev.tasks.publish_maven_central as publish_module
 
     repo_root = tmp_path / "jeeves"

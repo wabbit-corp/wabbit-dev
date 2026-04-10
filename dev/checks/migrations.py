@@ -34,11 +34,11 @@ class RepoLegalLayoutMigrationCheck(RepoCheck):
         issues: list[Issue] = []
         for misplaced in find_misplaced_legal_files(repo_root, projects):
             relative_path = misplaced.relative_to(repo_root).as_posix()
-            issues.append(
-                E_MISPLACED_LEGAL_FILE.make(relative_path=relative_path).at(misplaced).fixable(
-                    lambda repo_root=repo_root, projects=projects: cleanup_misplaced_legal_files(repo_root, projects)
-                )
-            )
+
+            def apply_fix(*, repo_root: Path = repo_root, projects: list[Project] = projects) -> None:
+                cleanup_misplaced_legal_files(repo_root, projects)
+
+            issues.append(E_MISPLACED_LEGAL_FILE.make(relative_path=relative_path).at(misplaced).fixable(apply_fix))
         return issues
 
 

@@ -39,23 +39,28 @@ def _status_lists(repo: Repo) -> tuple[list[str], list[str], list[str]]:
 
 def status(targets: str | list[str] | None, *, json_output: bool = False) -> int:
     requested_targets = [targets] if isinstance(targets, str) else targets
+    repos_payload: list[dict[str, object]] = []
     payload: dict[str, object] = {
         "requestedTargets": list(requested_targets or []),
         "inferredTargets": [],
-        "repos": [],
+        "repos": repos_payload,
     }
     config = load_config() if find_workspace_root() is not None else None
-    effective_targets = inferred_repo_targets(config, requested_targets) if config is not None else list(requested_targets or [])
+    effective_targets = (
+        inferred_repo_targets(config, requested_targets) if config is not None else list(requested_targets or [])
+    )
     if requested_targets is None and config is not None and effective_targets is not None:
         payload["inferredTargets"] = list(effective_targets)
 
     if not effective_targets:
         if config is None:
-            payload["error"] = "No config file found. Pass an explicit repo target or run inside a configured workspace."
+            payload["error"] = (
+                "No config file found. Pass an explicit repo target or run inside a configured workspace."
+            )
             if json_output:
                 print(json.dumps(payload, indent=2))
                 return 1
-            error(contextualize_failure(payload["error"], ["status"]))
+            error(contextualize_failure(str(payload["error"]), ["status"]))
             return 1
         resolved_targets = configured_repo_targets(config)
     else:
@@ -72,7 +77,7 @@ def status(targets: str | list[str] | None, *, json_output: bool = False) -> int
     exit_code = 0
     for index, resolved_target in enumerate(resolved_targets):
         path = resolved_target.path
-        repo_payload = {
+        repo_payload: dict[str, object] = {
             "name": resolved_target.name,
             "path": str(Path(path).resolve()),
             "stagedChanges": [],
@@ -81,7 +86,7 @@ def status(targets: str | list[str] | None, *, json_output: bool = False) -> int
         }
         if not path.exists():
             repo_payload["error"] = "Path does not exist."
-            payload["repos"].append(repo_payload)
+            repos_payload.append(repo_payload)
             exit_code = 1
             if not json_output:
                 error(f"Project {resolved_target.name} does not exist")
@@ -93,7 +98,7 @@ def status(targets: str | list[str] | None, *, json_output: bool = False) -> int
         repo_payload["trackedChanges"] = unstaged_changes
         repo_payload["untrackedFiles"] = untracked_files
         repo_payload["isClean"] = not (staged_changes or unstaged_changes or untracked_files)
-        payload["repos"].append(repo_payload)
+        repos_payload.append(repo_payload)
 
         if json_output:
             repo.close()

@@ -233,14 +233,22 @@ def _extra_license_dir(project: Project) -> Path:
     return project.path / "LICENSES"
 
 
+def _raw_extra_license_filename(license_key: str) -> str:
+    safe_name = license_key.replace("/", "-").replace("\\", "-")
+    return f"{safe_name}.md"
+
+
 def _extra_license_filename(license_key: str) -> str:
     normalized = canonicalize_license_key(license_key) or license_key
-    safe_name = normalized.replace("/", "-").replace("\\", "-")
-    return f"{safe_name}.md"
+    return _raw_extra_license_filename(normalized)
 
 
 def _extra_license_path(project: Project, license_key: str) -> Path:
     return _extra_license_dir(project) / _extra_license_filename(license_key)
+
+
+def _raw_extra_license_path(project: Project, license_key: str) -> Path:
+    return _extra_license_dir(project) / _raw_extra_license_filename(license_key)
 
 
 def _legacy_root_legal_paths(project: Project) -> list[Path]:
@@ -257,12 +265,22 @@ def _cleanup_legacy_root_legal_paths(project: Project) -> None:
         dev.io.delete_if_exists(path)
 
 
-def _cleanup_test_license_outputs(project: Project) -> None:
+def _cleanup_test_license_outputs(project: Project, *, keep_license: str | None = None) -> None:
+    keep_paths: set[Path] = set()
+    if keep_license is not None:
+        keep_paths.add(_extra_license_path(project, keep_license))
+        keep_paths.add(_raw_extra_license_path(project, keep_license))
     for candidate in [
         "LicenseRef-Wabbit-Public-Test-License",
         "LicenseRef-Wabbit-Public-Test-License-1.1",
     ]:
-        dev.io.delete_if_exists(_extra_license_path(project, candidate))
+        for candidate_path in {
+            _extra_license_path(project, candidate),
+            _raw_extra_license_path(project, candidate),
+        }:
+            if candidate_path in keep_paths:
+                continue
+            dev.io.delete_if_exists(candidate_path)
     licenses_dir = _extra_license_dir(project)
     if licenses_dir.is_dir() and not any(licenses_dir.iterdir()):
         dev.io.delete_if_exists(licenses_dir)
@@ -286,8 +304,7 @@ def _render_license_notice_file(
     test_license_path: Path,
 ) -> str:
     test_paths = "\n".join(f"- `{path}`" for path in _test_license_paths(project))
-    return clean_text(
-        f"""# Notices
+    return clean_text(f"""# Notices
 
 This repository contains materials under multiple licenses.
 
@@ -299,8 +316,7 @@ This repository contains materials under multiple licenses.
 If a file carries a different SPDX header, that file-level notice controls.
 
 Published artifacts must not include files covered by the test license.
-"""
-    )
+""")
 
 
 def write_wabbit_legal_documents(ctx: CommonSetupContext, project: Project) -> None:
@@ -348,7 +364,7 @@ def write_wabbit_legal_files(ctx: CommonSetupContext, project: Project) -> None:
                 error(f"Unknown test license key: {test_license}. Supported keys: {supported}")
                 write_wabbit_legal_documents(ctx, project)
                 return
-            _cleanup_test_license_outputs(project)
+            _cleanup_test_license_outputs(project, keep_license=test_license)
             rendered_test_license_text = render_project_license(test_license_text, project)
             test_license_path = _extra_license_path(project, test_license)
             dev.io.write_text_file(test_license_path, rendered_test_license_text)

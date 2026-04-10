@@ -7,12 +7,12 @@ import pytest
 
 from dev.checks.base import FileContext
 from dev.checks.code_linting import (
+    E_CS_NOT_FORMATTED,
     E_CSHARPIER_FAILED,
     E_CSHARPIER_MISSING,
-    E_CS_NOT_FORMATTED,
+    E_KOTLIN_NOT_FORMATTED,
     E_KTFMT_FAILED,
     E_KTFMT_MISSING,
-    E_KOTLIN_NOT_FORMATTED,
     CSharpFormattingCheck,
     KotlinFormattingCheck,
 )
@@ -69,7 +69,7 @@ def test_kotlin_formatting_check_reports_unformatted_for_style_diff(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     path = tmp_path / "Sample.kt"
-    path.write_text("fun main(){println(\"x\")}\n", encoding="utf-8")
+    path.write_text('fun main(){println("x")}\n', encoding="utf-8")
     ctx = FileContext(check_name="KotlinFormattingCheck", path=path)
 
     def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:

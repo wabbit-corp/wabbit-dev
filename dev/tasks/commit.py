@@ -8,7 +8,7 @@ from git.exc import InvalidGitRepositoryError, NoSuchPathError
 
 from dev.base import Scope
 from dev.build_order import toposort_projects
-from dev.config import Project, load_config, project_repo_root
+from dev.config import Config, Project, load_config, project_repo_root
 from dev.failure_context import contextualize_failure
 from dev.messages import accent, error, info, muted, warning
 from dev.repo_resolution import resolve_project_ids
@@ -33,7 +33,7 @@ def _repo_key(repo: Repo) -> str | None:
     return str(repo.working_tree_dir)
 
 
-def _resolve_target_projects(projects: str | list[str] | None = None) -> tuple[object, list[str] | None]:
+def _resolve_target_projects(projects: str | list[str] | None = None) -> tuple[Config, list[str] | None]:
     config = load_config()
     requested_projects = [projects] if isinstance(projects, str) else projects
     selected_project_names: list[str] | None = None
@@ -42,7 +42,7 @@ def _resolve_target_projects(projects: str | list[str] | None = None) -> tuple[o
     return config, selected_project_names
 
 
-def _build_repo_plans(order: list[str], *, config: object) -> dict[str, RepoCommitPlan]:
+def _build_repo_plans(order: list[str], *, config: Config) -> dict[str, RepoCommitPlan]:
     repo_plans: dict[str, RepoCommitPlan] = {}
     defined_projects = config.defined_projects
     for name in order:
@@ -86,10 +86,7 @@ def commit(projects: str | list[str] | None = None, *, dry_run: bool = False) ->
             info("Dry run: would run PROD setup for:\n  " + ", ".join(accent(name) for name in order))
             info(f"Dry run: would create commits for {len(repo_plans)} repository/repositories")
             for plan in repo_plans.values():
-                print(
-                    f"  {muted(plan.repo_root)}: "
-                    + ", ".join(accent(project.name) for project in plan.projects)
-                )
+                print(f"  {muted(plan.repo_root)}: " + ", ".join(accent(project.name) for project in plan.projects))
             return 0
 
         setup_context = create_repo_setup_context(config, RepoSetupMode.PROD)

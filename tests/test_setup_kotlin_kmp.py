@@ -37,7 +37,7 @@ from dev.config import (
 )
 from dev.maven import MavenCoordinate
 from dev.tasks.setup_common import RepoSetupMode
-from dev.tasks.setup_kotlin import _render_dependency_for_mode, _write_gradle_repo_root_workflows, setup_gradle_project
+from dev.tasks.setup_kotlin import _render_dependency_for_mode, setup_gradle_project, write_gradle_repo_root_workflows
 
 
 def _managed_gradle_template(body: str) -> str:
@@ -130,7 +130,9 @@ def _make_context(
         contributor_privacy_policy=jinja2.Template(""),
         subproject_build_template=jinja2.Template(_managed_gradle_template(jvm_template)),
         subproject_build_kmp_template=jinja2.Template(_managed_gradle_template(kmp_template)),
-        gradle_release_publish_workflow_template=jinja2.Template("release {{ project_name }} android={{ needs_android }}"),
+        gradle_release_publish_workflow_template=jinja2.Template(
+            "release {{ project_name }} android={{ needs_android }}"
+        ),
         gradle_snapshot_publish_workflow_template=jinja2.Template(
             "snapshot {{ project_name }} android={{ needs_android }}"
         ),
@@ -219,6 +221,33 @@ def test_setup_gradle_project_uses_jvm_template_for_jvm_only_platforms(
     assert "KMP_TEMPLATE" not in build_text
 
 
+def test_setup_gradle_project_writes_nested_gradle_gitignore_for_repo_managed_subproject(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    repo_root = tmp_path / "repo"
+    project = _make_repo_gradle_project(
+        repo_root / "server",
+        project_id="repo/server",
+        repo_root=repo_root,
+        gradle_project_name="server",
+        github_repo="org/repo",
+    )
+    project.path.mkdir(parents=True, exist_ok=True)
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template="KMP_TEMPLATE",
+    )
+    ctx.gradle_gitignore_template = jinja2.Template("/build\n/.gradle\n")
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    gitignore_text = (project.path / ".gitignore").read_text(encoding="utf-8")
+    assert gitignore_text == "/build\n/.gradle\n"
+
+
 def test_setup_gradle_project_inlines_optional_build_inline_script(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -227,7 +256,7 @@ def test_setup_gradle_project_inlines_optional_build_inline_script(
     project = _make_project(tmp_path / "inline-proj", platforms=["jvm"])
     project.path.mkdir(parents=True, exist_ok=True)
     (project.path / "build.inline.gradle.kts").write_text(
-        'import java.time.Instant\n\nprintln(Instant.EPOCH)\n',
+        "import java.time.Instant\n\nprintln(Instant.EPOCH)\n",
         encoding="utf-8",
     )
     ctx = _make_context(
@@ -255,7 +284,7 @@ def test_setup_gradle_project_inlines_configured_build_inline_script(
     project.path.mkdir(parents=True, exist_ok=True)
     project.build_inline_file = "native.inline.gradle.kts"
     (project.path / "native.inline.gradle.kts").write_text(
-        'import java.time.Instant\n\nprintln(Instant.EPOCH)\n',
+        "import java.time.Instant\n\nprintln(Instant.EPOCH)\n",
         encoding="utf-8",
     )
     ctx = _make_context(
@@ -483,7 +512,7 @@ def test_setup_kmp_includes_implicit_default_parent_source_sets(
 
     build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
     assert "[commonMain|getting||]" in build_text
-    assert "[commonTest|getting||implementation(\"org.jetbrains.kotlin:kotlin-test:2.2.20\")]" in build_text
+    assert '[commonTest|getting||implementation("org.jetbrains.kotlin:kotlin-test:2.2.20")]' in build_text
     assert "[jvmAndAndroidMain|creating|commonMain|]" in build_text
     assert "[jvmMain|getting|jvmAndAndroidMain|]" in build_text
     assert "[androidMain|getting|jvmAndAndroidMain|]" in build_text
@@ -495,8 +524,7 @@ def test_setup_kmp_template_conditionals_include_android_and_compose_only_when_f
 ) -> None:
     _patch_setup_side_effects(monkeypatch)
     kmp_template = (
-        "{% if android_kmp_library_target %}ANDROID{% endif %}"
-        "{% if 'kmp-compose' in features %}COMPOSE{% endif %}"
+        "{% if android_kmp_library_target %}ANDROID{% endif %}" "{% if 'kmp-compose' in features %}COMPOSE{% endif %}"
     )
     ctx = _make_context(
         tmp_path,
@@ -681,9 +709,9 @@ def test_setup_gradle_project_remaps_kmp_publication_artifact_ids(
 
     build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
     assert 'val configuredArtifactId = "kotlin-example"' in build_text
-    assert 'artifactId == project.name -> configuredArtifactId' in build_text
-    assert 'artifactId.startsWith(projectArtifactPrefix)' in build_text
-    assert 'artifactId.removePrefix(projectArtifactPrefix)' in build_text
+    assert "artifactId == project.name -> configuredArtifactId" in build_text
+    assert "artifactId.startsWith(projectArtifactPrefix)" in build_text
+    assert "artifactId.removePrefix(projectArtifactPrefix)" in build_text
 
 
 def test_setup_gradle_project_renders_extra_gradle_plugin_in_jvm_build_and_settings(
@@ -700,7 +728,7 @@ def test_setup_gradle_project_renders_extra_gradle_plugin_in_jvm_build_and_setti
     }
     ctx = _make_context(
         tmp_path,
-        jvm_template='{% for plugin in extra_gradle_plugins %}[{{ plugin.plugin_id }}]{% endfor %}',
+        jvm_template="{% for plugin in extra_gradle_plugins %}[{{ plugin.plugin_id }}]{% endfor %}",
         kmp_template="KMP_TEMPLATE",
     )
     ctx.config.plugins["acyclic-gradle"] = KotlinPluginDefinition(plugin_id="one.wabbit.acyclic", version="0.0.1")
@@ -748,7 +776,7 @@ def test_setup_gradle_project_renders_extra_gradle_plugin_in_kmp_build(
     ctx = _make_context(
         tmp_path,
         jvm_template="JVM_TEMPLATE",
-        kmp_template='{% for plugin in extra_gradle_plugins %}[{{ plugin.plugin_id }}]{% endfor %}',
+        kmp_template="{% for plugin in extra_gradle_plugins %}[{{ plugin.plugin_id }}]{% endfor %}",
     )
     ctx.config.plugins["acyclic-gradle"] = KotlinPluginDefinition(plugin_id="one.wabbit.acyclic", version="0.0.1")
 
@@ -1178,7 +1206,7 @@ def test_write_gradle_repo_root_workflows_uses_nested_task_selectors_and_repo_re
     ctx.gradle_docs_quality_workflow_template = jinja2.Template("{{ docs_build_command }}\n")
     ctx.gradle_docs_deploy_workflow_template = jinja2.Template("{{ docs_output_dir }}\n")
 
-    _write_gradle_repo_root_workflows(
+    write_gradle_repo_root_workflows(
         ctx,
         root_path=repo_root,
         repo_github_repo="wabbit-corp/jeeves",
@@ -1240,7 +1268,7 @@ def test_write_gradle_repo_root_workflows_skips_release_publish_when_nested_vers
         kmp_template="KMP_TEMPLATE",
     )
 
-    _write_gradle_repo_root_workflows(
+    write_gradle_repo_root_workflows(
         ctx,
         root_path=repo_root,
         repo_github_repo="wabbit-corp/jeeves",
@@ -1309,9 +1337,9 @@ def test_setup_gradle_project_renders_gradle_plugin_project_defaults(
     version_resource.write_text("version=${projectVersion}\n", encoding="utf-8")
 
     repo_root = Path(__file__).resolve().parents[2]
-    jvm_template = (
-        repo_root / "data-repo-template" / "gradle-files" / "subproject-build.gradle.kts.jinja2"
-    ).read_text(encoding="utf-8")
+    jvm_template = (repo_root / "data-repo-template" / "gradle-files" / "subproject-build.gradle.kts.jinja2").read_text(
+        encoding="utf-8"
+    )
     ctx = _make_context(
         tmp_path,
         jvm_template=jvm_template,

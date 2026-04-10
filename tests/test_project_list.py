@@ -32,7 +32,9 @@ def _empty_config() -> Config:
     return Config(raw=parse("()"))
 
 
-def _python_project(path: Path, *, project_id: str, repo_id: str | None = None, repo_root: Path | None = None) -> PythonProject:
+def _python_project(
+    path: Path, *, project_id: str, repo_id: str | None = None, repo_root: Path | None = None
+) -> PythonProject:
     return PythonProject(
         path=path,
         name=path.name,
@@ -254,7 +256,9 @@ def test_render_project_repo_lines_show_repo_metadata() -> None:
         [
             (
                 "jeeves/api",
-                _gradle_project(repo_root / "api", project_id="jeeves/api", build_model="kmp", repo_id="jeeves", repo_root=repo_root),
+                _gradle_project(
+                    repo_root / "api", project_id="jeeves/api", build_model="kmp", repo_id="jeeves", repo_root=repo_root
+                ),
             ),
             (
                 "jeeves/client",
@@ -272,7 +276,9 @@ def test_render_project_repo_lines_show_repo_metadata() -> None:
     from dev.repo_resolution import ResolvedRepoTarget
 
     lines = render_project_repo_lines(
-        ResolvedRepoTarget(name="jeeves", path=repo_root, repo_id="jeeves", project_ids=("jeeves/api", "jeeves/client")),
+        ResolvedRepoTarget(
+            name="jeeves", path=repo_root, repo_id="jeeves", project_ids=("jeeves/api", "jeeves/client")
+        ),
         config,
     )
 
@@ -388,7 +394,9 @@ def test_project_repo_payload_is_machine_readable() -> None:
     from dev.repo_resolution import ResolvedRepoTarget
 
     payload = project_repo_payload(
-        ResolvedRepoTarget(name="jeeves", path=repo_root, repo_id="jeeves", project_ids=("jeeves/api", "jeeves/client")),
+        ResolvedRepoTarget(
+            name="jeeves", path=repo_root, repo_id="jeeves", project_ids=("jeeves/api", "jeeves/client")
+        ),
         config,
     )
 
@@ -411,7 +419,9 @@ async def test_cli_project_list_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
 
     called: list[str] = []
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
+    monkeypatch.setattr(
+        doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True
+    )
 
     def fake_list_projects() -> None:
         called.append("called")
@@ -433,7 +443,9 @@ async def test_cli_project_show_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
 
     called: list[list[str]] = []
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
+    monkeypatch.setattr(
+        doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True
+    )
 
     def fake_show_projects(project_ids: list[str], *, json_output: bool = False) -> None:
         assert json_output is False
@@ -457,7 +469,9 @@ async def test_cli_project_show_defaults_to_current_project(monkeypatch: pytest.
 
     called: list[list[str]] = []
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
+    monkeypatch.setattr(
+        doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True
+    )
     monkeypatch.setattr(cli, "_load_workspace_config", lambda: object())
     monkeypatch.setattr(repo_resolution, "inferred_project_targets", lambda config, targets=None: ["app-wabbit-dev"])
 
@@ -482,7 +496,9 @@ async def test_cli_project_deps_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
 
     called: list[list[str]] = []
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
+    monkeypatch.setattr(
+        doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True
+    )
 
     def fake_show_project_dependencies(project_ids: list[str], *, json_output: bool = False) -> None:
         assert json_output is False
@@ -505,7 +521,9 @@ async def test_cli_project_repo_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
 
     called: list[list[str]] = []
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
+    monkeypatch.setattr(
+        doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True
+    )
 
     def fake_show_project_repos(project_ids: list[str], *, json_output: bool = False) -> None:
         assert json_output is False
@@ -539,7 +557,9 @@ async def test_cli_project_show_suggests_close_project_id(
         ]
     )
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
+    monkeypatch.setattr(
+        doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True
+    )
     monkeypatch.setattr(project_list, "load_config", lambda: config)
     monkeypatch.setattr("sys.argv", ["dev.py", "project", "show", "app-wabbit-de"])
 

@@ -22,7 +22,9 @@ async def test_publish_dry_run_prints_plan_without_calling_publishers(
     monkeypatch.setattr(publish_task, "load_config", lambda: config)
     monkeypatch.setattr(publish_task, "resolve_project_ids", lambda config, targets: list(targets))
     monkeypatch.setattr(publish_task, "toposort_projects", lambda _projects, target_project=None: ["alpha", "beta"])
-    monkeypatch.setattr(publish_task, "determine_publish_target", lambda project: "pypi" if project.name == "alpha" else "skip")
+    monkeypatch.setattr(
+        publish_task, "determine_publish_target", lambda project: "pypi" if project.name == "alpha" else "skip"
+    )
     monkeypatch.setattr(publish_task, "create_repo_setup_context", lambda *_args, **_kwargs: calls.append("setup"))
     monkeypatch.setattr(publish_task, "publish_python_project_to_pypi", lambda *args, **kwargs: calls.append("pypi"))
 

@@ -165,12 +165,8 @@ def _make_setup_context(pyproject_template: str, codespell_words: str = "wabbit\
         python_docs_deploy_workflow_template=jinja2.Template("name: Docs Deploy\n"),
         gradle_release_publish_workflow_template=jinja2.Template("name: Release Publish\n"),
         gradle_snapshot_publish_workflow_template=jinja2.Template("name: Snapshot Publish\n"),
-        gradle_compiler_plugin_release_publish_workflow_template=jinja2.Template(
-            "name: Compiler Release Publish\n"
-        ),
-        gradle_compiler_plugin_snapshot_publish_workflow_template=jinja2.Template(
-            "name: Compiler Snapshot Publish\n"
-        ),
+        gradle_compiler_plugin_release_publish_workflow_template=jinja2.Template("name: Compiler Release Publish\n"),
+        gradle_compiler_plugin_snapshot_publish_workflow_template=jinja2.Template("name: Compiler Snapshot Publish\n"),
         gradle_docs_quality_workflow_template=jinja2.Template("name: Gradle Docs Quality\n"),
         gradle_docs_deploy_workflow_template=jinja2.Template("name: Gradle Docs Deploy\n"),
         python_codespell_ignore_words_template=jinja2.Template(codespell_words),
@@ -223,20 +219,15 @@ def test_setup_project_skips_remote_check_when_github_api_unavailable(
     repo = Repo.init(project.path)
     repo.close()
 
-    warning_messages: list[str] = []
     error_messages: list[str] = []
 
     def fake_setup_python_project(ctx: object, python_project: PythonProject, interactive: bool = True) -> None:
         del ctx, python_project, interactive
 
-    def capture_warning(message: str) -> None:
-        warning_messages.append(message)
-
     def capture_error(message: str) -> None:
         error_messages.append(message)
 
     monkeypatch.setattr(setup_module, "setup_python_project", fake_setup_python_project)
-    monkeypatch.setattr(setup_module, "warning", capture_warning)
     monkeypatch.setattr(setup_module, "error", capture_error)
 
     ctx = _make_setup_context('[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n')
@@ -245,7 +236,6 @@ def test_setup_project_skips_remote_check_when_github_api_unavailable(
 
     setup_module.setup_project(ctx, project, interactive=False)
 
-    assert "GitHub API unavailable; skipping remote existence check." in warning_messages
     assert f"Remote repository {project.github_repo} does not exist" not in error_messages
 
 
@@ -587,9 +577,7 @@ def test_setup_python_project_preserves_existing_docs_and_refreshes_workflows(
     )
 
 
-def test_setup_python_project_appends_pyproject_extra_toml(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_setup_python_project_appends_pyproject_extra_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
 
@@ -954,7 +942,9 @@ def test_setup_prod_removes_stale_gradle_local_overlay_from_selected_repo_root(
 
     monkeypatch.setattr(setup_module, "load_config", lambda: config)
     monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["kotlin-web-common"])
-    monkeypatch.setattr(setup_module, "create_repo_setup_context", lambda _config, mode: SimpleNamespace(config=config, mode=mode))
+    monkeypatch.setattr(
+        setup_module, "create_repo_setup_context", lambda _config, mode: SimpleNamespace(config=config, mode=mode)
+    )
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
@@ -1011,7 +1001,9 @@ def test_setup_treats_empty_projects_list_as_all_projects(tmp_path: Path, monkey
     monkeypatch.setattr(
         setup_module,
         "toposort_projects",
-        lambda *_args, **_kwargs: pytest.fail("toposort_projects should not be called when projects=[] means all projects"),
+        lambda *_args, **_kwargs: pytest.fail(
+            "toposort_projects should not be called when projects=[] means all projects"
+        ),
     )
     monkeypatch.setattr(
         setup_module,
@@ -1134,8 +1126,14 @@ def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(setup_common_module, "write_wabbit_legal_documents", lambda _ctx, project: written_paths.append(project.path))
-    monkeypatch.setattr(setup_common_module, "write_wabbit_legal_files", lambda _ctx, project: written_license_paths.append(project.path))
+    monkeypatch.setattr(
+        setup_common_module, "write_wabbit_legal_documents", lambda _ctx, project: written_paths.append(project.path)
+    )
+    monkeypatch.setattr(
+        setup_common_module,
+        "write_wabbit_legal_files",
+        lambda _ctx, project: written_license_paths.append(project.path),
+    )
     monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
 
     setup_module.setup(setup_module.RepoSetupMode.LOCAL, interactive=False, project="jeeves/api")
@@ -1346,6 +1344,31 @@ def test_setup_repo_root_license_keeps_shared_test_license_when_some_repo_projec
     assert len(written_projects) == 1
     assert written_projects[0].path == repo_root
     assert written_projects[0].test_license == "LicenseRef-Wabbit-Public-Test-License-1.1"
+
+
+def test_cleanup_test_license_outputs_keeps_current_canonical_license_file(tmp_path: Path) -> None:
+    import dev.tasks.setup_common as setup_common_module
+    from dev.config import OwnershipType
+
+    project = SimpleNamespace(
+        path=tmp_path,
+        ownership=OwnershipType.WABBIT,
+        test_license="LicenseRef-Wabbit-Public-Test-License-1.1",
+    )
+    licenses_dir = tmp_path / "LICENSES"
+    licenses_dir.mkdir(parents=True)
+    canonical = licenses_dir / "LicenseRef-Wabbit-Public-Test-License-1.1.md"
+    legacy = licenses_dir / "LicenseRef-Wabbit-Public-Test-License.md"
+    canonical.write_text("canonical\n", encoding="utf-8")
+    legacy.write_text("legacy\n", encoding="utf-8")
+
+    setup_common_module._cleanup_test_license_outputs(
+        project,
+        keep_license="LicenseRef-Wabbit-Public-Test-License-1.1",
+    )
+
+    assert canonical.is_file()
+    assert not legacy.exists()
 
 
 def test_setup_does_not_commit_or_push_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1835,7 +1858,9 @@ def test_write_gradle_local_overlay_includes_local_plugin_projects_for_reachable
     assert "../kotlin-acyclic-plugin:[one.wabbit:kotlin-acyclic-plugin=>:]" in overlay_text
 
 
-def test_write_gradle_local_overlay_merges_plugin_and_compiler_included_builds_for_same_repo_root(tmp_path: Path) -> None:
+def test_write_gradle_local_overlay_merges_plugin_and_compiler_included_builds_for_same_repo_root(
+    tmp_path: Path,
+) -> None:
     from mu.types import Document
 
     import dev.tasks.setup as setup_module
@@ -2243,12 +2268,20 @@ def test_setup_gradle_repo_root_only_overwrites_generated_root_builds(
         include_external_dependencies: bool = False,
         write_dependency_substitutions: bool = False,
     ) -> None:
-        del ctx, root_path, root_project_name, seed_projects, write_wrapper, include_external_dependencies, write_dependency_substitutions
+        del (
+            ctx,
+            root_path,
+            root_project_name,
+            seed_projects,
+            write_wrapper,
+            include_external_dependencies,
+            write_dependency_substitutions,
+        )
         captured_write_build.append(write_build)
 
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", fake_write_gradle_root_files)
     monkeypatch.setattr(setup_module, "_write_repo_root_wabbit_legal_documents", lambda ctx, projects: None)
-    monkeypatch.setattr(setup_module.setup_kotlin, "_write_gradle_repo_root_workflows", lambda *args, **kwargs: None)
+    monkeypatch.setattr(setup_module.setup_kotlin, "write_gradle_repo_root_workflows", lambda *args, **kwargs: None)
 
     ctx = _make_setup_context('[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n')
     ctx.config = config

@@ -32,7 +32,7 @@ from dev.checks.base import (
     known_issue_types,
 )
 from dev.checks.root_paths import E_GITIGNORE_WITHOUT_REPO
-from dev.config import Project, find_workspace_root, load_config
+from dev.config import Config, Project, find_workspace_root, load_config
 from dev.discoverability import did_you_mean_suffix, unknown_name_message
 from dev.ignore_files import IgnoreMatcher, read_checkignore_issue_directives
 from dev.messages import accent, command_text, error, heading, info, style, warning
@@ -40,9 +40,7 @@ from dev.project_layout import build_check_ignore_matcher
 from dev.repo_resolution import configured_repo_targets, inferred_project_targets, resolve_check_paths
 
 _ISSUE_ID_RE = re.compile(r"\b(E_[A-Z0-9_]+)\b")
-_QUOTED_MESSAGE_PLACEHOLDER_RE = re.compile(
-    r"(['\"])\{(?P<field>[a-zA-Z_][a-zA-Z0-9_]*)(?P<spec>:[^}]*)?\}\1"
-)
+_QUOTED_MESSAGE_PLACEHOLDER_RE = re.compile(r"(['\"])\{(?P<field>[a-zA-Z_][a-zA-Z0-9_]*)(?P<spec>:[^}]*)?\}\1")
 
 
 @dataclass(frozen=True)
@@ -93,14 +91,14 @@ class ScopedIssueIgnore:
         return True
 
 
-def _load_optional_config(start: str | Path = ".") -> object | None:
+def _load_optional_config(start: str | Path = ".") -> Config | None:
     if find_workspace_root(Path(start)) is None:
         return None
     return load_config(Path(start))
 
 
-def _load_check_modules(config: object | None) -> dict[str, Module]:
-    if config is not None and hasattr(config, "modules"):
+def _load_check_modules(config: Config | None) -> dict[str, Module]:
+    if config is not None:
         return config.modules
 
     try:
@@ -110,13 +108,9 @@ def _load_check_modules(config: object | None) -> dict[str, Module]:
         return {}
 
 
-def _load_all_checks(config: object | None) -> dict[str, Check]:
+def _load_all_checks(config: Config | None) -> dict[str, Check]:
     modules = _load_check_modules(config)
-    return {
-        check_name: check
-        for check_name, check in modules.items()
-        if isinstance(check, Check)
-    }
+    return {check_name: check for check_name, check in modules.items() if isinstance(check, Check)}
 
 
 def _check_kind(check: Check) -> str:
@@ -154,11 +148,7 @@ def _issue_types_for_check(check: Check) -> tuple[IssueType, ...]:
     if module is None:
         return ()
 
-    issue_types_by_name = {
-        name: value
-        for name, value in vars(module).items()
-        if isinstance(value, IssueType)
-    }
+    issue_types_by_name = {name: value for name, value in vars(module).items() if isinstance(value, IssueType)}
     if not issue_types_by_name:
         return ()
 
@@ -246,24 +236,21 @@ def _catalog_entry(check: Check) -> CheckCatalogEntry:
     )
 
 
-def _catalog(config: object | None = None) -> dict[str, CheckCatalogEntry]:
+def _catalog(config: Config | None = None) -> dict[str, CheckCatalogEntry]:
     checks = _load_all_checks(config)
-    return {
-        name: _catalog_entry(check)
-        for name, check in checks.items()
-    }
+    return {name: _catalog_entry(check) for name, check in checks.items()}
 
 
-def load_check_catalog(config: object | None = None) -> dict[str, CheckCatalogEntry]:
+def load_check_catalog(config: Config | None = None) -> dict[str, CheckCatalogEntry]:
     return _catalog(config)
 
 
-def list_check_names(config: object | None = None) -> list[str]:
+def list_check_names(config: Config | None = None) -> list[str]:
     return sorted(load_check_catalog(config))
 
 
-def _config_target_choices(config: object | None) -> list[str]:
-    if config is None or not hasattr(config, "defined_projects") or not hasattr(config, "defined_repos"):
+def _config_target_choices(config: Config | None) -> list[str]:
+    if config is None:
         return []
     return list(dict.fromkeys([*config.defined_projects.keys(), *config.defined_repos.keys()]))
 
@@ -307,7 +294,7 @@ def _severity_color(severity: Severity) -> str:
     return "red"
 
 
-def _severity_reporter(severity: Severity) -> Callable[..., None]:
+def _severity_reporter(severity: Severity) -> Callable[[str], None]:
     if severity == Severity.INFO:
         return info
     if severity == Severity.WARNING:
@@ -391,19 +378,10 @@ def describe_check(check_name: str, *, json_output: bool = False) -> int:
     ignore_example = f'(checks/ignore-finding "{issue_id}" "**/*" "needle")'
     print(heading("Suppression examples:"))
     print(f"  - root.clj disable: {command_text(disable_example)}")
-    print(
-        "  - root.clj ignore finding text: "
-        + command_text(ignore_example)
-    )
+    print("  - root.clj ignore finding text: " + command_text(ignore_example))
     if entry.kind == "file":
-        print(
-            "  - inline ignore (content-based checks only): "
-            + command_text(f"# check:ignore {issue_id}")
-        )
-        print(
-            "  - inline ignore specific value: "
-            + command_text(f"# check:ignore {issue_id} value=needle")
-        )
+        print("  - inline ignore (content-based checks only): " + command_text(f"# check:ignore {issue_id}"))
+        print("  - inline ignore specific value: " + command_text(f"# check:ignore {issue_id} value=needle"))
     return 0
 
 
@@ -435,9 +413,7 @@ def check_main(
             effective_target = inferred_targets[0]
 
     config_root = (
-        config.workspace_root
-        if config is not None and hasattr(config, "workspace_root") and config.workspace_root is not None
-        else Path.cwd().resolve()
+        config.workspace_root if config is not None and config.workspace_root is not None else Path.cwd().resolve()
     )
 
     projects_by_path: dict[Path, Project] = {}
@@ -582,10 +558,7 @@ def check_main(
         try:
             data = dict(issue.data or {})
             template = _QUOTED_MESSAGE_PLACEHOLDER_RE.sub(
-                lambda match: "{"
-                + match.group("field")
-                + (match.group("spec") or "")
-                + "}",
+                lambda match: "{" + match.group("field") + (match.group("spec") or "") + "}",
                 issue.issue_type.message,
             )
 
@@ -791,11 +764,7 @@ def check_main(
         if not root_path.is_dir():
             return []
         resolved_root = root_path.resolve()
-        return [
-            repo_root
-            for repo_root in configured_repo_paths
-            if is_within(repo_root, resolved_root)
-        ]
+        return [repo_root for repo_root in configured_repo_paths if is_within(repo_root, resolved_root)]
 
     def maybe_run_project_checks(project: Project) -> None:
         resolved_project_path = project.path.resolve()

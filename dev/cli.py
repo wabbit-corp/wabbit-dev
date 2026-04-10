@@ -5,19 +5,47 @@ import os
 import re
 import sys
 import textwrap
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
+from typing import Literal, NoReturn, Protocol, TypedDict, Unpack
 
 from dev.bootstrap import canonical_rerun_command, maybe_reexec_to_workspace_venv
+from dev.config import Config
 from dev.discoverability import did_you_mean_suffix
+from dev.json_types import JSONValue
 from dev.messages import command_text, heading
+from dev.tasks.completion import register_action_metadata, register_parser_child, register_parser_metadata
 
 ##################################################################################################
 # Main
 ##################################################################################################
 
 type ArgParser = argparse.ArgumentParser
-type AddParser = Callable[..., ArgParser]
+
+
+class ParserKwargs(TypedDict, total=False):
+    help: str
+    description: str
+    epilog: str
+    formatter_class: type[argparse.HelpFormatter]
+
+
+class ArgumentKwargs(TypedDict, total=False):
+    action: str
+    nargs: int | str | None
+    type: Callable[[str], str | int | float] | str
+    choices: Iterable[str]
+    required: bool
+    help: str
+    metavar: str | tuple[str, ...]
+    dest: str
+    version: str
+    default: JSONValue
+
+
+class AddParser(Protocol):
+    def __call__(self, name: str, **kwargs: Unpack[ParserKwargs]) -> ArgParser: ...
+
 
 _INVALID_CHOICE_RE = re.compile(r"invalid choice: '([^']+)' \(choose from (.+)\)")
 _CONFIG_CONTEXT_COMMANDS = {
@@ -50,15 +78,11 @@ _CONFIG_CONTEXT_COMMANDS = {
 
 
 class SuggestingArgumentParser(argparse.ArgumentParser):
-    def error(self, message: str) -> None:
+    def error(self, message: str) -> NoReturn:
         match = _INVALID_CHOICE_RE.search(message)
         if match is not None:
             invalid = match.group(1)
-            choices = [
-                choice.strip().strip("'")
-                for choice in match.group(2).split(",")
-                if choice.strip().strip("'")
-            ]
+            choices = [choice.strip().strip("'") for choice in match.group(2).split(",") if choice.strip().strip("'")]
             suggestion = did_you_mean_suffix(invalid, choices)
             if suggestion:
                 message = f"{message}.{suggestion}"
@@ -71,16 +95,19 @@ class HelpFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentDefau
 
 def _add_argument(
     parser: argparse.ArgumentParser,
-    *args: object,
+    *args: str,
     completion_kind: str | None = None,
     completion_allow_files: bool = False,
     completion_blocks_positionals: bool = False,
-    **kwargs: object,
+    **kwargs: Unpack[ArgumentKwargs],
 ) -> argparse.Action:
     action = parser.add_argument(*args, **kwargs)
-    action._completion_kind = completion_kind
-    action._completion_allow_files = completion_allow_files
-    action._completion_blocks_positionals = completion_blocks_positionals
+    register_action_metadata(
+        action,
+        kind=completion_kind,
+        allow_files=completion_allow_files,
+        blocks_positionals=completion_blocks_positionals,
+    )
     return action
 
 
@@ -97,10 +124,6 @@ def _epilog(*, examples: Sequence[str] = (), notes: Sequence[str] = ()) -> str |
     if not sections:
         return None
     return "\n\n".join(sections)
-
-
-def _human_command_path(command_path: str) -> str:
-    return command_path.replace("/", " ")
 
 
 def _normalize_cli_argv(raw_argv: Sequence[str], commands: "Commands") -> list[str]:
@@ -156,6 +179,17 @@ def _normalize_cli_argv(raw_argv: Sequence[str], commands: "Commands") -> list[s
     return normalized
 
 
+def _namespace_string_list(args: argparse.Namespace, key: str) -> list[str]:
+    raw_value = args.__dict__.get(key)
+    match raw_value:
+        case []:
+            return []
+        case [str() as first, *rest] if all(isinstance(item, str) for item in rest):
+            return [first, *rest]
+        case _:
+            return []
+
+
 def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
     match command_path:
         case "where":
@@ -167,7 +201,8 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
             return ["config", "check"]
         case "doctor":
             tokens = ["doctor"]
-            for value in args.only or []:
+            only_values = _namespace_string_list(args, "only")
+            for value in only_values:
                 tokens.extend(["--only", value])
             if args.json:
                 tokens.append("--json")
@@ -350,22 +385,25 @@ def _print_failure_context(command_path: str, *, args: argparse.Namespace) -> No
 
 
 def _guidance_target(args: argparse.Namespace) -> str | None:
-    targets = getattr(args, "targets", None)
-    if isinstance(targets, list) and targets:
-        return targets[0]
+    if hasattr(args, "targets"):
+        targets = args.targets
+        if isinstance(targets, list) and targets and isinstance(targets[0], str):
+            return targets[0]
 
-    target = getattr(args, "target", None)
-    if isinstance(target, str) and target not in {".", ":root"}:
-        return target
+    if hasattr(args, "target"):
+        target = args.target
+        if isinstance(target, str) and target not in {".", ":root"}:
+            return target
 
-    project_or_dir_or_file = getattr(args, "project_or_dir_or_file", None)
-    if isinstance(project_or_dir_or_file, str) and project_or_dir_or_file not in {".", ":root"}:
-        return project_or_dir_or_file
+    if hasattr(args, "project_or_dir_or_file"):
+        project_or_dir_or_file = args.project_or_dir_or_file
+        if isinstance(project_or_dir_or_file, str) and project_or_dir_or_file not in {".", ":root"}:
+            return project_or_dir_or_file
 
     return None
 
 
-def _load_workspace_config() -> object | None:
+def _load_workspace_config() -> Config | None:
     from dev.config import find_workspace_root, load_config
 
     if find_workspace_root() is None:
@@ -455,23 +493,45 @@ def _print_next_steps(command_path: str, *, prog: str, args: argparse.Namespace)
                 steps = [f"{prog} check :root", f"{prog} project list", f"{prog} publish --dry-run"]
         case "publish":
             if getattr(args, "dry_run", False):
-                steps = [f"{prog} publish {target}" if target else f"{prog} publish", f"{prog} status {target}" if target else f"{prog} project list", f"{prog} push --dry-run {target}" if target else f"{prog} push --dry-run"]
+                steps = [
+                    f"{prog} publish {target}" if target else f"{prog} publish",
+                    f"{prog} status {target}" if target else f"{prog} project list",
+                    f"{prog} push --dry-run {target}" if target else f"{prog} push --dry-run",
+                ]
             else:
-                steps = [f"{prog} status {target}" if target else f"{prog} project list", f"{prog} push --dry-run {target}" if target else f"{prog} push --dry-run", f"{prog} push {target}" if target else f"{prog} push"]
+                steps = [
+                    f"{prog} status {target}" if target else f"{prog} project list",
+                    f"{prog} push --dry-run {target}" if target else f"{prog} push --dry-run",
+                    f"{prog} push {target}" if target else f"{prog} push",
+                ]
         case "project/show":
             if target is None:
                 return
             steps = [f"{prog} project deps {target}", f"{prog} project targets {target}", f"{prog} build {target}"]
         case "commit":
             if getattr(args, "dry_run", False):
-                steps = [f"{prog} commit {target}" if target else f"{prog} commit", f"{prog} status {target}" if target else f"{prog} project list", f"{prog} push --dry-run {target}" if target else f"{prog} push --dry-run"]
+                steps = [
+                    f"{prog} commit {target}" if target else f"{prog} commit",
+                    f"{prog} status {target}" if target else f"{prog} project list",
+                    f"{prog} push --dry-run {target}" if target else f"{prog} push --dry-run",
+                ]
             else:
-                steps = [f"{prog} status {target}" if target else f"{prog} project list", f"{prog} push --dry-run {target}" if target else f"{prog} push --dry-run", f"{prog} push {target}" if target else f"{prog} push"]
+                steps = [
+                    f"{prog} status {target}" if target else f"{prog} project list",
+                    f"{prog} push --dry-run {target}" if target else f"{prog} push --dry-run",
+                    f"{prog} push {target}" if target else f"{prog} push",
+                ]
         case "push":
             if getattr(args, "dry_run", False):
-                steps = [f"{prog} push {target}" if target else f"{prog} push", f"{prog} status {target}" if target else f"{prog} project list"]
+                steps = [
+                    f"{prog} push {target}" if target else f"{prog} push",
+                    f"{prog} status {target}" if target else f"{prog} project list",
+                ]
             else:
-                steps = [f"{prog} status {target}" if target else f"{prog} project list", f"{prog} project repo {target}" if target else f"{prog} project list"]
+                steps = [
+                    f"{prog} status {target}" if target else f"{prog} project list",
+                    f"{prog} project repo {target}" if target else f"{prog} project list",
+                ]
         case _:
             return
 
@@ -527,13 +587,13 @@ class Commands:
                     metavar="COMMAND",
                     parser_class=SuggestingArgumentParser,
                 )
-                subparsers[""] = root_subparsers.add_parser
+                subparsers[""] = root_subparsers.add_parser  # type: ignore[reportArgumentType]
 
             for i in range(1, len(path) + 1):
                 p = "/".join(path[:i])
                 p0 = "/".join(path[: i - 1])
                 if p not in parsers:
-                    parser_kwargs: dict[str, object] = {"formatter_class": HelpFormatter}
+                    parser_kwargs: ParserKwargs = {"formatter_class": HelpFormatter}
                     if i == len(path):
                         if help is not None:
                             parser_kwargs["help"] = help
@@ -542,6 +602,7 @@ class Commands:
                         if epilog is not None:
                             parser_kwargs["epilog"] = epilog
                     parsers[p] = subparsers[p0](path[i - 1], **parser_kwargs)
+                    register_parser_child(parsers[p0], path[i - 1], parsers[p])
                 if p not in subparsers and i != len(path):
                     child_subparsers = parsers[p].add_subparsers(
                         dest=subcommand(i),
@@ -549,11 +610,11 @@ class Commands:
                         metavar="SUBCOMMAND",
                         parser_class=SuggestingArgumentParser,
                     )
-                    subparsers[p] = child_subparsers.add_parser
+                    subparsers[p] = child_subparsers.add_parser  # type: ignore[reportArgumentType]
 
             self.parser = parsers[normalized_name]
             self.parser.formatter_class = HelpFormatter
-            self.parser._completion_hidden = help == argparse.SUPPRESS
+            register_parser_metadata(self.parser, hidden=help == argparse.SUPPRESS)
             if description is not None:
                 self.parser.description = description
             if epilog is not None:
@@ -592,15 +653,13 @@ class Commands:
 def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     parser = SuggestingArgumentParser(
         prog="dev",
-        description=_doc(
-            """
+        description=_doc("""
             Wabbit development toolkit.
 
             The CLI reads workspace metadata from root.clj and root.private.clj to
             generate project files, run checks, inspect dependencies, build projects,
             publish releases, and automate repository maintenance tasks.
-            """
-        ),
+            """),
         formatter_class=HelpFormatter,
         allow_abbrev=False,
     )
@@ -632,15 +691,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "where",
         help="Show the workspace, repo, and project context inferred from the current directory.",
-        description=_doc(
-            """
+        description=_doc("""
             Print the CLI context inferred from the current working directory.
 
             This shows the resolved workspace root, current configured project,
             current repo target, and the commands that inherit those defaults
             when you omit explicit targets.
-            """
-        ),
+            """),
         epilog=examples("where", "where --json"),
     ) as cmd:
         cmd.add_argument(
@@ -652,15 +709,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "config",
         help="Validate workspace configuration files.",
-        description=_doc(
-            """
+        description=_doc("""
             Parse and validate the workspace configuration files.
 
             These commands check that root.clj and root.private.clj can be decoded
             into the internal project model before you rely on setup, build, check,
             or publish workflows.
-            """
-        ),
+            """),
         epilog=examples("config check"),
     ) as cmd:
         del cmd
@@ -668,14 +723,12 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "completion",
         help="Generate shell completion scripts.",
-        description=_doc(
-            """
+        description=_doc("""
             Generate shell completion scripts for the dev CLI.
 
             The generated completions include top-level commands, nested
             subcommands, configured project and repo IDs, and loaded check names.
-            """
-        ),
+            """),
         epilog=examples(
             "completion bash",
             "completion zsh",
@@ -692,14 +745,12 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "completion",
         "bash",
         help="Print a bash completion script.",
-        description=_doc(
-            """
+        description=_doc("""
             Print a bash completion script to stdout.
 
             Source it from your shell profile or interactively to enable command,
             subcommand, target, and check-name completion.
-            """
-        ),
+            """),
         epilog=examples("completion bash"),
     ) as cmd:
         del cmd
@@ -708,14 +759,12 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "completion",
         "zsh",
         help="Print a zsh completion script.",
-        description=_doc(
-            """
+        description=_doc("""
             Print a zsh completion script to stdout.
 
             Source it from your shell profile after `compinit` to enable command,
             subcommand, target, and check-name completion.
-            """
-        ),
+            """),
         epilog=examples("completion zsh"),
     ) as cmd:
         del cmd
@@ -734,13 +783,11 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "config",
         "check",
         help="Parse and validate root.clj and root.private.clj.",
-        description=_doc(
-            """
+        description=_doc("""
             Parse root.clj and root.private.clj and fail fast on invalid command
             forms, unknown references, malformed dependency definitions, or other
             configuration errors.
-            """
-        ),
+            """),
         epilog=examples(
             "config check",
             notes=[
@@ -753,15 +800,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "doctor",
         help="Diagnose workspace, toolchain, and credential readiness.",
-        description=_doc(
-            """
+        description=_doc("""
             Run an environment and workspace readiness check.
 
             `doctor` validates the current working directory, required config
             files, Python version, virtual environment usage, tool availability,
             config loading, and publish/commit credentials.
-            """
-        ),
+            """),
         epilog=examples(
             "doctor",
             "doctor app-wabbit-dev",
@@ -803,14 +848,12 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "docs",
         help="Validate project documentation quality.",
-        description=_doc(
-            """
+        description=_doc("""
             Run deterministic and optional semantic documentation checks.
 
             Use `docs check` to validate markdown links, docs section coverage,
             docs hooks, code snippets, and optionally LLM-based semantic quality.
-            """
-        ),
+            """),
         epilog=examples("docs check", "docs check --semantic app-wabbit-dev"),
     ) as cmd:
         del cmd
@@ -819,8 +862,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "docs",
         "check",
         help="Check project documentation links, sections, snippets, and optional semantic quality.",
-        description=_doc(
-            """
+        description=_doc("""
             Validate docs for one or more configured projects.
 
             The deterministic layer checks internal links, external links and
@@ -828,8 +870,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             compileable or parseable code snippets. `--semantic` adds an
             LLM-based advisory pass for issues such as weak quickstarts or
             misleading examples.
-            """
-        ),
+            """),
         epilog=examples(
             "docs check",
             "docs check app-wabbit-dev",
@@ -867,8 +908,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "docs",
         "snippets",
         help="Check fenced documentation snippets with optional project-specific deeper verification.",
-        description=_doc(
-            """
+        description=_doc("""
             Validate fenced code blocks extracted from README and docs markdown files.
 
             By default this command stays fast: it syntax-checks or parses
@@ -876,8 +916,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             YAML. `--verify` enables deeper project-level verification when the
             project type supports it, such as project-specific Python snippet
             tests or a single coarse Gradle verification build.
-            """
-        ),
+            """),
         epilog=examples(
             "docs snippets",
             "docs snippets app-wabbit-dev",
@@ -915,15 +954,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "setup",
         help="Generate or refresh project files from root.clj.",
-        description=_doc(
-            """
+        description=_doc("""
             Materialize generated files for configured projects.
 
             `setup` reads root.clj, resolves project dependencies, and writes the
             managed Gradle, Python, legal, workflow, and repository files needed
             for the selected projects.
-            """
-        ),
+            """),
         epilog=examples(
             "setup",
             "setup app-wabbit-dev",
@@ -969,15 +1006,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "release",
         help="Verify release readiness for publishable projects.",
-        description=_doc(
-            """
+        description=_doc("""
             Run release-oriented verification for publishable projects.
 
             `release verify` uses project-type-specific verification backends to
             confirm that selected artifacts can be built and pass their
             publish-facing sanity checks without actually uploading them.
-            """
-        ),
+            """),
         epilog=examples("release verify", "release verify app-wabbit-dev", "release verify --json jeeves"),
     ) as cmd:
         del cmd
@@ -986,8 +1021,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "release",
         "verify",
         help="Verify publishable Python and Gradle projects without uploading them.",
-        description=_doc(
-            """
+        description=_doc("""
             Verify release readiness in dependency order for the selected targets.
 
             Python projects build wheel and sdist artifacts, run `twine check`,
@@ -996,8 +1030,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             dependencies are already available from Maven Central, then run
             publication-oriented verification tasks in PROD-style dependency
             resolution and restore local overlays afterward when needed.
-            """
-        ),
+            """),
         epilog=examples(
             "release verify",
             "release verify app-wabbit-dev",
@@ -1030,14 +1063,12 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "llmcopy",
         help="Copy file contents to the clipboard in an LLM-friendly envelope and report GPT-5.4 token totals.",
-        description=_doc(
-            """
+        description=_doc("""
             Read one or more files, directories, or glob patterns and copy their
             contents to the clipboard using a `<contents path="...">` wrapper that
             is convenient to paste into external tools or prompts. After copying,
             report the total token count using GPT-5.4 tokenization.
-            """
-        ),
+            """),
         epilog=examples(
             "llmcopy README.md docs",
             "llmcopy 'dev/tasks/*.py'",
@@ -1062,14 +1093,12 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "dep",
         help="Inspect dependency definitions and graphs.",
-        description=_doc(
-            """
+        description=_doc("""
             Analyze the dependency metadata loaded from root.clj.
 
             Use `dep` subcommands to render project dependency graphs or inspect
             whether configured named libraries have newer upstream versions.
-            """
-        ),
+            """),
         epilog=examples("dep graph", "dep updates"),
     ) as cmd:
         del cmd
@@ -1078,15 +1107,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "dep",
         "graph",
         help="Render an SVG graph of project dependencies.",
-        description=_doc(
-            """
+        description=_doc("""
             Generate an SVG dependency graph from the project relationships defined
             in root.clj.
 
             By default the graph includes only configured project-to-project
             edges. Use `--artifacts` to include external Maven artifacts as nodes.
-            """
-        ),
+            """),
         epilog=examples(
             "dep graph",
             "dep graph app-datatron",
@@ -1119,14 +1146,12 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "dep",
         "updates",
         help="Check configured Maven libraries and pinned Python deps for newer upstream versions.",
-        description=_doc(
-            """
+        description=_doc("""
             Compare named Maven libraries defined in root.clj and exact-pinned
             Python project dependencies against the latest versions available
             from their upstream repositories, then print any newer candidates
             that were found.
-            """
-        ),
+            """),
         epilog=examples(
             "dep updates",
             notes=[
@@ -1140,15 +1165,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "publish",
         help="Publish configured projects in dependency order.",
-        description=_doc(
-            """
+        description=_doc("""
             Publish selected projects using the publish target inferred from each
             project's metadata and features.
 
             Gradle projects can publish to Maven Central, JitPack, or JetBrains
             Marketplace. Python projects can publish to PyPI.
-            """
-        ),
+            """),
         epilog=examples(
             "publish",
             "publish app-wabbit-dev",
@@ -1180,15 +1203,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "build",
         help="Build configured Gradle or Python projects in dependency order.",
-        description=_doc(
-            """
+        description=_doc("""
             Build selected projects after topologically ordering them by configured
             project dependencies.
 
             Gradle projects run their `build` task. Python projects are syntax
             checked by compiling discovered `.py` files.
-            """
-        ),
+            """),
         epilog=examples(
             "build",
             "build app-datatron",
@@ -1221,16 +1242,14 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "duplicates",
         help="Find duplicate files and directory trees.",
-        description=_doc(
-            """
+        description=_doc("""
             Scan one or more folders for duplicate files and duplicate directory
             trees using a staged fingerprinting pipeline designed to minimize I/O.
 
             The command can optionally compare filesystem directories against zip
             contents and, when requested, perform weaker matching for encrypted zip
             archives using visible metadata.
-            """
-        ),
+            """),
         epilog=examples(
             "duplicates app-wabbit-dev app-wabbit-code",
             "duplicates . --exclude '*.png' '*.jpg' --size 4096",
@@ -1292,12 +1311,10 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "jitpack",
         help="Inspect JitPack metadata for an artifact.",
-        description=_doc(
-            """
+        description=_doc("""
             Query JitPack for refs, commits, versions, build metadata, and build
             logs associated with an artifact.
-            """
-        ),
+            """),
         epilog=examples("jitpack info wabbit-corp kotlin-base58"),
     ) as cmd:
         del cmd
@@ -1306,16 +1323,14 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "jitpack",
         "info",
         help="Show refs, commits, versions, and build info for a JitPack artifact.",
-        description=_doc(
-            """
+        description=_doc("""
             Inspect the current JitPack state for an artifact by printing:
 
             - known refs
             - recent master commits
             - published versions
             - build details and any compiler-style errors discovered in build logs
-            """
-        ),
+            """),
         epilog=examples(
             "jitpack info wabbit-corp kotlin-base58",
             "jitpack info wabbit-corp kotlin-base58 0.1.0",
@@ -1346,13 +1361,11 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "clean",
         help="Delete generated caches and build outputs for configured projects.",
-        description=_doc(
-            """
+        description=_doc("""
             Remove common generated directories such as `build`, `.gradle`,
             `.pytest_cache`, `.mypy_cache`, `.kotlin`, and Python `__pycache__`
             directories from configured projects.
-            """
-        ),
+            """),
         epilog=examples(
             "clean",
             "clean app-wabbit-dev",
@@ -1377,15 +1390,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "cloc",
         help="Summarize lines of code for configured targets or paths.",
-        description=_doc(
-            """
+        description=_doc("""
             Run `cloc` and print language totals.
 
             For configured targets, the command focuses on source directories that
             matter for each project type. When given an arbitrary path, it runs
             `cloc` directly on that path.
-            """
-        ),
+            """),
         epilog=examples(
             "cloc",
             "cloc app-wabbit-dev",
@@ -1411,14 +1422,12 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "status",
         help="Show repo status for selected targets.",
-        description=_doc(
-            """
+        description=_doc("""
             Print a repo status summary similar to `git status --short`.
 
             The output includes staged changes, unstaged changes, and untracked
             files for one or more resolved repository targets.
-            """
-        ),
+            """),
         epilog=examples(
             "status",
             "status app-wabbit-dev",
@@ -1450,13 +1459,11 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "commit",
         help="Run setup, stage changes, and create commits for configured projects.",
-        description=_doc(
-            """
+        description=_doc("""
             Run PROD setup for the target projects, group them by repository,
             stage detected changes, and generate commit messages using the OpenAI
             key configured in root.private.clj.
-            """
-        ),
+            """),
         epilog=examples(
             "commit",
             "commit app-wabbit-dev",
@@ -1488,15 +1495,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "push",
         help="Push origin/master and tags for selected repos or all configured repos.",
-        description=_doc(
-            """
+        description=_doc("""
             Push tags plus the `master` branch to `origin`.
 
             With no targets or `.` the command walks every configured project repo
             and pushes each distinct repository once. With explicit targets it
             pushes the repos resolved from those repo IDs, project IDs, or paths.
-            """
-        ),
+            """),
         epilog=examples(
             "push",
             "push .",
@@ -1530,12 +1535,10 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "project",
         help="Inspect the configured project inventory.",
-        description=_doc(
-            """
+        description=_doc("""
             Explore the projects defined in root.clj and how repo-managed projects
             are grouped under their parent repositories.
-            """
-        ),
+            """),
         epilog=examples(
             "project list",
             "project repo",
@@ -1551,13 +1554,11 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "project",
         "list",
         help="List configured projects grouped by repository.",
-        description=_doc(
-            """
+        description=_doc("""
             Print every configured project in declaration order, grouping nested
             repo-managed projects under their containing repository and labeling
             each entry by its detected project type.
-            """
-        ),
+            """),
         epilog=examples("project list"),
     ) as cmd:
         del cmd
@@ -1566,15 +1567,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "project",
         "show",
         help="Show detailed metadata for one or more configured projects.",
-        description=_doc(
-            """
+        description=_doc("""
             Print the resolved metadata for one or more projects.
 
             This includes the project type, path, repo root, resolved
             dependencies, publish target, docs system, JVM policy, and the main
             generated files that `setup` is expected to manage.
-            """
-        ),
+            """),
         epilog=examples(
             "project show",
             "project show app-wabbit-dev",
@@ -1607,14 +1606,12 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "project",
         "deps",
         help="Show resolved dependencies for one or more configured projects.",
-        description=_doc(
-            """
+        description=_doc("""
             Print the resolved dependency list for one or more projects.
 
             Targets can be individual projects, whole configured repos, or paths
             inside configured projects or repos.
-            """
-        ),
+            """),
         epilog=examples(
             "project deps",
             "project deps app-wabbit-dev",
@@ -1647,15 +1644,13 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "project",
         "repo",
         help="Show repository metadata for one or more configured targets.",
-        description=_doc(
-            """
+        description=_doc("""
             Print the repo-level metadata associated with one or more configured
             projects or repos.
 
             Targets can be project IDs, repo IDs, or paths inside configured
             projects or repos. Repositories are de-duplicated in the output.
-            """
-        ),
+            """),
         epilog=examples(
             "project repo",
             "project repo app-wabbit-dev",
@@ -1688,8 +1683,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "project",
         "targets",
         help="Show Kotlin Multiplatform target platforms for configured projects.",
-        description=_doc(
-            """
+        description=_doc("""
             Print the declared Kotlin Multiplatform target platforms for one or
             more configured projects.
 
@@ -1697,8 +1691,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             declaration order. Explicit targets can be project IDs, repo IDs, or
             paths inside configured projects or repos; non-KMP projects are
             ignored.
-            """
-        ),
+            """),
         epilog=examples(
             "project targets",
             "project targets kotlin-filesystem",
@@ -1729,14 +1722,12 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "check",
         help="Run repository and source checks, or inspect the loaded check catalog.",
-        description=_doc(
-            """
+        description=_doc("""
             Run the configured check suite against a project, directory, or file.
 
             Use bare `check` to execute checks, `check list` to browse the
             loaded catalog, and `check describe` to inspect one check in detail.
-            """
-        ),
+            """),
         epilog=examples(
             "check",
             "check app-wabbit-dev/dev/cli.py",
@@ -1763,11 +1754,9 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "check",
         "run",
         help=argparse.SUPPRESS,
-        description=_doc(
-            """
+        description=_doc("""
             Run the configured check suite against a project, directory, or file.
-            """
-        ),
+            """),
         epilog=examples(
             "check",
             "check app-wabbit-dev/dev/cli.py",
@@ -1776,7 +1765,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             "check . SpdxHeaderCheck",
         ),
     ) as cmd:
-        cmd._completion_hidden = True
+        register_parser_metadata(cmd, hidden=True)
         _add_argument(
             cmd,
             "project_or_dir_or_file",
@@ -1807,11 +1796,9 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "check",
         "list",
         help="List the loaded checks with scope, fixability, and summaries.",
-        description=_doc(
-            """
+        description=_doc("""
             List the checks currently loaded from the workspace and check modules.
-            """
-        ),
+            """),
         epilog=examples("check list", "check list --json"),
     ) as cmd:
         _add_argument(
@@ -1825,12 +1812,10 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "check",
         "describe",
         help="Show issue IDs, config knobs, and suppression examples for one check.",
-        description=_doc(
-            """
+        description=_doc("""
             Print detailed information about one loaded check, including issue
             IDs, typed config commands, and suppression examples.
-            """
-        ),
+            """),
         epilog=examples("check describe SpdxHeaderCheck", "check describe SpdxHeaderCheck --json"),
     ) as cmd:
         _add_argument(
@@ -1850,11 +1835,9 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "spdx",
         help="SPDX-related quality commands.",
-        description=_doc(
-            """
+        description=_doc("""
             Run SPDX-specific tooling derived from the general check runner.
-            """
-        ),
+            """),
         epilog=examples("spdx headers"),
     ) as cmd:
         del cmd
@@ -1863,13 +1846,11 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "spdx",
         "headers",
         help="Audit or fix SPDX file headers.",
-        description=_doc(
-            """
+        description=_doc("""
             Run only the SPDX header check against a project, directory, or file.
 
             This is a focused shortcut for `check ... SpdxHeaderCheck`.
-            """
-        ),
+            """),
         epilog=examples(
             "spdx headers .",
             "spdx headers app-wabbit-dev --fix",
@@ -1899,14 +1880,12 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "secrets",
         help="Scan for secrets and secret-like strings.",
-        description=_doc(
-            """
+        description=_doc("""
             Run secret-related scanning commands.
 
             The current implementation uses the internal check runner rather
             than invoking an external secret scanning binary.
-            """
-        ),
+            """),
         epilog=examples("secrets scan ."),
     ) as cmd:
         del cmd
@@ -1915,14 +1894,12 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "secrets",
         "scan",
         help="Run the high-entropy-string secret check.",
-        description=_doc(
-            """
+        description=_doc("""
             Run the high-entropy-string secret scan against a target path.
 
             This is equivalent to running the `HighEntropyStringCheck` through
             the general check runner.
-            """
-        ),
+            """),
         epilog=examples(
             "secrets scan .",
             "secrets scan app-wabbit-dev",
@@ -1948,11 +1925,9 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "contributors",
         help="Inspect repository contributor identity.",
-        description=_doc(
-            """
+        description=_doc("""
             Run contributor-related repository audits.
-            """
-        ),
+            """),
         epilog=examples("contributors audit"),
     ) as cmd:
         del cmd
@@ -1961,13 +1936,11 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         "contributors",
         "audit",
         help="Audit git contributor identity mismatches across configured repos.",
-        description=_doc(
-            """
+        description=_doc("""
             Walk configured git repositories and report contributors whose name
             or email does not match the expected default git identity from the
             loaded configuration.
-            """
-        ),
+            """),
         epilog=examples(
             "contributors audit",
             notes=[
@@ -1993,6 +1966,12 @@ async def async_main() -> int:
     prog = parser.prog
 
     normalized_argv = _normalize_cli_argv(sys.argv[1:], commands)
+    from dev.typed_cli import maybe_run_typed_cli
+
+    typed_exit_code = await maybe_run_typed_cli(normalized_argv, prog=prog)
+    if typed_exit_code is not None:
+        return typed_exit_code
+
     args = parser.parse_args(normalized_argv)
     command_path = getattr(args, "command_path", None)
     if command_path is None:
@@ -2008,7 +1987,21 @@ async def async_main() -> int:
     from dev.tasks.doctor import preflight_for_command
 
     selected_projects: tuple[str, ...] | None = None
-    if command_path in {"docs/check", "docs/snippets", "setup", "release/verify", "build", "publish", "commit", "clean", "dep/graph"} and args.targets:
+    if (
+        command_path
+        in {
+            "docs/check",
+            "docs/snippets",
+            "setup",
+            "release/verify",
+            "build",
+            "publish",
+            "commit",
+            "clean",
+            "dep/graph",
+        }
+        and args.targets
+    ):
         selected_projects = tuple(args.targets)
     elif command_path in {"project/show", "project/deps", "project/repo", "project/targets"}:
         selected_projects = tuple(args.targets)
@@ -2043,7 +2036,7 @@ async def async_main() -> int:
             case "completion/query":
                 from dev.tasks.completion import print_completion_query
 
-                return print_completion_query(args.shell, args.index, args.words)
+                return print_completion_query(parser, args.shell, args.index, args.words)
 
             case "doctor":
                 from dev.tasks.doctor import doctor
@@ -2231,6 +2224,6 @@ async def async_main() -> int:
     return exit_code
 
 
-def main(*, launch_mode: str = "script") -> None:
+def main(*, launch_mode: Literal["script", "module"] = "script") -> None:
     maybe_reexec_to_workspace_venv(launch_mode=launch_mode)
     raise SystemExit(asyncio.run(async_main()))

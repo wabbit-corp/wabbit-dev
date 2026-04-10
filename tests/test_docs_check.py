@@ -427,11 +427,7 @@ def test_docs_check_reports_missing_readme_quality_sections(
     _write_common_docs(
         project_path,
         readme_text=(
-            "# Alpha\n\n"
-            "## Installation\n\n"
-            "Install it.\n\n"
-            "## Quickstart\n\n"
-            "```python\nprint('ok')\n```\n"
+            "# Alpha\n\n" "## Installation\n\n" "Install it.\n\n" "## Quickstart\n\n" "```python\nprint('ok')\n```\n"
         ),
     )
     project = _make_python_project(project_path)
@@ -472,7 +468,7 @@ def test_docs_snippets_json_reports_success(
             "Alpha is a small developer library that exists to make alpha workflows predictable for integrations.\n\n"
             "## Examples\n\n"
             "```python\nprint('ok')\n```\n\n"
-            "```json\n{\"ok\": true}\n```\n"
+            '```json\n{"ok": true}\n```\n'
         ),
     )
     project = _make_python_project(project_path)
@@ -571,7 +567,7 @@ def test_docs_snippets_runs_gradle_build_when_verify_requested(
     project_path = tmp_path / "alpha"
     project_path.mkdir()
     (project_path / "README.md").write_text(
-        "# Alpha\n\n## Examples\n\n```kotlin\nprintln(\"ok\")\n```\n",
+        '# Alpha\n\n## Examples\n\n```kotlin\nprintln("ok")\n```\n',
         encoding="utf-8",
     )
     project = _make_gradle_project(project_path)
@@ -605,7 +601,7 @@ def test_docs_snippets_kmp_gradle_build_uses_multiplatform_publication(
     project_path = tmp_path / "alpha"
     project_path.mkdir()
     (project_path / "README.md").write_text(
-        "# Alpha\n\n## Examples\n\n```kotlin\nprintln(\"ok\")\n```\n",
+        '# Alpha\n\n## Examples\n\n```kotlin\nprintln("ok")\n```\n',
         encoding="utf-8",
     )
     (project_path / "gradlew").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")

@@ -1,17 +1,34 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
+
+import pytest
 
 from dev.checks.base import FileContext
 from dev.checks.file_headers import SpdxHeaderCheck, expected_spdx_identifier, render_spdx_fixed_text
-from dev.config import OwnershipType
+from dev.config import OwnershipType, PythonProject
 
 
-def _project(tmp_path: Path) -> SimpleNamespace:
-    return SimpleNamespace(
+def _project(tmp_path: Path) -> PythonProject:
+    return PythonProject(
         path=tmp_path,
+        name="demo",
+        version=None,
+        description=None,
+        authors=[],
         license="AGPL",
+        github_repo=None,
+        requires_python=None,
+        dependencies=[],
+        dev_dependencies=[],
+        scripts=[],
+        application=None,
+        homepage=None,
+        repository=None,
+        keywords=[],
+        classifiers=[],
+        quarantine=False,
+        publish=False,
         test_license="LicenseRef-Wabbit-Public-Test-License",
         ownership=OwnershipType.WABBIT,
     )
@@ -80,7 +97,7 @@ def test_spdx_header_check_reports_fix_for_missing_header(tmp_path: Path) -> Non
     assert file_path.read_text(encoding="utf-8").startswith("// SPDX-License-Identifier: AGPL-3.0-or-later\n")
 
 
-def test_spdx_headers_task_delegates_to_spdx_check(monkeypatch) -> None:
+def test_spdx_headers_task_delegates_to_spdx_check(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev.tasks import spdx_headers as task_module
 
     captured: list[tuple[str, list[str], bool]] = []

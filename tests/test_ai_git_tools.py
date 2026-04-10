@@ -3,19 +3,143 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 
+import openai
+import pytest
+from openai.types.chat import (
+    ChatCompletionMessageFunctionToolCall,
+    ChatCompletionMessageParam,
+    ChatCompletionToolParam,
+)
 from openai.types.responses import ResponseFunctionToolCall
 
 from dev.ai import (
-    _agent_tools,
-    _render_readme_prompt_template,
+    OpenAIChatClientLike,
     agent_call,
+    agent_tools,
     is_allowed_git_tool_command,
+    render_readme_prompt_template,
     run_safe_git_tool_command,
     suggest_commit_name,
 )
+from dev.json_types import JSONValue
+
+
+@dataclass
+class FakeMessage:
+    content: str | None
+    tool_calls: list[ChatCompletionMessageFunctionToolCall] | None
+
+
+@dataclass
+class FakeChoice:
+    message: FakeMessage
+    finish_reason: str | None
+
+
+@dataclass
+class FakeChatResponse:
+    choices: list[FakeChoice]
+
+
+class FakeCompletions:
+    def __init__(
+        self,
+        queued_responses: list[FakeChatResponse],
+        *,
+        captured_messages: list[list[ChatCompletionMessageParam]] | None = None,
+    ) -> None:
+        self._queued_responses = queued_responses
+        self._captured_messages = captured_messages
+
+    def create(
+        self,
+        *,
+        messages: list[ChatCompletionMessageParam],
+        model: str,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        tools: list[ChatCompletionToolParam] | None = None,
+        tool_choice: str | None = None,
+    ) -> FakeChatResponse:
+        del model, max_tokens, temperature, top_p, tools, tool_choice
+        if self._captured_messages is not None:
+            self._captured_messages.append(list(messages))
+        assert self._queued_responses
+        return self._queued_responses.pop(0)
+
+
+@dataclass
+class FakeChatNamespace:
+    completions: FakeCompletions
+
+
+@dataclass
+class FakeChatClient:
+    chat: FakeChatNamespace
+
+
+@dataclass
+class FakeResponsesOutput:
+    id: str
+    output: list[ResponseFunctionToolCall]
+    output_text: str
+
+
+class FakeResponsesApi:
+    def __init__(self, responses: list[FakeResponsesOutput]) -> None:
+        self._responses = responses
+
+    def create(self, **_kwargs: JSONValue) -> FakeResponsesOutput:
+        assert self._responses
+        return self._responses.pop(0)
+
+
+def _make_tool_call(
+    call_id: str,
+    name: str,
+    arguments: dict[str, JSONValue],
+) -> ChatCompletionMessageFunctionToolCall:
+    return ChatCompletionMessageFunctionToolCall(
+        id=call_id,
+        type="function",
+        function={"name": name, "arguments": json.dumps(arguments)},
+    )
+
+
+def _make_response(message: FakeMessage, finish_reason: str) -> FakeChatResponse:
+    return FakeChatResponse(choices=[FakeChoice(message=message, finish_reason=finish_reason)])
+
+
+def _make_client(
+    responses: list[FakeChatResponse],
+    *,
+    captured_messages: list[list[ChatCompletionMessageParam]] | None = None,
+) -> FakeChatClient:
+    return FakeChatClient(chat=FakeChatNamespace(completions=FakeCompletions(responses, captured_messages=captured_messages)))
+
+
+def _last_tool_message_content(messages: list[ChatCompletionMessageParam]) -> str:
+    tool_message = messages[-1]
+    assert isinstance(tool_message, dict)
+    assert tool_message.get("role") == "tool"
+    content = tool_message.get("content")
+    assert isinstance(content, str)
+    return content
+
+
+def _fail_answer_about_file(
+    paths: list[Path],
+    question: str,
+    /,
+    api_key: str | None = None,
+    client: openai.Client | OpenAIChatClientLike | None = None,
+) -> str:
+    del paths, question, api_key, client
+    raise AssertionError("answer_about_file should not be called")
 
 
 def test_is_allowed_git_tool_command_accepts_read_only_patterns() -> None:
@@ -50,7 +174,10 @@ def test_run_safe_git_tool_command_rejects_disallowed_command(tmp_path: Path) ->
     assert result["ok"] is False
 
 
-def test_render_readme_prompt_template_renders_company_contact_values(tmp_path: Path, monkeypatch) -> None:
+def test_render_readme_prompt_template_renders_company_contact_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     (tmp_path / "root.clj").write_text(
         "\n".join(
             [
@@ -64,7 +191,7 @@ def test_render_readme_prompt_template_renders_company_contact_values(tmp_path: 
     (tmp_path / "root.private.clj").write_text('(github-token "dummy")\n', encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    rendered = _render_readme_prompt_template(
+    rendered = render_readme_prompt_template(
         "<notes>\n<<notes>>\n</notes>\n"
         "For commercial use, please contact <<company_legal_name>> "
         "(at <<legal_contact_email>>) for licensing terms.\n"
@@ -82,37 +209,37 @@ def test_render_readme_prompt_template_renders_company_contact_values(tmp_path: 
 
 
 def test_agent_tools_require_task_or_question() -> None:
-    tools = _agent_tools()
+    tools = agent_tools()
     request_tool = next(tool for tool in tools if tool["function"]["name"] == "request_to_developer")
-
-    required = request_tool["function"]["parameters"]["required"]
-
+    parameters = request_tool["function"].get("parameters")
+    assert isinstance(parameters, dict)
+    required = parameters.get("required")
     assert required == ["paths", "task_or_question"]
 
 
 def test_agent_call_logs_only_metadata_for_prompt_and_tool_results(
     tmp_path: Path,
-    monkeypatch,
-    caplog,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     (tmp_path / "README.md").write_text("TOP SECRET FILE CONTENT\n", encoding="utf-8")
 
-    def fake_answer_about_file(*_args: object, **_kwargs: object) -> str:
+    def fake_answer_about_file(
+        paths: list[Path],
+        question: str,
+        /,
+        api_key: str | None = None,
+        client: openai.Client | OpenAIChatClientLike | None = None,
+    ) -> str:
+        del paths, question, api_key, client
         return "SUBORDINATE SECRET RESPONSE"
 
     monkeypatch.setattr("dev.ai.answer_about_file", fake_answer_about_file)
 
-    def make_tool_call(call_id: str, name: str, arguments: dict[str, object]) -> SimpleNamespace:
-        return SimpleNamespace(
-            type="function",
-            id=call_id,
-            function=SimpleNamespace(name=name, arguments=json.dumps(arguments)),
-        )
-
-    first_message = SimpleNamespace(
+    first_message = FakeMessage(
         content=None,
         tool_calls=[
-            make_tool_call(
+            _make_tool_call(
                 "call-1",
                 "request_to_developer",
                 {
@@ -122,10 +249,10 @@ def test_agent_call_logs_only_metadata_for_prompt_and_tool_results(
             )
         ],
     )
-    second_message = SimpleNamespace(
+    second_message = FakeMessage(
         content=None,
         tool_calls=[
-            make_tool_call(
+            _make_tool_call(
                 "call-2",
                 "answer",
                 {
@@ -135,20 +262,12 @@ def test_agent_call_logs_only_metadata_for_prompt_and_tool_results(
         ],
     )
 
-    responses = [
-        SimpleNamespace(choices=[SimpleNamespace(message=first_message, finish_reason="tool_calls")]),
-        SimpleNamespace(choices=[SimpleNamespace(message=second_message, finish_reason="tool_calls")]),
-    ]
-
-    class FakeCompletions:
-        def __init__(self, queued_responses: list[SimpleNamespace]) -> None:
-            self._queued_responses = queued_responses
-
-        def create(self, **_kwargs: object) -> SimpleNamespace:
-            assert self._queued_responses
-            return self._queued_responses.pop(0)
-
-    client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions(responses)))
+    client = _make_client(
+        [
+            _make_response(first_message, "tool_calls"),
+            _make_response(second_message, "tool_calls"),
+        ]
+    )
 
     caplog.set_level(logging.INFO)
 
@@ -165,23 +284,9 @@ def test_agent_call_logs_only_metadata_for_prompt_and_tool_results(
     assert "Tool request_to_developer returned string chars=27" in caplog.text
 
 
-def test_agent_call_raises_runtime_error_for_unexpected_finish_reason(
-    tmp_path: Path,
-) -> None:
-    message = SimpleNamespace(content="done", tool_calls=None)
-    responses = [
-        SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason="stop")]),
-    ]
-
-    class FakeCompletions:
-        def __init__(self, queued_responses: list[SimpleNamespace]) -> None:
-            self._queued_responses = queued_responses
-
-        def create(self, **_kwargs: object) -> SimpleNamespace:
-            assert self._queued_responses
-            return self._queued_responses.pop(0)
-
-    client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions(responses)))
+def test_agent_call_raises_runtime_error_for_unexpected_finish_reason(tmp_path: Path) -> None:
+    message = FakeMessage(content="done", tool_calls=None)
+    client = _make_client([_make_response(message, "stop")])
 
     try:
         agent_call(tmp_path, "task", client=client)
@@ -192,43 +297,43 @@ def test_agent_call_raises_runtime_error_for_unexpected_finish_reason(
 
 def test_agent_call_raises_runtime_error_after_max_steps(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("dev.ai.AGENT_CALL_MAX_STEPS", 2)
 
-    def make_tool_call(call_id: str) -> SimpleNamespace:
-        return SimpleNamespace(
-            type="function",
-            id=call_id,
-            function=SimpleNamespace(
-                name="request_to_developer",
-                arguments=json.dumps(
-                    {
-                        "paths": ["README.md"],
-                        "task_or_question": "inspect",
-                    }
-                ),
-            ),
-        )
-
     (tmp_path / "README.md").write_text("hello\n", encoding="utf-8")
-    monkeypatch.setattr("dev.ai.answer_about_file", lambda *_args, **_kwargs: "answer")
 
-    looping_message = SimpleNamespace(content=None, tool_calls=[make_tool_call("call-1")])
-    responses = [
-        SimpleNamespace(choices=[SimpleNamespace(message=looping_message, finish_reason="tool_calls")]),
-        SimpleNamespace(choices=[SimpleNamespace(message=looping_message, finish_reason="tool_calls")]),
-    ]
+    def fake_answer_about_file(
+        paths: list[Path],
+        question: str,
+        /,
+        api_key: str | None = None,
+        client: openai.Client | OpenAIChatClientLike | None = None,
+    ) -> str:
+        del paths, question, api_key, client
+        return "answer"
 
-    class FakeCompletions:
-        def __init__(self, queued_responses: list[SimpleNamespace]) -> None:
-            self._queued_responses = queued_responses
+    monkeypatch.setattr("dev.ai.answer_about_file", fake_answer_about_file)
 
-        def create(self, **_kwargs: object) -> SimpleNamespace:
-            assert self._queued_responses
-            return self._queued_responses.pop(0)
-
-    client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions(responses)))
+    looping_message = FakeMessage(
+        content=None,
+        tool_calls=[
+            _make_tool_call(
+                "call-1",
+                "request_to_developer",
+                {
+                    "paths": ["README.md"],
+                    "task_or_question": "inspect",
+                },
+            )
+        ],
+    )
+    client = _make_client(
+        [
+            _make_response(looping_message, "tool_calls"),
+            _make_response(looping_message, "tool_calls"),
+        ]
+    )
 
     try:
         agent_call(tmp_path, "task", client=client)
@@ -239,82 +344,51 @@ def test_agent_call_raises_runtime_error_after_max_steps(
 
 def test_agent_call_rejects_paths_that_escape_repo_root(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (tmp_path / "README.md").write_text("hello\n", encoding="utf-8")
     outside_file = tmp_path.parent / "outside-secret.txt"
     outside_file.write_text("secret\n", encoding="utf-8")
 
-    def fail_answer_about_file(*_args: object, **_kwargs: object) -> str:
-        raise AssertionError("answer_about_file should not be called for escaped paths")
+    monkeypatch.setattr("dev.ai.answer_about_file", _fail_answer_about_file)
 
-    monkeypatch.setattr("dev.ai.answer_about_file", fail_answer_about_file)
-
-    captured_messages: list[object] = []
-
-    def make_tool_call(call_id: str, name: str, arguments: dict[str, object]) -> SimpleNamespace:
-        return SimpleNamespace(
-            type="function",
-            id=call_id,
-            function=SimpleNamespace(name=name, arguments=json.dumps(arguments)),
-        )
-
-    first_message = SimpleNamespace(
-        content=None,
-        tool_calls=[
-            make_tool_call(
-                "call-1",
-                "request_to_developer",
-                {
-                    "paths": [f"../{outside_file.name}"],
-                    "task_or_question": "inspect",
-                },
-            )
+    captured_messages: list[list[ChatCompletionMessageParam]] = []
+    client = _make_client(
+        [
+            _make_response(
+                FakeMessage(
+                    content=None,
+                    tool_calls=[
+                        _make_tool_call(
+                            "call-1",
+                            "request_to_developer",
+                            {
+                                "paths": [f"../{outside_file.name}"],
+                                "task_or_question": "inspect",
+                            },
+                        )
+                    ],
+                ),
+                "tool_calls",
+            ),
+            _make_response(
+                FakeMessage(
+                    content=None,
+                    tool_calls=[_make_tool_call("call-2", "answer", {"result": "done"})],
+                ),
+                "tool_calls",
+            ),
         ],
+        captured_messages=captured_messages,
     )
-    second_message = SimpleNamespace(
-        content=None,
-        tool_calls=[
-            make_tool_call(
-                "call-2",
-                "answer",
-                {
-                    "result": "done",
-                },
-            )
-        ],
-    )
-    responses = [
-        SimpleNamespace(choices=[SimpleNamespace(message=first_message, finish_reason="tool_calls")]),
-        SimpleNamespace(choices=[SimpleNamespace(message=second_message, finish_reason="tool_calls")]),
-    ]
-
-    class FakeCompletions:
-        def __init__(self, queued_responses: list[SimpleNamespace]) -> None:
-            self._queued_responses = queued_responses
-
-        def create(self, **kwargs: object) -> SimpleNamespace:
-            messages = kwargs.get("messages")
-            if messages is not None:
-                assert isinstance(messages, list)
-                captured_messages.append(list(messages))
-            assert self._queued_responses
-            return self._queued_responses.pop(0)
-
-    client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions(responses)))
 
     assert agent_call(tmp_path, "task", client=client) == "done"
-
-    second_request_messages = captured_messages[1]
-    assert isinstance(second_request_messages, list)
-    tool_message = second_request_messages[-1]
-    assert tool_message["role"] == "tool"
-    assert "Paths escape repository root" in tool_message["content"]
+    assert "Paths escape repository root" in _last_tool_message_content(captured_messages[1])
 
 
 def test_agent_call_rejects_symlink_paths_that_resolve_outside_repo_root(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     outside_dir = tmp_path.parent / "outside-dir"
     outside_dir.mkdir(exist_ok=True)
@@ -322,292 +396,171 @@ def test_agent_call_rejects_symlink_paths_that_resolve_outside_repo_root(
     outside_file.write_text("secret\n", encoding="utf-8")
     (tmp_path / "link.txt").symlink_to(outside_file)
 
-    def fail_answer_about_file(*_args: object, **_kwargs: object) -> str:
-        raise AssertionError("answer_about_file should not be called for escaped paths")
+    monkeypatch.setattr("dev.ai.answer_about_file", _fail_answer_about_file)
 
-    monkeypatch.setattr("dev.ai.answer_about_file", fail_answer_about_file)
-
-    captured_messages: list[object] = []
-
-    def make_tool_call(call_id: str, name: str, arguments: dict[str, object]) -> SimpleNamespace:
-        return SimpleNamespace(
-            type="function",
-            id=call_id,
-            function=SimpleNamespace(name=name, arguments=json.dumps(arguments)),
-        )
-
-    first_message = SimpleNamespace(
-        content=None,
-        tool_calls=[
-            make_tool_call(
-                "call-1",
-                "request_to_developer",
-                {
-                    "paths": ["link.txt"],
-                    "task_or_question": "inspect",
-                },
-            )
+    captured_messages: list[list[ChatCompletionMessageParam]] = []
+    client = _make_client(
+        [
+            _make_response(
+                FakeMessage(
+                    content=None,
+                    tool_calls=[
+                        _make_tool_call(
+                            "call-1",
+                            "request_to_developer",
+                            {
+                                "paths": ["link.txt"],
+                                "task_or_question": "inspect",
+                            },
+                        )
+                    ],
+                ),
+                "tool_calls",
+            ),
+            _make_response(
+                FakeMessage(
+                    content=None,
+                    tool_calls=[_make_tool_call("call-2", "answer", {"result": "done"})],
+                ),
+                "tool_calls",
+            ),
         ],
+        captured_messages=captured_messages,
     )
-    second_message = SimpleNamespace(
-        content=None,
-        tool_calls=[
-            make_tool_call(
-                "call-2",
-                "answer",
-                {
-                    "result": "done",
-                },
-            )
-        ],
-    )
-    responses = [
-        SimpleNamespace(choices=[SimpleNamespace(message=first_message, finish_reason="tool_calls")]),
-        SimpleNamespace(choices=[SimpleNamespace(message=second_message, finish_reason="tool_calls")]),
-    ]
-
-    class FakeCompletions:
-        def __init__(self, queued_responses: list[SimpleNamespace]) -> None:
-            self._queued_responses = queued_responses
-
-        def create(self, **kwargs: object) -> SimpleNamespace:
-            messages = kwargs.get("messages")
-            if messages is not None:
-                assert isinstance(messages, list)
-                captured_messages.append(list(messages))
-            assert self._queued_responses
-            return self._queued_responses.pop(0)
-
-    client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions(responses)))
 
     assert agent_call(tmp_path, "task", client=client) == "done"
-
-    second_request_messages = captured_messages[1]
-    assert isinstance(second_request_messages, list)
-    tool_message = second_request_messages[-1]
-    assert tool_message["role"] == "tool"
-    assert "Paths escape repository root" in tool_message["content"]
+    assert "Paths escape repository root" in _last_tool_message_content(captured_messages[1])
 
 
-def test_agent_call_converts_invalid_tool_json_into_tool_error(
-    tmp_path: Path,
-) -> None:
-    captured_messages: list[object] = []
-
-    first_message = SimpleNamespace(
-        content=None,
-        tool_calls=[
-            SimpleNamespace(
-                type="function",
-                id="call-1",
-                function=SimpleNamespace(name="request_to_developer", arguments="{not valid json"),
-            )
-        ],
+def test_agent_call_converts_invalid_tool_json_into_tool_error(tmp_path: Path) -> None:
+    captured_messages: list[list[ChatCompletionMessageParam]] = []
+    invalid_json_call = ChatCompletionMessageFunctionToolCall(
+        id="call-1",
+        type="function",
+        function={"name": "request_to_developer", "arguments": "{not valid json"},
     )
-    second_message = SimpleNamespace(
-        content=None,
-        tool_calls=[
-            SimpleNamespace(
-                type="function",
-                id="call-2",
-                function=SimpleNamespace(name="answer", arguments=json.dumps({"result": "done"})),
-            )
+    client = _make_client(
+        [
+            _make_response(FakeMessage(content=None, tool_calls=[invalid_json_call]), "tool_calls"),
+            _make_response(
+                FakeMessage(
+                    content=None,
+                    tool_calls=[_make_tool_call("call-2", "answer", {"result": "done"})],
+                ),
+                "tool_calls",
+            ),
         ],
+        captured_messages=captured_messages,
     )
-    responses = [
-        SimpleNamespace(choices=[SimpleNamespace(message=first_message, finish_reason="tool_calls")]),
-        SimpleNamespace(choices=[SimpleNamespace(message=second_message, finish_reason="tool_calls")]),
-    ]
-
-    class FakeCompletions:
-        def __init__(self, queued_responses: list[SimpleNamespace]) -> None:
-            self._queued_responses = queued_responses
-
-        def create(self, **kwargs: object) -> SimpleNamespace:
-            messages = kwargs.get("messages")
-            if messages is not None:
-                assert isinstance(messages, list)
-                captured_messages.append(list(messages))
-            assert self._queued_responses
-            return self._queued_responses.pop(0)
-
-    client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions(responses)))
 
     assert agent_call(tmp_path, "task", client=client) == "done"
-
-    second_request_messages = captured_messages[1]
-    assert isinstance(second_request_messages, list)
-    tool_message = second_request_messages[-1]
-    assert tool_message["role"] == "tool"
-    assert "Invalid JSON tool arguments for request_to_developer" in tool_message["content"]
+    assert "Invalid JSON tool arguments for request_to_developer" in _last_tool_message_content(captured_messages[1])
 
 
 def test_agent_call_rejects_known_binary_files_before_reading(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (tmp_path / "demo.jar").write_bytes(b"PK\x03\x04jar-bytes")
+    monkeypatch.setattr("dev.ai.answer_about_file", _fail_answer_about_file)
 
-    def fail_answer_about_file(*_args: object, **_kwargs: object) -> str:
-        raise AssertionError("answer_about_file should not be called for known binary files")
-
-    monkeypatch.setattr("dev.ai.answer_about_file", fail_answer_about_file)
-
-    captured_messages: list[object] = []
-
-    first_message = SimpleNamespace(
-        content=None,
-        tool_calls=[
-            SimpleNamespace(
-                type="function",
-                id="call-1",
-                function=SimpleNamespace(
-                    name="request_to_developer",
-                    arguments=json.dumps({"paths": ["demo.jar"], "task_or_question": "inspect"}),
+    captured_messages: list[list[ChatCompletionMessageParam]] = []
+    client = _make_client(
+        [
+            _make_response(
+                FakeMessage(
+                    content=None,
+                    tool_calls=[
+                        _make_tool_call(
+                            "call-1",
+                            "request_to_developer",
+                            {"paths": ["demo.jar"], "task_or_question": "inspect"},
+                        )
+                    ],
                 ),
-            )
+                "tool_calls",
+            ),
+            _make_response(
+                FakeMessage(
+                    content=None,
+                    tool_calls=[_make_tool_call("call-2", "answer", {"result": "done"})],
+                ),
+                "tool_calls",
+            ),
         ],
+        captured_messages=captured_messages,
     )
-    second_message = SimpleNamespace(
-        content=None,
-        tool_calls=[
-            SimpleNamespace(
-                type="function",
-                id="call-2",
-                function=SimpleNamespace(name="answer", arguments=json.dumps({"result": "done"})),
-            )
-        ],
-    )
-    responses = [
-        SimpleNamespace(choices=[SimpleNamespace(message=first_message, finish_reason="tool_calls")]),
-        SimpleNamespace(choices=[SimpleNamespace(message=second_message, finish_reason="tool_calls")]),
-    ]
-
-    class FakeCompletions:
-        def __init__(self, queued_responses: list[SimpleNamespace]) -> None:
-            self._queued_responses = queued_responses
-
-        def create(self, **kwargs: object) -> SimpleNamespace:
-            messages = kwargs.get("messages")
-            if messages is not None:
-                assert isinstance(messages, list)
-                captured_messages.append(list(messages))
-            assert self._queued_responses
-            return self._queued_responses.pop(0)
-
-    client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions(responses)))
 
     assert agent_call(tmp_path, "task", client=client) == "done"
-
-    second_request_messages = captured_messages[1]
-    assert isinstance(second_request_messages, list)
-    tool_message = second_request_messages[-1]
-    assert tool_message["role"] == "tool"
-    assert "Files are not text and cannot be read safely" in tool_message["content"]
+    assert "Files are not text and cannot be read safely" in _last_tool_message_content(captured_messages[1])
 
 
-def test_agent_call_reports_decode_errors_for_unknown_binary_files(
-    tmp_path: Path,
-) -> None:
+def test_agent_call_reports_decode_errors_for_unknown_binary_files(tmp_path: Path) -> None:
     (tmp_path / "mystery.binx").write_bytes(b"\xff\xfe\xfa\xfb")
 
-    captured_messages: list[object] = []
-
-    first_message = SimpleNamespace(
-        content=None,
-        tool_calls=[
-            SimpleNamespace(
-                type="function",
-                id="call-1",
-                function=SimpleNamespace(
-                    name="request_to_developer",
-                    arguments=json.dumps({"paths": ["mystery.binx"], "task_or_question": "inspect"}),
+    captured_messages: list[list[ChatCompletionMessageParam]] = []
+    client = _make_client(
+        [
+            _make_response(
+                FakeMessage(
+                    content=None,
+                    tool_calls=[
+                        _make_tool_call(
+                            "call-1",
+                            "request_to_developer",
+                            {"paths": ["mystery.binx"], "task_or_question": "inspect"},
+                        )
+                    ],
                 ),
-            )
+                "tool_calls",
+            ),
+            _make_response(
+                FakeMessage(
+                    content=None,
+                    tool_calls=[_make_tool_call("call-2", "answer", {"result": "done"})],
+                ),
+                "tool_calls",
+            ),
         ],
+        captured_messages=captured_messages,
     )
-    second_message = SimpleNamespace(
-        content=None,
-        tool_calls=[
-            SimpleNamespace(
-                type="function",
-                id="call-2",
-                function=SimpleNamespace(name="answer", arguments=json.dumps({"result": "done"})),
-            )
-        ],
-    )
-    responses = [
-        SimpleNamespace(choices=[SimpleNamespace(message=first_message, finish_reason="tool_calls")]),
-        SimpleNamespace(choices=[SimpleNamespace(message=second_message, finish_reason="tool_calls")]),
-    ]
-
-    class FakeCompletions:
-        def __init__(self, queued_responses: list[SimpleNamespace]) -> None:
-            self._queued_responses = queued_responses
-
-        def create(self, **kwargs: object) -> SimpleNamespace:
-            messages = kwargs.get("messages")
-            if messages is not None:
-                assert isinstance(messages, list)
-                captured_messages.append(list(messages))
-            assert self._queued_responses
-            return self._queued_responses.pop(0)
-
-    client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions(responses)))
 
     assert agent_call(tmp_path, "task", client=client) == "done"
-
-    second_request_messages = captured_messages[1]
-    assert isinstance(second_request_messages, list)
-    tool_message = second_request_messages[-1]
-    assert tool_message["role"] == "tool"
-    assert "not valid UTF-8 text" in tool_message["content"]
+    assert "not valid UTF-8 text" in _last_tool_message_content(captured_messages[1])
 
 
 def test_agent_call_processes_other_tool_calls_before_returning_answer(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (tmp_path / "README.md").write_text("hello\n", encoding="utf-8")
     subordinate_calls: list[tuple[list[Path], str]] = []
 
-    def fake_answer_about_file(paths: list[Path], question: str, **_kwargs: object) -> str:
+    def fake_answer_about_file(
+        paths: list[Path],
+        question: str,
+        /,
+        api_key: str | None = None,
+        client: openai.Client | OpenAIChatClientLike | None = None,
+    ) -> str:
+        del api_key, client
         subordinate_calls.append((paths, question))
         return "subordinate answer"
 
     monkeypatch.setattr("dev.ai.answer_about_file", fake_answer_about_file)
 
-    first_message = SimpleNamespace(
+    first_message = FakeMessage(
         content=None,
         tool_calls=[
-            SimpleNamespace(
-                type="function",
-                id="call-1",
-                function=SimpleNamespace(name="answer", arguments=json.dumps({"result": "done"})),
-            ),
-            SimpleNamespace(
-                type="function",
-                id="call-2",
-                function=SimpleNamespace(
-                    name="request_to_developer",
-                    arguments=json.dumps({"paths": ["README.md"], "task_or_question": "inspect"}),
-                ),
+            _make_tool_call("call-1", "answer", {"result": "done"}),
+            _make_tool_call(
+                "call-2",
+                "request_to_developer",
+                {"paths": ["README.md"], "task_or_question": "inspect"},
             ),
         ],
     )
-    responses = [
-        SimpleNamespace(choices=[SimpleNamespace(message=first_message, finish_reason="tool_calls")]),
-    ]
-
-    class FakeCompletions:
-        def __init__(self, queued_responses: list[SimpleNamespace]) -> None:
-            self._queued_responses = queued_responses
-
-        def create(self, **_kwargs: object) -> SimpleNamespace:
-            assert self._queued_responses
-            return self._queued_responses.pop(0)
-
-    client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions(responses)))
+    client = _make_client([_make_response(first_message, "tool_calls")])
 
     assert agent_call(tmp_path, "task", client=client) == "done"
     assert len(subordinate_calls) == 1
@@ -617,12 +570,12 @@ def test_agent_call_processes_other_tool_calls_before_returning_answer(
 
 def test_suggest_commit_name_raises_when_model_never_returns_final_message(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.chdir(tmp_path)
 
     queued_responses = [
-        SimpleNamespace(
+        FakeResponsesOutput(
             id=f"resp-{idx}",
             output=[
                 ResponseFunctionToolCall(
@@ -639,18 +592,10 @@ def test_suggest_commit_name_raises_when_model_never_returns_final_message(
         for idx in range(9)
     ]
 
-    class FakeResponses:
-        def __init__(self, responses: list[SimpleNamespace]) -> None:
-            self._responses = responses
-
-        def create(self, **_kwargs: object) -> SimpleNamespace:
-            assert self._responses
-            return self._responses.pop(0)
-
     class FakeClient:
         def __init__(self, api_key: str) -> None:
             del api_key
-            self.responses = FakeResponses(queued_responses)
+            self.responses = FakeResponsesApi(queued_responses)
 
     monkeypatch.setattr("dev.ai.openai.Client", FakeClient)
 

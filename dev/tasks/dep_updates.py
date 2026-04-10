@@ -67,9 +67,7 @@ def _iter_python_project_dependencies(project: PythonProject) -> list[tuple[str,
 
 def _extract_exact_pinned_python_version(requirement: Requirement) -> PythonVersion | None:
     exact_versions = {
-        spec.version
-        for spec in requirement.specifier
-        if spec.operator in {"==", "==="} and "*" not in spec.version
+        spec.version for spec in requirement.specifier if spec.operator in {"==", "==="} and "*" not in spec.version
     }
     if len(exact_versions) != 1:
         return None

@@ -24,6 +24,10 @@ class _FakeProject:
     copyright_year_start: int | None = None
     test_license: str | None = None
 
+    @property
+    def effective_repo_root(self) -> Path:
+        return self.path
+
 
 @dataclass
 class _FakeContext:

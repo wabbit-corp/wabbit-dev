@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
+import jinja2
+import pytest
 from mu.parser import parse
+
+if TYPE_CHECKING:
+    from dev.config import Config
+    from dev.tasks.setup import RepoSetupContext, RepoSetupMode
 
 
 def _make_python_project(path: Path, *, project_id: str, repo_id: str | None = None, repo_root: Path | None = None):
@@ -35,6 +41,58 @@ def _make_python_project(path: Path, *, project_id: str, repo_id: str | None = N
         repo_root=repo_root,
         docs_enabled=True,
         docs_system="mkdocs",
+    )
+
+
+def _make_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupContext:
+    import dev.tasks.setup as setup_module
+
+    return setup_module.RepoSetupContext(
+        config=config,
+        known_repo_names=[],
+        known_github_repos={},
+        is_github_api_available=False,
+        repo_template=Path("."),
+        licenses={},
+        coc=jinja2.Template(""),
+        editorconfig_template=jinja2.Template("root = true\n"),
+        gitignore_template=jinja2.Template(""),
+        cla=jinja2.Template(""),
+        cla_explanations=jinja2.Template(""),
+        contributor_privacy_policy=jinja2.Template(""),
+        github_codeowners_template=jinja2.Template("* owner@example.com\n"),
+        github_security_template=jinja2.Template("# Security Policy\n"),
+        github_pull_request_template=jinja2.Template("## Summary\n"),
+        github_issue_bug_template=jinja2.Template("name: Bug report\n"),
+        github_issue_feature_template=jinja2.Template("name: Feature request\n"),
+        settings_template=jinja2.Template(""),
+        settings_local_template=jinja2.Template(""),
+        subproject_settings_template=jinja2.Template(""),
+        build_template=jinja2.Template(""),
+        subproject_build_template=jinja2.Template(""),
+        subproject_build_kmp_template=jinja2.Template(""),
+        gradle_gitignore_template=jinja2.Template(""),
+        gradle_properties_template=jinja2.Template(""),
+        python_gitignore_template=jinja2.Template(""),
+        purescript_gitignore_template=jinja2.Template(""),
+        python_pyproject_template=jinja2.Template(""),
+        python_pyrightconfig_template=jinja2.Template("{}"),
+        python_mkdocs_template=jinja2.Template(""),
+        python_docs_index_template=jinja2.Template(""),
+        python_docs_installation_template=jinja2.Template(""),
+        python_docs_development_template=jinja2.Template(""),
+        python_contributing_template=jinja2.Template(""),
+        python_docs_quality_workflow_template=jinja2.Template(""),
+        python_docs_deploy_workflow_template=jinja2.Template(""),
+        gradle_release_publish_workflow_template=jinja2.Template(""),
+        gradle_snapshot_publish_workflow_template=jinja2.Template(""),
+        gradle_compiler_plugin_release_publish_workflow_template=jinja2.Template(""),
+        gradle_compiler_plugin_snapshot_publish_workflow_template=jinja2.Template(""),
+        gradle_docs_quality_workflow_template=jinja2.Template(""),
+        gradle_docs_deploy_workflow_template=jinja2.Template(""),
+        python_codespell_ignore_words_template=jinja2.Template(""),
+        python_build_executable_template=jinja2.Template(""),
+        mode=mode,
     )
 
 
@@ -141,7 +199,7 @@ def test_write_repo_agents_file_updates_only_managed_block(tmp_path: Path) -> No
 
 def test_write_repo_agents_file_reports_multiple_managed_blocks_with_file_path(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import dev.agents_md as agents_md
     from dev.config import Config
@@ -178,9 +236,12 @@ def test_write_repo_agents_file_reports_multiple_managed_blocks_with_file_path(
     assert warnings == [f"Skipping malformed AGENTS.md managed block in {agents_path}: found 2 managed blocks"]
 
 
-def test_setup_writes_repo_root_agents_for_repo_managed_project(tmp_path: Path, monkeypatch) -> None:
+def test_setup_writes_repo_root_agents_for_repo_managed_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import dev.tasks.setup as setup_module
-    from dev.config import Config, RepoDefinition
+    from dev.config import Config, Project, RepoDefinition
 
     repo_root = tmp_path / "demo"
     project_path = repo_root / "pkg"
@@ -199,15 +260,36 @@ def test_setup_writes_repo_root_agents_for_repo_managed_project(tmp_path: Path, 
         project_ids=["demo/pkg"],
     )
 
-    monkeypatch.setattr(setup_module, "load_config", lambda: config)
-    monkeypatch.setattr(
-        setup_module,
-        "create_repo_setup_context",
-        lambda _config, mode: SimpleNamespace(config=config, mode=mode),
-    )
-    monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["demo/pkg"])
-    monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
+    def fake_load_config() -> Config:
+        return config
+
+    def fake_create_repo_setup_context(_config: Config, mode: RepoSetupMode) -> RepoSetupContext:
+        return _make_setup_context(config, mode)
+
+    def fake_toposort_projects(
+        _projects: dict[str, Project],
+        target_project: str | list[str] | tuple[str, ...] | None = None,
+    ) -> list[str]:
+        del target_project
+        return ["demo/pkg"]
+
+    def fake_setup_project(
+        _ctx: RepoSetupContext,
+        _project: Project,
+        interactive: bool = True,
+        commit_changes: bool = True,
+        allow_push: bool = True,
+    ) -> None:
+        del interactive, commit_changes, allow_push
+
+    def fake_write_repo_metadata_files(_ctx: RepoSetupContext, _projects: list[Project]) -> list[str]:
+        return []
+
+    monkeypatch.setattr(setup_module, "load_config", fake_load_config)
+    monkeypatch.setattr(setup_module, "create_repo_setup_context", fake_create_repo_setup_context)
+    monkeypatch.setattr(setup_module, "toposort_projects", fake_toposort_projects)
+    monkeypatch.setattr(setup_module, "setup_project", fake_setup_project)
+    monkeypatch.setattr(setup_module, "_write_repo_metadata_files", fake_write_repo_metadata_files)
 
     result = setup_module.setup(setup_module.RepoSetupMode.PROD, interactive=False, project="demo/pkg")
 

@@ -15,10 +15,11 @@ def test_commit_runs_prod_setup_and_commits_once_per_repo(tmp_path: Path, monkey
     alpha_path.mkdir(parents=True, exist_ok=True)
     beta_path.mkdir(parents=True, exist_ok=True)
 
-    alpha_project = SimpleNamespace(name="alpha", path=alpha_path, quarantine=False)
-    beta_project = SimpleNamespace(name="beta", path=beta_path, quarantine=False)
+    alpha_project = SimpleNamespace(name="alpha", path=alpha_path, quarantine=False, github_repo=None)
+    beta_project = SimpleNamespace(name="beta", path=beta_path, quarantine=False, github_repo=None)
     config = SimpleNamespace(
         defined_projects={"alpha": alpha_project, "beta": beta_project},
+        defined_repos={},
         openai_key="test-openai-key",
     )
 
@@ -83,9 +84,10 @@ def test_commit_requires_openai_key(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     alpha_path = tmp_path / "alpha"
     alpha_path.mkdir(parents=True, exist_ok=True)
-    alpha_project = SimpleNamespace(name="alpha", path=alpha_path, quarantine=False)
+    alpha_project = SimpleNamespace(name="alpha", path=alpha_path, quarantine=False, github_repo=None)
     config = SimpleNamespace(
         defined_projects={"alpha": alpha_project},
+        defined_repos={},
         openai_key=None,
     )
 
@@ -114,10 +116,11 @@ def test_commit_without_project_runs_all_projects(tmp_path: Path, monkeypatch: p
     alpha_path.mkdir(parents=True, exist_ok=True)
     beta_path.mkdir(parents=True, exist_ok=True)
 
-    alpha_project = SimpleNamespace(name="alpha", path=alpha_path, quarantine=False)
-    beta_project = SimpleNamespace(name="beta", path=beta_path, quarantine=False)
+    alpha_project = SimpleNamespace(name="alpha", path=alpha_path, quarantine=False, github_repo=None)
+    beta_project = SimpleNamespace(name="beta", path=beta_path, quarantine=False, github_repo=None)
     config = SimpleNamespace(
         defined_projects={"alpha": alpha_project, "beta": beta_project},
+        defined_repos={},
         openai_key="test-openai-key",
     )
 
@@ -190,9 +193,10 @@ def test_commit_dry_run_skips_setup_and_commit(
     alpha_path = tmp_path / "alpha"
     alpha_path.mkdir(parents=True, exist_ok=True)
 
-    alpha_project = SimpleNamespace(name="alpha", path=alpha_path, quarantine=False)
+    alpha_project = SimpleNamespace(name="alpha", path=alpha_path, quarantine=False, github_repo=None)
     config = SimpleNamespace(
         defined_projects={"alpha": alpha_project},
+        defined_repos={},
         openai_key=None,
     )
 

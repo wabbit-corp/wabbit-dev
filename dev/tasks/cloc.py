@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from dev.config import GradleProject, PremakeProject, PythonProject, find_workspace_root, load_config
+from dev.config import Config, GradleProject, PremakeProject, PythonProject, find_workspace_root, load_config
 from dev.discoverability import did_you_mean_suffix
 from dev.messages import accent, heading, muted, style, warning
 from dev.repo_resolution import inferred_project_targets, resolve_project_ids
@@ -59,7 +59,7 @@ def _run_cloc(path: Path) -> defaultdict[str, ClocStats]:
     return stats_by_lang
 
 
-def _target_choices(config: object | None) -> list[str]:
+def _target_choices(config: Config | None) -> list[str]:
     if config is None:
         return []
     return list(dict.fromkeys([*config.defined_projects.keys(), *config.defined_repos.keys()]))

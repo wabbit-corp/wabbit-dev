@@ -56,10 +56,14 @@ def test_check_for_updates_reports_pinned_pypi_dependency_updates(
         ),
     )
     monkeypatch.setattr(dep_updates_task, "load_config", lambda: config)
-    monkeypatch.setattr(dep_updates_task, "fetch_project_metadata", lambda name: {
-        "requests": PyPiProjectMetadata(latest_version="2.32.3", releases=["2.31.0", "2.32.3"]),
-        "pytest": PyPiProjectMetadata(latest_version="8.3.5", releases=["8.0.0", "8.3.5"]),
-    }[name])
+    monkeypatch.setattr(
+        dep_updates_task,
+        "fetch_project_metadata",
+        lambda name: {
+            "requests": PyPiProjectMetadata(latest_version="2.32.3", releases=["2.31.0", "2.32.3"]),
+            "pytest": PyPiProjectMetadata(latest_version="8.3.5", releases=["8.0.0", "8.3.5"]),
+        }[name],
+    )
 
     dep_updates_task.check_for_updates()
 

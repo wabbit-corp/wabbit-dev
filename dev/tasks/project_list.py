@@ -8,6 +8,7 @@ from dev.config import (
     Config,
     DataProject,
     Dependency,
+    DependencyTarget,
     GradleProject,
     PremakeProject,
     Project,
@@ -136,15 +137,14 @@ def _dependency_payload(dep: Dependency) -> dict[str, str]:
         "targetType": type(dep.target).__name__.removesuffix("DependencyTarget").lower(),
     }
     target = dep.target
-    if hasattr(target, "project"):
+    if isinstance(target, DependencyTarget.Project):
         payload["project"] = target.project
-    if hasattr(target, "artifact") and target.artifact is not None:
+    if isinstance(target, DependencyTarget.Maven) and target.artifact is not None:
         payload["artifact"] = target.artifact
-    if hasattr(target, "package"):
+    if isinstance(target, DependencyTarget.Npm):
         payload["package"] = target.package
-    if hasattr(target, "version"):
         payload["version"] = target.version
-    if hasattr(target, "path"):
+    if isinstance(target, DependencyTarget.JarFile):
         payload["path"] = str(target.path.resolve())
     return payload
 
@@ -543,7 +543,11 @@ def show_project_repos(project_targets: list[str], config: Config | None = None,
         repo_targets.append(repo_target)
 
     if json_output:
-        print(json.dumps({"repos": [project_repo_payload(repo_target, active_config) for repo_target in repo_targets]}, indent=2))
+        print(
+            json.dumps(
+                {"repos": [project_repo_payload(repo_target, active_config) for repo_target in repo_targets]}, indent=2
+            )
+        )
         return
 
     for index, repo_target in enumerate(repo_targets):
@@ -561,16 +565,26 @@ def show_project_targets(
 ) -> None:
     active_config = load_config() if config is None else config
     requested_targets = inferred_project_targets(active_config, project_targets)
-    resolved_project_ids = resolve_project_ids(active_config, requested_targets) if requested_targets else list(active_config.defined_projects.keys())
-    kmp_project_ids = [
-        project_id
-        for project_id in resolved_project_ids
-        if isinstance(active_config.defined_projects[project_id], GradleProject)
-        and active_config.defined_projects[project_id].is_kmp
-    ]
+    resolved_project_ids = (
+        resolve_project_ids(active_config, requested_targets)
+        if requested_targets
+        else list(active_config.defined_projects.keys())
+    )
+    kmp_project_ids: list[str] = []
+    for project_id in resolved_project_ids:
+        match active_config.defined_projects[project_id]:
+            case GradleProject(is_kmp=True):
+                kmp_project_ids.append(project_id)
+            case _:
+                continue
 
     if json_output:
-        print(json.dumps({"projects": [_kmp_project_payload(project_id, active_config) for project_id in kmp_project_ids]}, indent=2))
+        print(
+            json.dumps(
+                {"projects": [_kmp_project_payload(project_id, active_config) for project_id in kmp_project_ids]},
+                indent=2,
+            )
+        )
         return
 
     if not kmp_project_ids:

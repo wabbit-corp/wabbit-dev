@@ -4,8 +4,6 @@ Checks for oversized files and checked-in binary dependency artifacts.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from dev.checks.base import FileCheck, FileContext, IssueType
 
 DEFAULT_MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024

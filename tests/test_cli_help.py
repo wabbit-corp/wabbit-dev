@@ -344,7 +344,9 @@ async def test_cli_check_describe_does_not_infer_target(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_cli_doctor_prints_next_steps(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+async def test_cli_doctor_prints_next_steps(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from dev import cli
     from dev.tasks import doctor as doctor_task
 
@@ -390,7 +392,9 @@ async def test_cli_contributors_audit_dispatches(monkeypatch: pytest.MonkeyPatch
 
     called: list[str] = []
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
+    monkeypatch.setattr(
+        doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True
+    )
 
     def fake_audit_contributors() -> int:
         called.append("called")
@@ -413,7 +417,9 @@ async def test_cli_secrets_scan_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
 
     called: list[str] = []
 
-    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True)
+    monkeypatch.setattr(
+        doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True
+    )
 
     def fake_secrets_scan(target: str) -> int:
         called.append(target)

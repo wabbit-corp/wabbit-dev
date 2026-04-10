@@ -5,16 +5,17 @@ import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 from dev.config import (
     CANONICAL_KMP_SOURCE_SET_REQUIREMENTS,
     GRADLE_SOURCE_SET_NAME_RE,
     GRADLE_TARGET_KIND_TO_PLATFORM,
     GradleProject,
-    _source_set_is_allowed_for_platforms,
+    source_set_is_allowed_for_platforms,
 )
 from dev.ignore_files import IgnoreMatcher
+from dev.json_utils import as_dict, as_list
 from dev.repo_metadata import RepoMetadataPlan, expected_repo_metadata_paths
 
 _PYTHON_PACKAGE_IGNORE_DIRS = {
@@ -90,7 +91,7 @@ def kmp_allowed_source_set_names(project: GradleProject) -> set[str]:
     result = {
         source_set_name
         for source_set_name in CANONICAL_KMP_SOURCE_SET_REQUIREMENTS
-        if _source_set_is_allowed_for_platforms(source_set_name, project.platforms)
+        if source_set_is_allowed_for_platforms(source_set_name, project.platforms)
     }
     has_native_targets = False
     has_apple_targets = False
@@ -217,7 +218,7 @@ def kmp_structural_source_set_names(project: GradleProject) -> set[str]:
     canonical_names = {
         source_set_name
         for source_set_name in CANONICAL_KMP_SOURCE_SET_REQUIREMENTS
-        if _source_set_is_allowed_for_platforms(source_set_name, project.platforms)
+        if source_set_is_allowed_for_platforms(source_set_name, project.platforms)
     }
     return canonical_names | set(kmp_direct_source_set_platforms(project))
 
@@ -264,13 +265,11 @@ def ambiguous_kmp_native_names(project: GradleProject) -> tuple[AmbiguousKmpNati
                 "location": location.resolve(),
             },
         )
-        variants = bucket["variants"]
-        assert isinstance(variants, set)
+        variants = cast(set[str], bucket["variants"])
         variants.add(variant)
 
         if target_kind is not None:
-            target_kinds = bucket["target_kinds"]
-            assert isinstance(target_kinds, set)
+            target_kinds = cast(set[str], bucket["target_kinds"])
             target_kinds.add(target_kind)
 
         bucket_location = bucket["location"]
@@ -301,12 +300,9 @@ def ambiguous_kmp_native_names(project: GradleProject) -> tuple[AmbiguousKmpNati
     results: list[AmbiguousKmpNativeName] = []
     for base_name in sorted(buckets):
         bucket = buckets[base_name]
-        variants = bucket["variants"]
-        target_kinds = bucket["target_kinds"]
-        location = bucket["location"]
-        assert isinstance(variants, set)
-        assert isinstance(target_kinds, set)
-        assert isinstance(location, Path)
+        variants = cast(set[str], bucket["variants"])
+        target_kinds = cast(set[str], bucket["target_kinds"])
+        location = cast(Path, bucket["location"])
         results.append(
             AmbiguousKmpNativeName(
                 base_name=base_name,
@@ -400,7 +396,11 @@ def discover_python_package_roots(project_path: Path) -> list[Path]:
     for child in sorted(project_path.iterdir(), key=lambda path: path.name.casefold()):
         if not child.is_dir():
             continue
-        if child.name.startswith(".") or child.name in _PYTHON_PACKAGE_IGNORE_DIRS or ignore_paths.matches(child, is_dir=True):
+        if (
+            child.name.startswith(".")
+            or child.name in _PYTHON_PACKAGE_IGNORE_DIRS
+            or ignore_paths.matches(child, is_dir=True)
+        ):
             continue
         if (child / "__init__.py").is_file():
             packages.append(child.resolve())
@@ -412,39 +412,42 @@ def parse_pyproject_poetry_paths(project_path: Path) -> tuple[dict[str, Path], d
     if not pyproject_path.is_file():
         return {}, {}
 
-    data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
-    tool = data.get("tool")
-    if not isinstance(tool, dict):
+    data = as_dict(tomllib.loads(pyproject_path.read_text(encoding="utf-8")))
+    if data is None:
         return {}, {}
-    poetry = tool.get("poetry")
-    if not isinstance(poetry, dict):
+    tool = as_dict(data.get("tool"))
+    if tool is None:
+        return {}, {}
+    poetry = as_dict(tool.get("poetry"))
+    if poetry is None:
         return {}, {}
 
     package_paths: dict[str, Path] = {}
-    packages = poetry.get("packages")
-    if isinstance(packages, list):
-        for entry in packages:
-            if not isinstance(entry, dict):
-                continue
-            include_value = entry.get("include")
-            from_value = entry.get("from")
-            if not isinstance(include_value, str):
-                continue
-            base_path = project_path / from_value if isinstance(from_value, str) else project_path
-            package_paths[include_value] = (base_path / include_value).resolve()
+    packages = as_list(poetry.get("packages")) or []
+    for raw_entry in packages:
+        entry = as_dict(raw_entry)
+        if entry is None:
+            continue
+        include_value = entry.get("include")
+        from_value = entry.get("from")
+        if not isinstance(include_value, str):
+            continue
+        base_path = project_path / from_value if isinstance(from_value, str) else project_path
+        package_paths[include_value] = (base_path / include_value).resolve()
 
     include_paths: dict[str, Path] = {}
-    include_entries = poetry.get("include")
-    if isinstance(include_entries, list):
-        for entry in include_entries:
-            if isinstance(entry, str):
-                include_paths[entry] = (project_path / entry).resolve()
-                continue
-            if not isinstance(entry, dict):
-                continue
-            path_value = entry.get("path")
-            if isinstance(path_value, str):
-                include_paths[path_value] = (project_path / path_value).resolve()
+    raw_include_entries = as_list(poetry.get("include"))
+    include_entries: list[object] = raw_include_entries or []
+    for include_entry in include_entries:
+        if isinstance(include_entry, str):
+            include_paths[include_entry] = (project_path / include_entry).resolve()
+            continue
+        entry_dict = as_dict(include_entry)
+        if entry_dict is None:
+            continue
+        path_value = entry_dict.get("path")
+        if isinstance(path_value, str):
+            include_paths[path_value] = (project_path / path_value).resolve()
 
     return package_paths, include_paths
 
@@ -455,24 +458,24 @@ def _mkdocs_layout_from_yaml(project_path: Path, config_path: Path, text: str) -
     except ImportError:
         return None
 
-    data = yaml.safe_load(text) or {}
-    if not isinstance(data, dict):
+    data = as_dict(yaml.safe_load(text) or {})
+    if data is None:
         return None
 
     docs_dir_value = data.get("docs_dir")
     docs_dir = project_path / (docs_dir_value if isinstance(docs_dir_value, str) else "docs")
     nav_paths: list[Path] = []
 
-    def collect(value: Any) -> None:
+    def collect(value: object) -> None:
         if isinstance(value, str) and value.lower().endswith(tuple(_MARKDOWN_SUFFIXES)):
             nav_paths.append((docs_dir / value).resolve())
             return
         if isinstance(value, list):
-            for item in value:
+            for item in cast(list[object], value):
                 collect(item)
             return
         if isinstance(value, dict):
-            for item in value.values():
+            for item in cast(dict[object, object], value).values():
                 collect(item)
 
     collect(data.get("nav"))

@@ -83,6 +83,7 @@ async def publish_main(projects: str | list[str] | None = None, *, dry_run: bool
                 warning(f"Skipping {project.name}: unsupported project type for publish.")
                 continue
 
+            ok = False
             try:
                 if target == "maven-central":
                     if not isinstance(project, GradleProject):

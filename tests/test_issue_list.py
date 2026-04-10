@@ -2,7 +2,6 @@ from pathlib import Path
 
 from dev.checks.base import IssueList, IssueType
 
-
 E_TEST_ISSUE_LIST_BEHAVIOR = IssueType(
     "E_TEST_ISSUE_LIST_BEHAVIOR",
     "Test issue list behavior.",

@@ -4,6 +4,7 @@ import ast
 import json
 import os
 import re
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Protocol, cast
 from urllib.parse import urlparse
@@ -268,7 +269,7 @@ def _toml_inline_table_list_map(map_data: dict[str, list[str]]) -> str:
     return "{ " + ", ".join(parts) + " }"
 
 
-def _toml_inline_table_array(entries: list[dict[str, object]]) -> str:
+def _toml_inline_table_array(entries: Sequence[Mapping[str, str | Sequence[str]]]) -> str:
     if not entries:
         return "[]"
 
@@ -840,9 +841,7 @@ def _append_pyproject_extra_toml(project_path: Path, base_text: str) -> str:
 
         tomllib.loads(combined)
     except Exception as ex:
-        raise ValueError(
-            f"{extra_path} must append only valid, non-conflicting TOML sections: {ex}"
-        ) from ex
+        raise ValueError(f"{extra_path} must append only valid, non-conflicting TOML sections: {ex}") from ex
 
     return combined
 
@@ -905,15 +904,10 @@ def _append_mkdocs_extra_yaml(project_path: Path, base_text: str) -> str:
     conflicts = sorted(_yaml_top_level_keys(base_text) & _yaml_top_level_keys(extra_text))
     if conflicts:
         conflict_list = ", ".join(conflicts)
-        raise ValueError(
-            f"{extra_path} redefines generated MkDocs top-level keys: {conflict_list}"
-        )
+        raise ValueError(f"{extra_path} redefines generated MkDocs top-level keys: {conflict_list}")
 
     return clean_text(
-        base_text.rstrip("\n")
-        + "\n\n"
-        + "# Additional unmanaged top-level keys from mkdocs.extra.yml\n\n"
-        + extra_text
+        base_text.rstrip("\n") + "\n\n" + "# Additional unmanaged top-level keys from mkdocs.extra.yml\n\n" + extra_text
     )
 
 

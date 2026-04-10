@@ -362,10 +362,12 @@ def test_release_verify_gradle_skips_when_cross_repo_dependency_missing_from_mav
     monkeypatch.setattr(release_task, "resolve_project_ids", lambda _config, targets: list(targets))
     monkeypatch.setattr(release_task, "toposort_projects", lambda _projects, target_project=None: ["alpha"])
 
-    class NotFoundError(Exception):
+    import requests
+
+    class NotFoundError(requests.HTTPError):
         def __init__(self) -> None:
-            self.response = SimpleNamespace(status_code=404)
             super().__init__("404")
+            self.response = SimpleNamespace(status_code=404)
 
     monkeypatch.setattr(
         release_task,

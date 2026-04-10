@@ -71,8 +71,7 @@ def build_repo_metadata_plan(
 
     github_repo = repo_github_repo(config, repo_root, repo_projects)
     requires_ci_workflows = github_repo is not None and any(
-        not project.quarantine and (project.publish or project.docs_enabled)
-        for project in managed_projects
+        not project.quarantine and (project.publish or project.docs_enabled) for project in managed_projects
     )
 
     return RepoMetadataPlan(

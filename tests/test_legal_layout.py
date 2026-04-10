@@ -24,7 +24,9 @@ class _FakeProject:
         return self.repo_root or self.path
 
 
-def _make_gradle_project(path: Path, *, repo_root: Path | None = None, test_license: str | None = None) -> GradleProject:
+def _make_gradle_project(
+    path: Path, *, repo_root: Path | None = None, test_license: str | None = None
+) -> GradleProject:
     return GradleProject(
         path=path,
         group_name="one.wabbit",
@@ -50,7 +52,9 @@ def _make_gradle_project(path: Path, *, repo_root: Path | None = None, test_lice
 
 
 def test_find_misplaced_legal_files_flags_nested_non_test_legal_docs(tmp_path: Path) -> None:
-    project = _FakeProject(path=tmp_path, ownership=OwnershipType.WABBIT, test_license="LicenseRef-Wabbit-Public-Test-License")
+    project = _FakeProject(
+        path=tmp_path, ownership=OwnershipType.WABBIT, test_license="LicenseRef-Wabbit-Public-Test-License"
+    )
     (tmp_path / "LICENSE.md").write_text("root\n", encoding="utf-8")
     (tmp_path / "legal" / "cla" / "v1.0.0").mkdir(parents=True)
     (tmp_path / "legal" / "cla" / "v1.0.0" / "CLA.md").write_text("cla\n", encoding="utf-8")

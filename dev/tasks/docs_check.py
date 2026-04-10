@@ -24,6 +24,7 @@ from openai.types.responses.response_input_param import ResponseInputParam
 
 from dev.config import GradleProject, Project, PythonProject, load_config
 from dev.failure_context import contextualize_failure
+from dev.json_utils import as_dict, as_list
 from dev.messages import accent, error, heading, info, style, success, warning
 from dev.repo_resolution import inferred_project_targets, resolve_project_ids
 
@@ -307,7 +308,9 @@ def _section_findings(readme_path: Path, text: str, code_blocks: Sequence[Fenced
     has_install = any(any(keyword in heading for keyword in _INSTALL_KEYWORDS) for heading in headings)
     has_quickstart = any(any(keyword in heading for keyword in _QUICKSTART_KEYWORDS) for heading in headings)
     has_usage = any(any(keyword in heading for keyword in _USAGE_KEYWORDS) for heading in headings)
-    has_examples = any(any(keyword in heading for keyword in _EXAMPLE_KEYWORDS) for heading in headings) or bool(code_blocks)
+    has_examples = any(any(keyword in heading for keyword in _EXAMPLE_KEYWORDS) for heading in headings) or bool(
+        code_blocks
+    )
     has_purpose = _contains_any_keyword(headings, _PURPOSE_KEYWORDS) or len(intro_text.split()) >= 12
     has_status = _contains_any_keyword(headings, _STATUS_KEYWORDS) or _contains_any_keyword([text], _STATUS_KEYWORDS)
     has_docs_link = _contains_any_keyword(link_texts, _DOCS_LINK_KEYWORDS)
@@ -402,8 +405,16 @@ def _docs_hook_findings(project: Project) -> list[DocsFinding]:
 
     if isinstance(project, PythonProject) and project.docs_system == "mkdocs":
         expected_errors = [
-            (project.path / "mkdocs.yml", "E_DOCS_MISSING_MKDOCS_CONFIG", "Docs are enabled but mkdocs.yml is missing."),
-            (project.path / "docs" / "index.md", "E_DOCS_MISSING_INDEX", "Docs are enabled but docs/index.md is missing."),
+            (
+                project.path / "mkdocs.yml",
+                "E_DOCS_MISSING_MKDOCS_CONFIG",
+                "Docs are enabled but mkdocs.yml is missing.",
+            ),
+            (
+                project.path / "docs" / "index.md",
+                "E_DOCS_MISSING_INDEX",
+                "Docs are enabled but docs/index.md is missing.",
+            ),
         ]
         for path, code, message in expected_errors:
             if not path.is_file():
@@ -596,11 +607,10 @@ def _run_python_snippet_hook(
     command = [sys.executable, "-m", "pytest", "-q", "tests/test_docs_snippets.py"]
     result["command"] = command
     try:
-        run_kwargs: dict[str, object] = {}
         if redirect_output:
-            run_kwargs["stdout"] = sys.stderr
-            run_kwargs["stderr"] = sys.stderr
-        subprocess.run(command, cwd=project.path, check=True, **run_kwargs)
+            subprocess.run(command, cwd=project.path, check=True, stdout=sys.stderr, stderr=sys.stderr)
+        else:
+            subprocess.run(command, cwd=project.path, check=True)
     except subprocess.CalledProcessError as ex:
         finding = DocsFinding(
             code="E_DOCS_SNIPPETS_PYTHON_HOOK_FAILED",
@@ -621,23 +631,22 @@ def _run_gradle_snippet_build(
     *,
     redirect_output: bool,
 ) -> tuple[list[DocsFinding], dict[str, object]]:
-    if project.is_kmp:
-        from dev.tasks.release_verify import _gradle_command, _gradle_task_name
+    from dev.tasks.build import build_gradle_project, gradle_command, gradle_task_name
 
+    if project.is_kmp:
         gradle_root = project.effective_gradle_root
         command = [
-            *_gradle_command(gradle_root),
+            *gradle_command(gradle_root),
             "--no-daemon",
-            _gradle_task_name(project, "publishKotlinMultiplatformPublicationToMavenLocal"),
+            gradle_task_name(project, "publishKotlinMultiplatformPublicationToMavenLocal"),
         ]
-        run_kwargs: dict[str, object] = {}
-        if redirect_output:
-            run_kwargs["stdout"] = sys.stderr
-            run_kwargs["stderr"] = sys.stderr
         try:
-            subprocess.run(command, cwd=gradle_root, check=True, **run_kwargs)
+            if redirect_output:
+                subprocess.run(command, cwd=gradle_root, check=True, stdout=sys.stderr, stderr=sys.stderr)
+            else:
+                subprocess.run(command, cwd=gradle_root, check=True)
         except subprocess.CalledProcessError as ex:
-            result = {
+            failed_result: dict[str, object] = {
                 "status": "failed",
                 "details": {
                     "kind": "gradle",
@@ -657,7 +666,7 @@ def _run_gradle_snippet_build(
                 ),
                 path=str(project.path.resolve()),
             )
-            return [finding], result
+            return [finding], failed_result
 
         return (
             [],
@@ -672,9 +681,7 @@ def _run_gradle_snippet_build(
             },
         )
 
-    from dev.tasks.build import _build_gradle_project
-
-    success_build, details = _build_gradle_project(
+    success_build, details = build_gradle_project(
         project,
         emit_messages=not redirect_output,
         redirect_output=redirect_output,
@@ -744,7 +751,7 @@ def _semantic_prompt(project: Project, markdown_files: Sequence[Path]) -> str:
         total_chars += len(truncated)
         prompt.extend(
             [
-                f"<file path=\"{path.relative_to(project.path).as_posix()}\">",
+                f'<file path="{path.relative_to(project.path).as_posix()}">',
                 truncated,
                 "</file>",
                 "",
@@ -896,6 +903,7 @@ def _semantic_tools() -> list[FunctionToolParam]:
     return [
         {
             "type": "function",
+            "strict": False,
             "name": "list_paths",
             "description": "List files or directories under the project root to understand docs structure and neighboring config files.",
             "parameters": {
@@ -911,6 +919,7 @@ def _semantic_tools() -> list[FunctionToolParam]:
         },
         {
             "type": "function",
+            "strict": False,
             "name": "read_file",
             "description": "Read one UTF-8 text file from the project, such as README.md, mkdocs.yml, pyproject.toml, build.gradle.kts, or a docs page.",
             "parameters": {
@@ -927,6 +936,7 @@ def _semantic_tools() -> list[FunctionToolParam]:
         },
         {
             "type": "function",
+            "strict": False,
             "name": "grep_repo",
             "description": "Search project files for evidence such as quickstart commands, support paths, status language, or docs references.",
             "parameters": {
@@ -1078,19 +1088,20 @@ def _semantic_findings(
 
 
 def _coerce_semantic_findings(project: Project, payload: dict[str, object]) -> list[DocsFinding]:
-    findings_raw = payload.get("findings")
-    if not isinstance(findings_raw, list):
+    findings_raw = as_list(payload.get("findings"))
+    if findings_raw is None:
         return []
     findings: list[DocsFinding] = []
     for item in findings_raw[:7]:
-        if not isinstance(item, dict):
+        item_dict = as_dict(item)
+        if item_dict is None:
             continue
-        code = item.get("code")
-        message = item.get("message")
-        evidence = item.get("evidence")
+        code = item_dict.get("code")
+        message = item_dict.get("message")
+        evidence = item_dict.get("evidence")
         if not isinstance(code, str) or not isinstance(message, str):
             continue
-        path_value = item.get("path")
+        path_value = item_dict.get("path")
         path_text = None
         if isinstance(path_value, str) and path_value.strip():
             path_text = str((project.path / path_value).resolve()) if not Path(path_value).is_absolute() else path_value
@@ -1185,12 +1196,17 @@ def _project_docs_result(
                 if link.target not in external_url_cache:
                     external_url_cache[link.target] = _check_external_url(link.target)
                 ok, detail = external_url_cache[link.target]
-                result["externalLinksChecked"] = int(result["externalLinksChecked"]) + 1
+                external_links_checked = cast(int, result["externalLinksChecked"])
+                result["externalLinksChecked"] = external_links_checked + 1
                 if not ok:
                     label = _url_label(link.target, link.is_image)
                     findings.append(
                         DocsFinding(
-                            code="W_DOCS_UNREACHABLE_BADGE_URL" if label == "badge" else "W_DOCS_UNREACHABLE_EXTERNAL_URL",
+                            code=(
+                                "W_DOCS_UNREACHABLE_BADGE_URL"
+                                if label == "badge"
+                                else "W_DOCS_UNREACHABLE_EXTERNAL_URL"
+                            ),
                             severity="warning",
                             message=f"External {label} URL is unreachable: {link.target} ({detail}).",
                             path=str(link.path),
@@ -1232,7 +1248,7 @@ def _project_docs_result(
     if semantic:
         if api_key is None:
             raise DocsCheckError(
-                "Semantic docs checking requires an OpenAI key. Add `(openai-key \"...\")` to root.private.clj "
+                'Semantic docs checking requires an OpenAI key. Add `(openai-key "...")` to root.private.clj '
                 "or export OPENAI_API_KEY."
             )
         if markdown_files:
@@ -1285,7 +1301,11 @@ def _project_snippets_result(
             findings.extend(hook_findings)
             result["verification"] = hook_result | {"mode": "python-hook"}
         else:
-            result["verification"] = {"status": "skipped", "reason": "no-project-specific-verifier", "mode": "python-hook"}
+            result["verification"] = {
+                "status": "skipped",
+                "reason": "no-project-specific-verifier",
+                "mode": "python-hook",
+            }
 
     if verify and isinstance(project, GradleProject):
         has_jvm_snippets = any(_snippet_language(block) in _SNIPPET_JVM_LANGUAGES for block in code_blocks)
@@ -1395,6 +1415,8 @@ def docs_check(
         "results": [],
         "semantic": semantic,
     }
+    results_payload: list[dict[str, object]] = []
+    payload["results"] = results_payload
 
     def run() -> int:
         config = load_config()
@@ -1426,7 +1448,7 @@ def docs_check(
                 external_url_cache=external_url_cache,
                 api_key=openai_key,
             )
-            payload["results"].append(result)
+            results_payload.append(result)
             if not json_output:
                 _print_project_result(result)
                 print()
@@ -1441,9 +1463,7 @@ def docs_check(
             return 1
         if summary["warning"]:
             if not json_output:
-                warning(
-                    f"{heading('Docs summary')}: {summary['warning']} warning project(s), no blocking docs errors."
-                )
+                warning(f"{heading('Docs summary')}: {summary['warning']} warning project(s), no blocking docs errors.")
             return 0
         if not json_output:
             success(f"{heading('Docs summary')}: no docs problems found.")
@@ -1479,6 +1499,8 @@ def docs_snippets(
         "results": [],
         "verify": verify,
     }
+    snippet_results_payload: list[dict[str, object]] = []
+    payload["results"] = snippet_results_payload
 
     def run() -> int:
         config = load_config()
@@ -1506,7 +1528,7 @@ def docs_snippets(
                 verify=verify,
                 redirect_output=json_output,
             )
-            payload["results"].append(result)
+            snippet_results_payload.append(result)
             if not json_output:
                 _print_snippets_result(result)
                 print()

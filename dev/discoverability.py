@@ -70,7 +70,7 @@ def unknown_name_message(
     return f"{prefix} {kind}: {value!r}.{did_you_mean_suffix(value, choices, limit=limit, cutoff=cutoff)}"
 
 
-def require_project(config: "Config", project_id: str, *, kind: str = "project") -> "Project":
+def require_project(config: Config, project_id: str, *, kind: str = "project") -> Project:
     project = config.defined_projects.get(project_id)
     if project is None:
         raise ValueError(unknown_name_message(kind, project_id, config.defined_projects))
