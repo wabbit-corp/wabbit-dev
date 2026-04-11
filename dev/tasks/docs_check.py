@@ -22,7 +22,8 @@ from openai.types.responses.function_tool_param import FunctionToolParam
 from openai.types.responses.response_input_item_param import FunctionCallOutput
 from openai.types.responses.response_input_param import ResponseInputParam
 
-from dev.config import GradleProject, Project, PythonProject, load_config
+from dev.config import DotnetProject, GradleProject, Project, PythonProject, load_config
+from dev.dotnet import dotnet_project_file
 from dev.failure_context import contextualize_failure
 from dev.json_utils import as_dict, as_list
 from dev.messages import accent, error, heading, info, style, success, warning
@@ -54,6 +55,7 @@ _SNIPPET_JSON_LANGUAGES = {"json"}
 _SNIPPET_TOML_LANGUAGES = {"toml"}
 _SNIPPET_PYTHON_LANGUAGES = {"python", "py"}
 _SNIPPET_SHELL_LANGUAGES = {"bash", "sh", "zsh", "shell"}
+_SNIPPET_DOTNET_LANGUAGES = {"fsharp", "fs", "csharp", "cs"}
 _SEMANTIC_TOOL_MAX_FILE_CHARS = 12000
 _SEMANTIC_TOOL_MAX_LIST_ENTRIES = 200
 _SEMANTIC_TOOL_MAX_GREP_LINES = 200
@@ -458,6 +460,45 @@ def _docs_hook_findings(project: Project) -> list[DocsFinding]:
         ):
             if not path.is_file():
                 findings.append(DocsFinding(code=code, severity="warning", message=message, path=str(path)))
+        return findings
+
+    if isinstance(project, DotnetProject) and project.docs_system == "mkdocs":
+        expected_errors = [
+            (
+                project.path / "mkdocs.yml",
+                "E_DOCS_MISSING_MKDOCS_CONFIG",
+                "Docs are enabled but mkdocs.yml is missing.",
+            ),
+            (
+                project.path / "docs" / "index.md",
+                "E_DOCS_MISSING_INDEX",
+                "Docs are enabled but docs/index.md is missing.",
+            ),
+        ]
+        for path, code, message in expected_errors:
+            if not path.is_file():
+                findings.append(DocsFinding(code=code, severity="error", message=message, path=str(path)))
+
+        expected_warnings = [
+            (
+                project.path / "scripts" / "generate_api_docs.py",
+                "W_DOCS_MISSING_API_DOCS_HOOK",
+                "Docs are enabled but scripts/generate_api_docs.py is missing.",
+            ),
+            (
+                project.path / "scripts" / "check_docs_links.py",
+                "W_DOCS_MISSING_LINK_CHECK_HOOK",
+                "Docs are enabled but scripts/check_docs_links.py is missing.",
+            ),
+            (
+                project.path / "tests" / "test_docs_snippets.py",
+                "W_DOCS_MISSING_SNIPPETS_TEST",
+                "Docs are enabled but tests/test_docs_snippets.py is missing.",
+            ),
+        ]
+        for path, code, message in expected_warnings:
+            if not path.is_file():
+                findings.append(DocsFinding(code=code, severity="warning", message=message, path=str(path)))
     return findings
 
 
@@ -704,6 +745,69 @@ def _run_gradle_snippet_build(
         path=str(project.path.resolve()),
     )
     return [finding], result
+
+
+def _run_dotnet_snippet_build(
+    project: DotnetProject,
+    *,
+    redirect_output: bool,
+) -> tuple[list[DocsFinding], dict[str, object]]:
+    project_file = dotnet_project_file(project)
+    restore_command = ["dotnet", "restore", str(project_file), "--nologo"]
+    build_command = ["dotnet", "build", str(project_file), "-c", "Release", "--nologo", "--no-restore"]
+    result: dict[str, object] = {
+        "status": "success",
+        "details": {
+            "kind": "dotnet",
+            "projectFile": str(project_file.resolve()),
+            "restoreCommand": restore_command,
+            "command": build_command,
+        },
+        "mode": "coarse-project-build",
+    }
+    try:
+        if redirect_output:
+            subprocess.run(
+                restore_command,
+                cwd=project.effective_repo_root,
+                check=True,
+                stdout=sys.stderr,
+                stderr=sys.stderr,
+            )
+            subprocess.run(
+                build_command,
+                cwd=project.effective_repo_root,
+                check=True,
+                stdout=sys.stderr,
+                stderr=sys.stderr,
+            )
+        else:
+            subprocess.run(restore_command, cwd=project.effective_repo_root, check=True)
+            subprocess.run(build_command, cwd=project.effective_repo_root, check=True)
+    except subprocess.CalledProcessError as ex:
+        result["status"] = "failed"
+        result["details"] = result["details"] | {"returnCode": ex.returncode}
+        finding = DocsFinding(
+            code="E_DOCS_SNIPPETS_DOTNET_BUILD_FAILED",
+            severity="error",
+            message=(
+                "Dotnet snippet verification requested a coarse project build, and that build failed. "
+                "This validates the project build as a whole, not each snippet individually."
+            ),
+            path=str(project.path.resolve()),
+        )
+        return [finding], result
+    except FileNotFoundError:
+        result["status"] = "failed"
+        result["details"] = result["details"] | {"error": "dotnet CLI not found"}
+        finding = DocsFinding(
+            code="E_DOCS_SNIPPETS_DOTNET_BUILD_FAILED",
+            severity="error",
+            message="Dotnet snippet verification could not run because the dotnet CLI was not found.",
+            path=str(project.path.resolve()),
+        )
+        return [finding], result
+    return [], result
 
 
 def _semantic_prompt(project: Project, markdown_files: Sequence[Path]) -> str:
@@ -1331,7 +1435,16 @@ def _project_snippets_result(
         else:
             result["verification"] = {"status": "skipped", "reason": "no-jvm-snippets", "mode": "gradle"}
 
-    if verify and "verification" not in result and not isinstance(project, (PythonProject, GradleProject)):
+    if verify and isinstance(project, DotnetProject):
+        has_dotnet_snippets = any(_snippet_language(block) in _SNIPPET_DOTNET_LANGUAGES for block in code_blocks)
+        if has_dotnet_snippets:
+            dotnet_findings, dotnet_result = _run_dotnet_snippet_build(project, redirect_output=redirect_output)
+            findings.extend(dotnet_findings)
+            result["verification"] = dotnet_result
+        else:
+            result["verification"] = {"status": "skipped", "reason": "no-dotnet-snippets", "mode": "dotnet"}
+
+    if verify and "verification" not in result and not isinstance(project, (PythonProject, GradleProject, DotnetProject)):
         result["verification"] = {"status": "skipped", "reason": "unsupported-project-kind"}
 
     result["findings"] = [finding.payload() for finding in findings]

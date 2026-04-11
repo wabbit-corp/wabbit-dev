@@ -203,6 +203,32 @@ def test_purescript_project_loads_explicit_copyright_metadata(tmp_path: Path) ->
     assert project.copyright_year_start == 2019
 
 
+def test_repo_level_dotnet_sdk_version_does_not_replace_project_sdk_kind(tmp_path: Path) -> None:
+    from dev.config import DotnetProject
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(repo "demo-dotnet"',
+                '    :repo "wabbit-corp/demo-dotnet"',
+                '    :dotnetSdkVersion "10.0.100"',
+                '    :defaultTargetFramework "net10.0"',
+                "    :projects [",
+                '        (fsharp "src/Demo"',
+                '            :version "0.1.0"',
+                '            :assemblyName "Demo")',
+                "    ])",
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["demo-dotnet/src/Demo"]
+    assert isinstance(project, DotnetProject)
+    assert project.sdk == "Microsoft.NET.Sdk"
+
+
 def test_unknown_top_level_tag_fails_decode(tmp_path: Path) -> None:
     from mu.typed import DecodeError
 

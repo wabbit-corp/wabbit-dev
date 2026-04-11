@@ -6,7 +6,7 @@ from contextlib import AsyncExitStack
 from typing import Literal
 
 from dev.build_order import toposort_projects
-from dev.config import GradleProject, Project, PythonProject, load_config
+from dev.config import DotnetProject, GradleProject, Project, PythonProject, load_config
 from dev.failure_context import contextualize_failure
 from dev.jitpack import JitPackAPI
 from dev.messages import accent, error, muted, success, warning
@@ -15,10 +15,11 @@ from dev.tasks.publish_common import PublishError
 from dev.tasks.publish_intellij import publish_gradle_project_to_intellij_marketplace
 from dev.tasks.publish_jetpack import publish_gradle_project_to_jetpack
 from dev.tasks.publish_maven_central import publish_gradle_project_to_maven_central
+from dev.tasks.publish_nuget import publish_dotnet_project_to_nuget
 from dev.tasks.publish_pypi import publish_python_project_to_pypi
 from dev.tasks.setup import RepoSetupMode, create_repo_setup_context
 
-PublishTarget = Literal["maven-central", "jitpack", "intellij-marketplace", "pypi", "skip"]
+PublishTarget = Literal["maven-central", "jitpack", "intellij-marketplace", "nuget", "pypi", "skip"]
 
 
 def determine_publish_target(project: Project) -> PublishTarget:
@@ -33,6 +34,10 @@ def determine_publish_target(project: Project) -> PublishTarget:
     if isinstance(project, PythonProject):
         if project.publish_target == "pypi":
             return "pypi"
+        return "skip"
+    if isinstance(project, DotnetProject):
+        if project.publish_target == "nuget":
+            return "nuget"
         return "skip"
     return "skip"
 
@@ -123,6 +128,13 @@ async def publish_main(projects: str | list[str] | None = None, *, dry_run: bool
                         project,
                         repo_setup_context,
                         pypi_token=config.pypi_token,
+                    )
+                elif target == "nuget":
+                    if not isinstance(project, DotnetProject):
+                        raise PublishError(f"Expected DotnetProject for {project.name}, got {type(project).__name__}.")
+                    ok = await publish_dotnet_project_to_nuget(
+                        project,
+                        nuget_api_key=config.nuget_api_key,
                     )
             except PublishError as ex:
                 error(f"{project.name} publish failed: {ex}")

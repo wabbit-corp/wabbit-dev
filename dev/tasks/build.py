@@ -12,6 +12,7 @@ from pathlib import Path
 from dev.build_order import toposort_projects
 from dev.config import (
     Config,
+    DotnetProject,
     GradleProject,
     Project,
     PythonProject,
@@ -19,6 +20,7 @@ from dev.config import (
     load_config,
     resolve_kotlin_plugin_compiler_plugin_project,
 )
+from dev.dotnet import dotnet_project_file, nuget_source_args, workspace_local_nuget_feed
 from dev.failure_context import contextualize_failure
 from dev.json_types import JSONObject, JSONValue
 from dev.messages import error, info, success, warning
@@ -57,6 +59,8 @@ def _project_kind(project: Project) -> str:
     match project:
         case GradleProject():
             return "gradle"
+        case DotnetProject():
+            return "dotnet"
         case PythonProject():
             return "python"
         case _:
@@ -139,6 +143,139 @@ def build_gradle_project(
             error(f"{project.name}: gradle wrapper or command not found (checked: {gradle_root / 'gradlew'})")
         return False, details
     return True, details
+
+
+def _pack_dotnet_project_to_local_feed(
+    config: Config,
+    project: DotnetProject,
+    *,
+    emit_messages: bool,
+    redirect_output: bool,
+) -> tuple[bool, JSONObject]:
+    workspace_root = config.workspace_root
+    feed_path = None if workspace_root is None else workspace_local_nuget_feed(workspace_root)
+    if feed_path is None or not project.packable:
+        return True, {
+            "packedToLocalFeed": False,
+        }
+
+    feed_path.mkdir(parents=True, exist_ok=True)
+    project_file = dotnet_project_file(project)
+    command = [
+        "dotnet",
+        "pack",
+        str(project_file),
+        "-c",
+        "Debug",
+        "--nologo",
+        "--no-build",
+        "--output",
+        str(feed_path),
+    ]
+    if emit_messages:
+        info(f"Packing local NuGet package for {project.name}: {' '.join(command)}")
+    details: JSONObject = {
+        "packedToLocalFeed": True,
+        "localFeed": str(feed_path.resolve()),
+        "packCommand": command,
+    }
+    try:
+        if redirect_output:
+            subprocess.run(command, cwd=project.effective_repo_root, check=True, stdout=sys.stderr, stderr=sys.stderr)
+        else:
+            subprocess.run(command, cwd=project.effective_repo_root, check=True)
+    except subprocess.CalledProcessError as ex:
+        details["error"] = f"Local NuGet pack failed with exit code {ex.returncode}."
+        details["returnCode"] = ex.returncode
+        if emit_messages:
+            error(f"{project.name}: local NuGet pack failed with exit code {ex.returncode}")
+        return False, details
+    except FileNotFoundError:
+        details["error"] = "dotnet CLI not found."
+        if emit_messages:
+            error(f"{project.name}: dotnet CLI not found")
+        return False, details
+    return True, details
+
+
+def build_dotnet_project(
+    config: Config,
+    project: DotnetProject,
+    *,
+    emit_messages: bool = True,
+    redirect_output: bool = False,
+) -> tuple[bool, JSONObject]:
+    project_file = dotnet_project_file(project)
+    workspace_root = config.workspace_root
+    restore_command = [
+        "dotnet",
+        "restore",
+        str(project_file),
+        "--nologo",
+        *nuget_source_args(workspace_root=workspace_root, include_local=True),
+    ]
+    build_command = [
+        "dotnet",
+        "build",
+        str(project_file),
+        "-c",
+        "Debug",
+        "--nologo",
+        "--no-restore",
+    ]
+    details: JSONObject = {
+        "kind": "dotnet",
+        "projectFile": str(project_file.resolve()),
+        "restoreCommand": restore_command,
+        "command": build_command,
+    }
+    if workspace_root is not None:
+        details["localFeed"] = str(workspace_local_nuget_feed(workspace_root).resolve())
+    try:
+        if emit_messages:
+            info(f"Running dotnet restore for {project.name}: {' '.join(restore_command)}")
+        if redirect_output:
+            subprocess.run(
+                restore_command,
+                cwd=project.effective_repo_root,
+                check=True,
+                stdout=sys.stderr,
+                stderr=sys.stderr,
+            )
+            if emit_messages:
+                info(f"Running dotnet build for {project.name}: {' '.join(build_command)}")
+            subprocess.run(
+                build_command,
+                cwd=project.effective_repo_root,
+                check=True,
+                stdout=sys.stderr,
+                stderr=sys.stderr,
+            )
+        else:
+            subprocess.run(restore_command, cwd=project.effective_repo_root, check=True)
+            if emit_messages:
+                info(f"Running dotnet build for {project.name}: {' '.join(build_command)}")
+            subprocess.run(build_command, cwd=project.effective_repo_root, check=True)
+    except subprocess.CalledProcessError as ex:
+        details["error"] = f"Build failed with exit code {ex.returncode}."
+        details["returnCode"] = ex.returncode
+        if emit_messages:
+            error(f"{project.name}: build failed with exit code {ex.returncode}")
+        return False, details
+    except FileNotFoundError:
+        details["error"] = "dotnet CLI not found."
+        if emit_messages:
+            error(f"{project.name}: dotnet CLI not found")
+        return False, details
+
+    pack_ok, pack_details = _pack_dotnet_project_to_local_feed(
+        config,
+        project,
+        emit_messages=emit_messages,
+        redirect_output=redirect_output,
+    )
+    details.update(pack_details)
+    return pack_ok, details
 
 
 def _publish_local_compiler_plugins(
@@ -289,7 +426,7 @@ def build(projects: str | list[str] | None = None, *, json_output: bool = False)
         else:
             target_project_name = selected_project_names[0]
         target_project = config.defined_projects[target_project_name] if target_project_name is not None else None
-        if target_project is not None and not isinstance(target_project, (GradleProject, PythonProject)):
+        if target_project is not None and not isinstance(target_project, (GradleProject, DotnetProject, PythonProject)):
             assert target_project_name is not None
             message = f"Project {target_project_name} is not buildable in this command."
             payload["error"] = message
@@ -301,7 +438,7 @@ def build(projects: str | list[str] | None = None, *, json_output: bool = False)
             unsupported_targets = [
                 project_name
                 for project_name in selected_project_names
-                if not isinstance(config.defined_projects[project_name], (GradleProject, PythonProject))
+                if not isinstance(config.defined_projects[project_name], (GradleProject, DotnetProject, PythonProject))
             ]
             if unsupported_targets:
                 message = "Unsupported build target(s): " + ", ".join(unsupported_targets)
@@ -349,6 +486,13 @@ def build(projects: str | list[str] | None = None, *, json_output: bool = False)
                         _update_build_summary(payload)
                         return 1
                     ok, details = build_gradle_project(
+                        project,
+                        emit_messages=not json_output,
+                        redirect_output=json_output,
+                    )
+                case DotnetProject():
+                    ok, details = build_dotnet_project(
+                        config,
                         project,
                         emit_messages=not json_output,
                         redirect_output=json_output,

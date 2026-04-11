@@ -100,6 +100,17 @@ def prepend_generated_comment(
     stripped = text.lstrip("\n")
     if not stripped:
         return stamp_managed_text(banner, comment_prefix=comment_prefix, comment_suffix=comment_suffix)
+    if stripped.startswith("<?xml"):
+        declaration, separator, remainder = stripped.partition("\n")
+        if separator:
+            managed_body = declaration + "\n" + banner + "\n" + remainder
+        else:
+            managed_body = declaration + "\n" + banner
+        return stamp_managed_text(
+            managed_body,
+            comment_prefix=comment_prefix,
+            comment_suffix=comment_suffix,
+        )
     return stamp_managed_text(
         banner + "\n" + stripped,
         comment_prefix=comment_prefix,
@@ -110,8 +121,15 @@ def prepend_generated_comment(
 def is_setup_managed_text(text: str) -> bool:
     if not text:
         return False
-    first_line = text.splitlines()[0]
-    return SETUP_GENERATED_MARKER in first_line
+    lines = text.splitlines()
+    if not lines:
+        return False
+    first_line = lines[0]
+    if SETUP_GENERATED_MARKER in first_line:
+        return True
+    if first_line.lstrip().startswith("<?xml") and len(lines) > 1:
+        return SETUP_GENERATED_MARKER in lines[1]
+    return False
 
 
 def is_setup_managed_file(path: Path) -> bool:
@@ -149,8 +167,13 @@ def _base58_encode(data: bytes) -> str:
 def _comment_style_for_managed_text(text: str) -> CommentStyle | None:
     if not is_setup_managed_text(text):
         return None
-    first_line = text.splitlines()[0]
-    prefix, _, suffix = first_line.partition(SETUP_GENERATED_MARKER)
+    lines = text.splitlines()
+    if not lines:
+        return None
+    marker_line = lines[0]
+    if marker_line.lstrip().startswith("<?xml") and len(lines) > 1:
+        marker_line = lines[1]
+    prefix, _, suffix = marker_line.partition(SETUP_GENERATED_MARKER)
     normalized_prefix = prefix.rstrip()
     normalized_suffix = suffix.strip() or None
     return CommentStyle(prefix=normalized_prefix, suffix=normalized_suffix)
@@ -207,7 +230,10 @@ def stamp_managed_text(
         raise ValueError("Managed file text must not be empty")
 
     token = compute_managed_integrity_token(canonical)
-    lines.insert(1, _render_comment_line(effective_style, f"{SETUP_MANAGED_INTEGRITY_LABEL} {token}"))
+    insert_index = 1
+    if lines[0].lstrip().startswith("<?xml"):
+        insert_index = 2
+    lines.insert(insert_index, _render_comment_line(effective_style, f"{SETUP_MANAGED_INTEGRITY_LABEL} {token}"))
     stamped = "\n".join(lines)
     if canonical.endswith("\n"):
         stamped += "\n"

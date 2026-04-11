@@ -6,12 +6,13 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dev.config import Config, GradleProject, Project, PythonProject, load_config
+from dev.config import Config, DotnetProject, GradleProject, Project, PythonProject, load_config
 from dev.discoverability import require_project
 from dev.git_env import git_subprocess_env
 from dev.json_types import JSONObject, JSONValue
 from dev.maven import MAVEN_CENTRAL_BASE_URL, MavenMetadata, MavenVersion
 from dev.messages import accent, heading, muted, style, warning
+from dev.nuget import NuGetPackageMetadata, fetch_package_metadata
 from dev.pypi import PyPiProjectMetadata
 from dev.repo_resolution import (
     contextualize_resolution_error,
@@ -458,6 +459,8 @@ def _current_version(project: Project) -> str | None:
     match project:
         case GradleProject(version=version):
             return str(version) if version is not None else None
+        case DotnetProject(version=version):
+            return str(version) if version is not None else None
         case PythonProject(version=version):
             return str(version) if version is not None else None
         case _:
@@ -535,6 +538,31 @@ def _pypi_registry(project: PythonProject) -> RegistrySnapshot:
         package=project.name,
         latest=metadata.latest_version,
         versions=tuple(metadata.releases),
+    )
+
+
+def _nuget_registry(project: DotnetProject) -> RegistrySnapshot:
+    package_id = project.effective_package_id
+    try:
+        metadata: NuGetPackageMetadata = fetch_package_metadata(package_id)
+    except Exception as ex:
+        return RegistrySnapshot(
+            name="nuget",
+            package=package_id,
+            latest=None,
+            versions=(),
+            diagnostics=(
+                VersionDiagnostic(
+                    source="nuget",
+                    message=f"could not query NuGet metadata for {package_id}: {ex}",
+                ),
+            ),
+        )
+    return RegistrySnapshot(
+        name="nuget",
+        package=package_id,
+        latest=metadata.latest_version,
+        versions=metadata.versions,
     )
 
 
@@ -669,6 +697,8 @@ def _registry_snapshots(
             registries.append(_jitpack_registry(gradle_project, config))
         case ("pypi", PythonProject() as python_project):
             registries.append(_pypi_registry(python_project))
+        case ("nuget", DotnetProject() as dotnet_project):
+            registries.append(_nuget_registry(dotnet_project))
         case ("jitpack", GradleProject() as gradle_project):
             registries.append(_jitpack_registry(gradle_project, config))
         case ("intellij-marketplace", GradleProject()):
@@ -692,7 +722,7 @@ def _version_sort_key(row: VersionRow) -> MavenVersion:
 
 def _registry_source_key(source: str) -> tuple[int, str]:
     match source:
-        case "maven-central" | "pypi":
+        case "maven-central" | "pypi" | "nuget":
             return (0, source)
         case "jitpack":
             return (1, source)
@@ -763,7 +793,7 @@ def _source_color(source: str) -> str:
             return "yellow"
         case "remote-tag":
             return "blue"
-        case "maven-central" | "pypi" | "jitpack":
+        case "maven-central" | "nuget" | "pypi" | "jitpack":
             return "cyan"
         case _:
             return "white"
@@ -884,7 +914,7 @@ def show_project_versions(
         for line in render_project_version_lines(report):
             print(line)
         if any(
-            diagnostic.source in {"maven-central", "pypi", "jitpack", "remote-tags"}
+            diagnostic.source in {"maven-central", "nuget", "pypi", "jitpack", "remote-tags"}
             for diagnostic in report.diagnostics
         ):
             warning("Some version sources were unavailable; see diagnostics above.")

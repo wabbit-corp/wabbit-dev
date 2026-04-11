@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from dev.config import Config, GradleProject, Project, PythonProject, RepoDefinition
+from dev.config import Config, DotnetProject, GradleProject, Project, PythonProject, RepoDefinition
 
 
 @dataclass(frozen=True)
@@ -72,6 +72,8 @@ def _supports_repo_docs_project(project: Project) -> bool:
     match project:
         case GradleProject():
             return project.docs_enabled and project.docs_system == "dokka"
+        case DotnetProject():
+            return project.docs_enabled and project.docs_system == "mkdocs"
         case PythonProject():
             return project.docs_enabled and project.docs_system == "mkdocs"
         case _:
@@ -93,6 +95,18 @@ def _project_docs_entry(root_path: Path, project: Project) -> RepoDocsEntry | No
                 relative_project_path=relative_project_path,
                 relative_output_path=_gradle_docs_output_path(root_path, project),
                 gradle_task=_gradle_docs_task(project),
+            )
+        case DotnetProject() if project.docs_enabled and project.docs_system == "mkdocs":
+            return RepoDocsEntry(
+                kind="dotnet-mkdocs",
+                title=project.name,
+                description=default_description,
+                published_path=published_path,
+                relative_project_path=relative_project_path,
+                has_changelog_guard_script=(project.path / "scripts" / "check_changelog_guard.py").is_file(),
+                has_generate_api_docs_script=(project.path / "scripts" / "generate_api_docs.py").is_file(),
+                has_docs_links_script=(project.path / "scripts" / "check_docs_links.py").is_file(),
+                has_docs_snippets_test=(project.path / "tests" / "test_docs_snippets.py").is_file(),
             )
         case PythonProject() if project.docs_enabled and project.docs_system == "mkdocs":
             return RepoDocsEntry(
@@ -203,7 +217,7 @@ def _repo_docs_plan_for_projects(
         needs_java=has_gradle_docs,
         needs_python=bool(entries),
         needs_android=needs_android,
-        needs_dotnet=False,
+        needs_dotnet=any(entry.kind == "dotnet-mkdocs" for entry in entries),
     )
 
 
@@ -224,6 +238,17 @@ def standalone_project_repo_docs_plan(project: Project) -> RepoDocsPlan | None:
                 and project.github_repo is not None
                 and project.effective_gradle_root == project.path
             ):
+            return _repo_docs_plan_for_projects(
+                repo_id=project.project_id or project.name,
+                root_path=project.path,
+                github_repo=project.github_repo,
+                projects=[project],
+            )
+        case DotnetProject() if (
+                project.docs_enabled
+                and project.docs_system == "mkdocs"
+                and project.github_repo is not None
+        ):
             return _repo_docs_plan_for_projects(
                 repo_id=project.project_id or project.name,
                 root_path=project.path,

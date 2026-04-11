@@ -17,6 +17,7 @@ import dev.io
 from dev.build_order import toposort_projects
 from dev.config import (
     DataProject,
+    DotnetProject,
     GradleProject,
     PremakeProject,
     Project,
@@ -24,6 +25,7 @@ from dev.config import (
     PythonProject,
     load_config,
 )
+from dev.dotnet import dotnet_project_file
 from dev.failure_context import contextualize_failure
 from dev.json_types import JSONObject, JSONValue
 from dev.messages import error, info, success, warning
@@ -50,6 +52,8 @@ def _project_kind(project: Project) -> str:
     match project:
         case GradleProject():
             return "gradle"
+        case DotnetProject():
+            return "dotnet"
         case PythonProject():
             return "python"
         case _:
@@ -173,7 +177,7 @@ def _repo_version_label(projects: Sequence[Project]) -> str:
     versions: set[str] = set()
     for project in projects:
         match project:
-            case PythonProject(version=version) | GradleProject(version=version) | PurescriptProject(version=version) | PremakeProject(version=version) | DataProject(version=version):
+            case PythonProject(version=version) | GradleProject(version=version) | DotnetProject(version=version) | PurescriptProject(version=version) | PremakeProject(version=version) | DataProject(version=version):
                 if version is not None:
                     versions.add(str(version))
             case _:
@@ -389,6 +393,73 @@ def _bundle_gradle_project(
     return result
 
 
+def _bundle_dotnet_project(
+    project: DotnetProject,
+    *,
+    plan: RepoBundlePlan,
+    redirect_output: bool,
+) -> JSONObject:
+    publish_target = determine_publish_target(project)
+    result: JSONObject = {
+        "projectId": _project_id(project),
+        "kind": "dotnet",
+        "path": str(project.path.resolve()),
+        "publishTarget": publish_target,
+    }
+
+    if project.quarantine:
+        result["status"] = "skipped"
+        result["reason"] = "quarantined"
+        return result
+    if not project.publish:
+        result["status"] = "skipped"
+        result["reason"] = "publish-disabled"
+        return result
+    if publish_target != "nuget":
+        result["status"] = "skipped"
+        result["reason"] = "unsupported-publish-target"
+        return result
+
+    bundle_path = _bundle_path(plan, project)
+    project_file = dotnet_project_file(project)
+    with tempfile.TemporaryDirectory(prefix="release-bundle-dotnet-") as temp_dir_name:
+        source_dir = Path(temp_dir_name) / "packages"
+        source_dir.mkdir(parents=True, exist_ok=True)
+        command = [
+            "dotnet",
+            "pack",
+            str(project_file),
+            "-c",
+            "Release",
+            "--nologo",
+            "--output",
+            str(source_dir),
+        ]
+        result["command"] = command
+        try:
+            if redirect_output:
+                subprocess.run(command, cwd=project.effective_repo_root, check=True, stdout=sys.stderr, stderr=sys.stderr)
+            else:
+                subprocess.run(command, cwd=project.effective_repo_root, check=True)
+        except subprocess.CalledProcessError as ex:
+            raise ReleaseBundleError(_command_failure_message(ex)) from ex
+        except FileNotFoundError as ex:
+            raise ReleaseBundleError("dotnet CLI not found.") from ex
+
+        entry_count = _write_bundle_zip(source_dir, bundle_path, archive_prefix="packages")
+
+    result["bundle"] = {
+        "path": str(bundle_path.resolve()),
+        "bundleKind": "dotnet-nuget",
+        "archivePrefix": "packages",
+        "sha256": _sha256_hex(bundle_path),
+        "sizeBytes": bundle_path.stat().st_size,
+        "entryCount": entry_count,
+    }
+    result["status"] = "success"
+    return result
+
+
 def _aggregate_repo_bundles(
     plan: RepoBundlePlan,
     project_results: Sequence[JSONObject],
@@ -539,6 +610,8 @@ def release_bundle(projects: str | list[str] | None = None, *, json_output: bool
                 match project:
                     case PythonProject():
                         result = _bundle_python_project(project, plan=plan, redirect_output=json_output)
+                    case DotnetProject():
+                        result = _bundle_dotnet_project(project, plan=plan, redirect_output=json_output)
                     case GradleProject():
                         result = _bundle_gradle_project(project, plan=plan, redirect_output=json_output)
                     case PurescriptProject() | PremakeProject() | DataProject():

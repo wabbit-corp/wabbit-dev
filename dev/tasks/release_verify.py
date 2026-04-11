@@ -22,6 +22,7 @@ from dev.config import (
     DataProject,
     Dependency,
     DependencyTarget,
+    DotnetProject,
     GradleProject,
     IntellijPlugin,
     PremakeProject,
@@ -30,10 +31,12 @@ from dev.config import (
     PythonProject,
     load_config,
 )
+from dev.dotnet import NUGET_V3_INDEX_URL, dotnet_project_file
 from dev.failure_context import contextualize_failure
 from dev.json_types import JSONObject, JSONValue
 from dev.maven import MavenMetadata
 from dev.messages import error, info, success, warning
+from dev.nuget import fetch_package_metadata
 from dev.python_sdist_policy import python_check_manifest_ignore_patterns
 from dev.repo_resolution import inferred_project_targets, resolve_project_ids
 from dev.tasks.build import gradle_command, gradle_task_name
@@ -51,6 +54,8 @@ class ReleaseVerifyError(Exception):
 def _project_kind(project: Project) -> str:
     if isinstance(project, GradleProject):
         return "gradle"
+    if isinstance(project, DotnetProject):
+        return "dotnet"
     if isinstance(project, PythonProject):
         return "python"
     return type(project).__name__.removesuffix("Project").lower()
@@ -499,6 +504,295 @@ def _verify_python_project(
     return result
 
 
+def _direct_dotnet_dependency_projects(config: Config, project: DotnetProject) -> list[DotnetProject]:
+    dependency_projects: list[DotnetProject] = []
+    seen: set[str] = set()
+    for dependency in project.resolved_dependencies:
+        target = dependency.target
+        if not isinstance(target, DependencyTarget.Project):
+            continue
+        dependency_project = config.defined_projects.get(target.project)
+        if not isinstance(dependency_project, DotnetProject):
+            continue
+        dependency_key = dependency_project.project_id or dependency_project.name
+        if dependency_key in seen:
+            continue
+        seen.add(dependency_key)
+        dependency_projects.append(dependency_project)
+    return dependency_projects
+
+
+def _reachable_dotnet_dependency_projects(config: Config, project: DotnetProject) -> list[DotnetProject]:
+    reachable: list[DotnetProject] = []
+    seen: set[str] = set()
+    queue = _direct_dotnet_dependency_projects(config, project)
+    while queue:
+        dependency_project = queue.pop(0)
+        dependency_key = dependency_project.project_id or dependency_project.name
+        if dependency_key in seen:
+            continue
+        seen.add(dependency_key)
+        reachable.append(dependency_project)
+        queue.extend(_direct_dotnet_dependency_projects(config, dependency_project))
+    return reachable
+
+
+def _cross_repo_dotnet_dependencies_for_prod(config: Config, project: DotnetProject) -> list[DotnetProject]:
+    current_repo_root = project.effective_repo_root.resolve()
+    return [
+        dependency_project
+        for dependency_project in _reachable_dotnet_dependency_projects(config, project)
+        if dependency_project.effective_repo_root.resolve() != current_repo_root
+    ]
+
+
+def _nuget_preflight_for_dotnet_project(config: Config, project: DotnetProject) -> JSONObject:
+    checked: list[JSONObject] = []
+    missing: list[JSONObject] = []
+    unavailable: list[JSONObject] = []
+
+    for dependency_project in _cross_repo_dotnet_dependencies_for_prod(config, project):
+        project_id = dependency_project.project_id or dependency_project.name
+        dependency_version = dependency_project.version
+        base_entry: JSONObject = {
+            "projectId": project_id,
+            "path": str(dependency_project.path.resolve()),
+            "publishTarget": determine_publish_target(dependency_project),
+            "packageId": dependency_project.effective_package_id,
+        }
+        if dependency_version is None:
+            missing.append(
+                {
+                    **base_entry,
+                    "reason": "cross-repo dependency has no publishable version",
+                }
+            )
+            continue
+
+        version = str(dependency_version)
+        try:
+            metadata = fetch_package_metadata(dependency_project.effective_package_id)
+        except Exception as ex:
+            unavailable.append(
+                {
+                    **base_entry,
+                    "version": version,
+                    "reason": f"could not query NuGet metadata: {ex}",
+                }
+            )
+            continue
+
+        available = version in metadata.versions
+        checked.append(
+            {
+                **base_entry,
+                "version": version,
+                "available": available,
+            }
+        )
+        if not available:
+            missing.append(
+                {
+                    **base_entry,
+                    "version": version,
+                    "reason": "artifact version is not present on NuGet",
+                }
+            )
+
+    status = "pass"
+    if missing:
+        status = "missing"
+    elif unavailable:
+        status = "unknown"
+
+    return {
+        "status": status,
+        "checked": checked,
+        "missing": missing,
+        "unavailable": unavailable,
+    }
+
+
+def _summarize_dotnet_artifacts(project: DotnetProject, out_dir: Path) -> JSONObject:
+    packages = sorted(path for path in out_dir.glob("*.nupkg") if not path.name.endswith(".symbols.nupkg"))
+    symbol_packages = sorted(out_dir.glob("*.snupkg"))
+    if not packages:
+        raise ReleaseVerifyError(f"No .nupkg was produced for {project.name}.")
+
+    package_path = packages[0]
+    with zipfile.ZipFile(package_path) as archive:
+        names = archive.namelist()
+        nuspec_name = next((name for name in names if name.endswith(".nuspec")), None)
+        if nuspec_name is None:
+            raise ReleaseVerifyError(f"{package_path.name} is missing a .nuspec file.")
+        try:
+            nuspec_root = ET.fromstring(archive.read(nuspec_name).decode("utf-8"))
+        except (UnicodeDecodeError, ET.ParseError) as ex:
+            raise ReleaseVerifyError(f"{package_path.name} has an unreadable .nuspec file: {ex}") from ex
+
+    metadata_node = nuspec_root.find("metadata")
+    if metadata_node is None:
+        raise ReleaseVerifyError(f"{package_path.name} is missing nuspec metadata.")
+
+    def metadata_text(name: str) -> str | None:
+        child = metadata_node.find(name)
+        if child is None or child.text is None:
+            return None
+        normalized = child.text.strip()
+        if not normalized:
+            return None
+        return normalized
+
+    package_id = metadata_text("id")
+    version = metadata_text("version")
+    description = metadata_text("description")
+    authors = metadata_text("authors")
+    project_url = metadata_text("projectUrl")
+    readme = metadata_text("readme")
+    license_text = metadata_text("license")
+    if package_id != project.effective_package_id:
+        raise ReleaseVerifyError(
+            f"{package_path.name} packages id {package_id!r}; expected {project.effective_package_id!r}."
+        )
+    expected_version = str(project.version) if project.version is not None else None
+    if expected_version is not None and version != expected_version:
+        raise ReleaseVerifyError(
+            f"{package_path.name} packages version {version!r}; expected {expected_version!r}."
+        )
+    if description is None:
+        raise ReleaseVerifyError(f"{package_path.name} is missing nuspec description metadata.")
+    if authors is None:
+        raise ReleaseVerifyError(f"{package_path.name} is missing nuspec authors metadata.")
+    if project.github_repo is not None:
+        expected_project_url = f"https://github.com/{project.github_repo}"
+        if project_url != expected_project_url:
+            raise ReleaseVerifyError(
+                f"{package_path.name} packages projectUrl {project_url!r}; expected {expected_project_url!r}."
+            )
+    if readme is None:
+        raise ReleaseVerifyError(f"{package_path.name} is missing nuspec readme metadata.")
+    if readme not in names:
+        raise ReleaseVerifyError(f"{package_path.name} declares readme {readme!r} but does not package it.")
+    if license_text is None:
+        raise ReleaseVerifyError(f"{package_path.name} is missing nuspec license metadata.")
+    if license_text.endswith(".md") and license_text not in names:
+        raise ReleaseVerifyError(f"{package_path.name} declares license file {license_text!r} but does not package it.")
+
+    return {
+        "package": {
+            "path": str(package_path.resolve()),
+            "entryCount": len(names),
+        },
+        "symbols": [str(path.resolve()) for path in symbol_packages],
+        "metadata": {
+            "id": package_id or "",
+            "version": version or "",
+            "readme": readme or "",
+            "license": license_text or "",
+            "projectUrl": project_url or "",
+        },
+    }
+
+
+def _verify_dotnet_project(
+    config: Config,
+    project: DotnetProject,
+    *,
+    redirect_output: bool,
+) -> JSONObject:
+    publish_target = determine_publish_target(project)
+    result: JSONObject = {
+        "projectId": project.project_id or project.name,
+        "kind": "dotnet",
+        "path": str(project.path.resolve()),
+        "publishTarget": publish_target,
+        "checks": [],
+    }
+
+    if project.quarantine:
+        result["status"] = "skipped"
+        result["reason"] = "quarantined"
+        return result
+    if not project.publish:
+        result["status"] = "skipped"
+        result["reason"] = "publish-disabled"
+        return result
+    if publish_target != "nuget":
+        result["status"] = "skipped"
+        result["reason"] = "unsupported-publish-target"
+        return result
+
+    preflight = _nuget_preflight_for_dotnet_project(config, project)
+    result["preflight"] = {"nuget": preflight}
+    if preflight["status"] == "missing":
+        result["status"] = "skipped"
+        result["reason"] = "external-project-dependencies-missing-from-nuget"
+        result["missingDependencies"] = preflight["missing"]
+        return result
+
+    project_file = dotnet_project_file(project)
+    result["checks"] = [
+        {"name": "restore", "status": "pass"},
+        {"name": "build", "status": "pass"},
+        {"name": "pack", "status": "pass"},
+        {"name": "artifact-sanity", "status": "pass"},
+    ]
+
+    with tempfile.TemporaryDirectory(prefix="release-verify-dotnet-") as temp_dir_name:
+        out_dir = Path(temp_dir_name)
+        restore_command = [
+            "dotnet",
+            "restore",
+            str(project_file),
+            "--nologo",
+            "--source",
+            NUGET_V3_INDEX_URL,
+        ]
+        build_command = [
+            "dotnet",
+            "build",
+            str(project_file),
+            "-c",
+            "Release",
+            "--nologo",
+            "--no-restore",
+        ]
+        pack_command = [
+            "dotnet",
+            "pack",
+            str(project_file),
+            "-c",
+            "Release",
+            "--nologo",
+            "--no-build",
+            "--output",
+            str(out_dir),
+        ]
+        result["command"] = build_command
+        result["restoreCommand"] = restore_command
+        result["packCommand"] = pack_command
+
+        if redirect_output:
+            subprocess.run(
+                restore_command,
+                cwd=project.effective_repo_root,
+                check=True,
+                stdout=sys.stderr,
+                stderr=sys.stderr,
+            )
+            subprocess.run(build_command, cwd=project.effective_repo_root, check=True, stdout=sys.stderr, stderr=sys.stderr)
+            subprocess.run(pack_command, cwd=project.effective_repo_root, check=True, stdout=sys.stderr, stderr=sys.stderr)
+        else:
+            subprocess.run(restore_command, cwd=project.effective_repo_root, check=True)
+            subprocess.run(build_command, cwd=project.effective_repo_root, check=True)
+            subprocess.run(pack_command, cwd=project.effective_repo_root, check=True)
+
+        result["artifacts"] = _summarize_dotnet_artifacts(project, out_dir)
+
+    result["status"] = "success"
+    return result
+
+
 def _intellij_feature(project: GradleProject) -> IntellijPlugin:
     feature = project.resolved_features.get("intellij-plugin")
     match feature:
@@ -773,6 +1067,8 @@ def release_verify(projects: str | list[str] | None = None, *, json_output: bool
                 match project:
                     case PythonProject():
                         result = _verify_python_project(project, redirect_output=json_output)
+                    case DotnetProject():
+                        result = _verify_dotnet_project(config, project, redirect_output=json_output)
                     case GradleProject():
                         result = _verify_gradle_project(config, project, redirect_output=json_output)
                     case PurescriptProject() | PremakeProject() | DataProject():

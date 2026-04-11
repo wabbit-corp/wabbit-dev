@@ -29,3 +29,13 @@ def test_dependency_as_string_jarfile_escapes_quotes() -> None:
         dep.as_string()
         == 'implementation(fileTree(mapOf("dir" to "lib\\"dir", "include" to listOf("agent\\"core.jar"))))'
     )
+
+
+def test_dependency_as_string_nuget_uses_package_at_version() -> None:
+    dep = Dependency(
+        scope=None,
+        target=DependencyTarget.Nuget(package="Wabbit.Codec.NBT", version="0.1.0"),
+    )
+
+    assert dep.name == "Wabbit.Codec.NBT"
+    assert dep.as_string() == "Wabbit.Codec.NBT@0.1.0"

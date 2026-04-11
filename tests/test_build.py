@@ -202,3 +202,128 @@ def test_build_json_output_reports_python_project(
     assert payload["results"][0]["projectId"] == "alpha"
     assert payload["results"][0]["status"] == "success"
     assert payload["results"][0]["sourceCount"] == 1
+
+
+def test_build_json_output_reports_dotnet_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from mu.parser import parse
+
+    import dev.tasks.build as build_module
+    from dev.config import Config, DotnetProject, OwnershipType, Project, Version
+
+    project_path = tmp_path / "alpha"
+    project_file_dir = project_path / "src" / "Alpha"
+    project_file_dir.mkdir(parents=True)
+    project_file = project_file_dir / "Alpha.fsproj"
+    project_file.write_text("<Project Sdk=\"Microsoft.NET.Sdk\" />\n", encoding="utf-8")
+
+    project = DotnetProject(
+        path=project_path,
+        name="alpha",
+        version=Version.parse("0.1.0"),
+        description=None,
+        authors=[],
+        license="AGPL",
+        quarantine=False,
+        publish=True,
+        github_repo="wabbit-corp/alpha",
+        ownership=OwnershipType.WABBIT,
+        resolved_dependencies=[],
+        language="fsharp",
+        project_kind="library",
+        sdk="Microsoft.NET.Sdk",
+        target_framework="net10.0",
+        project_id="alpha",
+        publish_target="nuget",
+        packable=True,
+    )
+
+    config = Config(raw=parse("()"))
+    config.workspace_root = tmp_path
+    config.defined_projects["alpha"] = project
+
+    def fake_load_config() -> Config:
+        return config
+
+    def fake_resolve_project_ids(_config: Config, targets: list[str]) -> list[str]:
+        assert targets == ["alpha"]
+        return ["alpha"]
+
+    def fake_toposort_projects(
+        _projects: dict[str, Project],
+        target_project: str | list[str] | tuple[str, ...] | None = None,
+    ) -> list[str]:
+        del target_project
+        return ["alpha"]
+
+    commands: list[tuple[Path, list[str]]] = []
+
+    def fake_run(
+        command: list[str],
+        cwd: Path,
+        check: bool,
+        stdout: object | None = None,
+        stderr: object | None = None,
+    ) -> SimpleNamespace:
+        del check, stdout, stderr
+        commands.append((cwd, command))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(build_module, "load_config", fake_load_config)
+    monkeypatch.setattr(build_module, "resolve_project_ids", fake_resolve_project_ids)
+    monkeypatch.setattr(build_module, "toposort_projects", fake_toposort_projects)
+    monkeypatch.setattr(build_module.subprocess, "run", fake_run)
+
+    result = build_module.build(["alpha"], json_output=True)
+
+    resolved_project_file = build_module.dotnet_project_file(project)
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["results"][0]["projectId"] == "alpha"
+    assert payload["results"][0]["status"] == "success"
+    assert payload["results"][0]["projectFile"] == str(resolved_project_file.resolve())
+    assert payload["results"][0]["packedToLocalFeed"] is True
+    assert commands == [
+        (
+            project_path,
+            [
+                "dotnet",
+                "restore",
+                str(resolved_project_file),
+                "--nologo",
+                "--source",
+                "https://api.nuget.org/v3/index.json",
+                "--source",
+                str((tmp_path / ".nuget-local-feed").resolve()),
+            ],
+        ),
+        (
+            project_path,
+            [
+                "dotnet",
+                "build",
+                str(resolved_project_file),
+                "-c",
+                "Debug",
+                "--nologo",
+                "--no-restore",
+            ],
+        ),
+        (
+            project_path,
+            [
+                "dotnet",
+                "pack",
+                str(resolved_project_file),
+                "-c",
+                "Debug",
+                "--nologo",
+                "--no-build",
+                "--output",
+                str((tmp_path / ".nuget-local-feed").resolve()),
+            ],
+        ),
+    ]

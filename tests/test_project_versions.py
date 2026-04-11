@@ -86,6 +86,31 @@ def _make_gradle_project(path: Path):
     )
 
 
+def _make_dotnet_project(path: Path):
+    from dev.config import DotnetProject, OwnershipType, Version
+
+    return DotnetProject(
+        path=path,
+        name="alpha",
+        version=Version.parse("0.2.0"),
+        description="Alpha project",
+        authors=["Dev"],
+        license="AGPL",
+        quarantine=False,
+        publish=True,
+        github_repo="wabbit-corp/alpha",
+        ownership=OwnershipType.WABBIT,
+        resolved_dependencies=[],
+        language="fsharp",
+        project_kind="library",
+        sdk="Microsoft.NET.Sdk",
+        target_framework="net10.0",
+        project_id="alpha",
+        publish_target="nuget",
+        packable=True,
+    )
+
+
 def test_project_versions_json_merges_current_tags_and_pypi(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -323,3 +348,62 @@ def test_project_versions_requires_single_project_target(tmp_path: Path) -> None
 
     with pytest.raises(ValueError, match="expects exactly one project"):
         project_versions_task.show_project_versions(["alpha", "beta"], config=config, json_output=True)
+
+
+def test_project_versions_json_adds_nuget_for_dotnet_projects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import dev.tasks.project_versions as project_versions_task
+    from dev.config import Config
+    from dev.nuget import NuGetPackageMetadata
+
+    project_path = tmp_path / "alpha"
+    project_path.mkdir()
+    project = _make_dotnet_project(project_path)
+    config = Config(raw=parse("()"))
+    config.defined_projects["alpha"] = project
+
+    def fake_run_git(repo_root: Path, args: list[str], loaded_config: Config) -> subprocess.CompletedProcess[str]:
+        del loaded_config
+        assert repo_root == project_path
+        match args:
+            case ["tag", "--list"]:
+                return subprocess.CompletedProcess(args, 0, "0.1.0\nv0.2.0\n", "")
+            case ["remote"]:
+                return subprocess.CompletedProcess(args, 0, "origin\n", "")
+            case ["ls-remote", "--tags", "origin"]:
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    "abc\trefs/tags/v0.1.0\n"
+                    "def\trefs/tags/v0.2.0\n",
+                    "",
+                )
+            case _:
+                git_state_result = _clean_git_state_result(args, ["0.1.0", "v0.2.0"])
+                if git_state_result is not None:
+                    return git_state_result
+                raise AssertionError(f"unexpected git args: {args}")
+
+    monkeypatch.setattr(project_versions_task, "_run_git", fake_run_git)
+    monkeypatch.setattr(
+        project_versions_task,
+        "fetch_package_metadata",
+        lambda package_id: NuGetPackageMetadata(latest_version="0.3.0", versions=("0.1.0", "0.3.0")),
+    )
+
+    result = project_versions_task.show_project_versions(["alpha"], config=config, json_output=True)
+
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["publishTarget"] == "nuget"
+    assert payload["registry"]["name"] == "nuget"
+    assert payload["registry"]["latest"] == "0.3.0"
+
+    rows = {row["version"]: row for row in payload["versions"]}
+    assert rows["0.1.0"]["registries"] == ["nuget"]
+    assert rows["0.2.0"]["current"] is True
+    assert rows["0.2.0"]["localTags"] == ["v0.2.0"]
+    assert rows["0.3.0"]["registries"] == ["nuget"]

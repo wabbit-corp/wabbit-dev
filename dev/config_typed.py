@@ -429,6 +429,12 @@ class PypiTokenCommand:
     token: str
 
 
+@tag("nuget-api-key")
+@dataclass(frozen=True)
+class NugetApiKeyCommand:
+    token: str
+
+
 @tag("maven-username")
 @dataclass(frozen=True)
 class MavenUsernameCommand:
@@ -906,8 +912,84 @@ class GradleProjectCommand:
     testLicense: str | None = None
 
 
+@tag("fsharp")
+@dataclass(frozen=True)
+class FsharpProjectCommand:
+    dir_name: str
+    version: str
+    name: str | None = None
+    description: str | None = None
+    authors: list[str] | None = None
+    license: str | None = "AGPL"
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
+    quarantine: bool = False
+    publish: bool = True
+    projectKind: str | None = None
+    targetFramework: str | None = None
+    targetFrameworks: list[str] | None = None
+    sdk: str | None = None
+    assemblyName: str | None = None
+    rootNamespace: str | None = None
+    packageId: str | None = None
+    packageTags: list[str] | None = None
+    generateDocumentationFile: bool | None = None
+    nullable: bool | None = None
+    implicitUsings: bool | None = None
+    langVersion: str | None = None
+    dependencies: list[str] | None = None
+    publishTarget: str | None = None
+    publishSnapshots: bool | None = None
+    docs: bool | None = None
+    docsSystem: str | None = None
+    repo: str | None = None
+    ownership: str | None = None
+    testLicense: str | None = None
+
+
+@tag("csharp")
+@dataclass(frozen=True)
+class CsharpProjectCommand:
+    dir_name: str
+    version: str
+    name: str | None = None
+    description: str | None = None
+    authors: list[str] | None = None
+    license: str | None = "AGPL"
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
+    quarantine: bool = False
+    publish: bool = True
+    projectKind: str | None = None
+    targetFramework: str | None = None
+    targetFrameworks: list[str] | None = None
+    sdk: str | None = None
+    assemblyName: str | None = None
+    rootNamespace: str | None = None
+    packageId: str | None = None
+    packageTags: list[str] | None = None
+    generateDocumentationFile: bool | None = None
+    nullable: bool | None = None
+    implicitUsings: bool | None = None
+    langVersion: str | None = None
+    dependencies: list[str] | None = None
+    publishTarget: str | None = None
+    publishSnapshots: bool | None = None
+    docs: bool | None = None
+    docsSystem: str | None = None
+    repo: str | None = None
+    ownership: str | None = None
+    testLicense: str | None = None
+
+
 RepoProjectCommand = (
-    PythonProjectCommand | PurescriptProjectCommand | DataProjectCommand | PremakeProjectCommand | GradleProjectCommand
+    PythonProjectCommand
+    | PurescriptProjectCommand
+    | DataProjectCommand
+    | PremakeProjectCommand
+    | GradleProjectCommand
+    | FsharpProjectCommand
+    | CsharpProjectCommand
 )
 
 
@@ -920,6 +1002,10 @@ class RepoCommand:
     projectVersion: str | None = None
     defaultKotlinVersion: str | None = None
     supportedKotlinVersions: list[str] | None = None
+    dotnetSdkVersion: str | None = None
+    defaultTargetFramework: str | None = None
+    solutionName: str | None = None
+    useCentralPackageManagement: bool | None = None
     jvmPolicy: str | None = None
     docsProject: str | None = None
     projects: list[RepoProjectCommand] | None = None
@@ -935,6 +1021,7 @@ BuiltinTopLevelCommand = (
     | AnthropicKeyCommand
     | JetbrainsMarketplaceTokenCommand
     | PypiTokenCommand
+    | NugetApiKeyCommand
     | MavenUsernameCommand
     | MavenPasswordCommand
     | MavenGpgPrivateKeyCommand
@@ -961,6 +1048,8 @@ BuiltinTopLevelCommand = (
     | DataProjectCommand
     | PremakeProjectCommand
     | GradleProjectCommand
+    | FsharpProjectCommand
+    | CsharpProjectCommand
     | RepoCommand
 )
 
@@ -975,6 +1064,7 @@ BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[object], ...] = (
     AnthropicKeyCommand,
     JetbrainsMarketplaceTokenCommand,
     PypiTokenCommand,
+    NugetApiKeyCommand,
     MavenUsernameCommand,
     MavenPasswordCommand,
     MavenGpgPrivateKeyCommand,
@@ -1001,6 +1091,8 @@ BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[object], ...] = (
     DataProjectCommand,
     PremakeProjectCommand,
     GradleProjectCommand,
+    FsharpProjectCommand,
+    CsharpProjectCommand,
     RepoCommand,
 )
 
@@ -1028,6 +1120,7 @@ __all__ = [
     "CodeOwnerCommand",
     "Const",
     "DataProjectCommand",
+    "CsharpProjectCommand",
     "DefaultMavenProjectGroupCommand",
     "DefineCommand",
     "AddDefaultGradlePluginCommand",
@@ -1069,12 +1162,14 @@ __all__ = [
     "MavenGpgPrivateKeyCommand",
     "MavenPasswordCommand",
     "MavenUsernameCommand",
+    "NugetApiKeyCommand",
     "OpenaiKeyCommand",
     "PaperPluginCommand",
     "PypiTokenCommand",
     "PremakeProjectCommand",
     "RepoCommand",
     "RepoProjectCommand",
+    "FsharpProjectCommand",
     "PurescriptProjectCommand",
     "PythonDefaultsCommand",
     "PythonApplicationCommand",

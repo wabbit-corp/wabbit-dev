@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from inspect import signature
 from pathlib import Path
-from typing import Protocol, TypeGuard, Union, cast
+from typing import Literal, Protocol, TypeGuard, Union, cast
 
 from mu.exec import Quoted
 from mu.parser import parse
@@ -613,6 +613,10 @@ class RepoDefinition:
     project_version: str | None = None
     default_kotlin_version: str | None = None
     supported_kotlin_versions: list[str] = dataclasses.field(default_factory=list)
+    dotnet_sdk_version: str | None = None
+    default_target_framework: str | None = None
+    solution_name: str | None = None
+    use_central_package_management: bool = False
     docs_project_id: str | None = None
     project_ids: list[str] = dataclasses.field(default_factory=list)
 
@@ -675,6 +679,8 @@ class Dependency:
             return target.artifact
         if isinstance(target, NpmDependencyTarget):
             return target.package
+        if isinstance(target, NugetDependencyTarget):
+            return target.package
         raise ValueError(f"Unsupported dependency target type: {type(target).__name__}")
 
     @property
@@ -719,6 +725,9 @@ class Dependency:
         if isinstance(target, NpmDependencyTarget):
             return f'{modifier}(npm("{target.package}", "{target.version}"))'
 
+        if isinstance(target, NugetDependencyTarget):
+            return f"{target.package}@{target.version}"
+
         raise ValueError(f"Unsupported dependency target type: {type(target).__name__}")
 
 
@@ -727,6 +736,7 @@ class DependencyTarget:
     Project: type["ProjectDependencyTarget"] = None  # type: ignore
     Maven: type["MavenDependencyTarget"] = None  # type: ignore
     Npm: type["NpmDependencyTarget"] = None  # type: ignore
+    Nuget: type["NugetDependencyTarget"] = None  # type: ignore
 
 
 @dataclass
@@ -761,6 +771,15 @@ class NpmDependencyTarget(DependencyTarget):
 
 
 DependencyTarget.Npm = NpmDependencyTarget
+
+
+@dataclass
+class NugetDependencyTarget(DependencyTarget):
+    package: str
+    version: str
+
+
+DependencyTarget.Nuget = NugetDependencyTarget
 
 ################################################################################
 # Project base + Gradle/Python subtypes
@@ -1101,6 +1120,120 @@ class GradleProject(Project):
         return None
 
 
+DotnetLanguage = Literal["fsharp", "csharp"]
+DotnetProjectKind = Literal["library", "exe", "tool", "test"]
+
+
+@dataclass
+class DotnetProject(Project):
+    path: Path
+    name: str
+    version: Version | None
+    description: str | None
+    authors: list[str]
+    license: str | None
+    quarantine: bool
+    publish: bool
+    github_repo: str | None
+    ownership: OwnershipType
+    resolved_dependencies: list[Dependency]
+    language: DotnetLanguage
+    project_kind: DotnetProjectKind
+    sdk: str
+    target_framework: str | None = None
+    target_frameworks: list[str] = dataclasses.field(default_factory=list)
+    assembly_name: str | None = None
+    root_namespace: str | None = None
+    package_id: str | None = None
+    package_tags: list[str] = dataclasses.field(default_factory=list)
+    generate_documentation_file: bool = True
+    nullable: bool | None = None
+    implicit_usings: bool | None = None
+    lang_version: str | None = None
+    source_roots: list[str] = dataclasses.field(default_factory=list)
+    packable: bool = True
+    project_id: str | None = None
+    repo_id: str | None = None
+    repo_root: Path | None = None
+    managed_by_setup: bool = True
+    copyright_holder: str | None = None
+    copyright_year_start: int | None = None
+    publish_target: str | None = None
+    publish_snapshots: bool = False
+    docs_enabled: bool = False
+    docs_system: str | None = None
+    test_license: str | None = None
+
+    @property
+    def effective_target_frameworks(self) -> list[str]:
+        if self.target_frameworks:
+            return list(self.target_frameworks)
+        if self.target_framework is not None:
+            return [self.target_framework]
+        return []
+
+    @property
+    def effective_assembly_name(self) -> str:
+        if self.assembly_name is not None:
+            return self.assembly_name
+        return self.name
+
+    @property
+    def effective_root_namespace(self) -> str:
+        if self.root_namespace is not None:
+            return self.root_namespace
+        return self.effective_assembly_name
+
+    @property
+    def effective_package_id(self) -> str:
+        if self.package_id is not None:
+            return self.package_id
+        return self.effective_assembly_name
+
+    @property
+    def effective_project_extension(self) -> str:
+        if self.language == "fsharp":
+            return "fsproj"
+        return "csproj"
+
+    @property
+    def source_dir_name(self) -> str:
+        if self.project_kind == "test":
+            return "tests"
+        return "src"
+
+    @property
+    def project_dir_name(self) -> str:
+        return self.effective_assembly_name
+
+    @property
+    def project_file_path(self) -> Path:
+        return (
+            self.path
+            / self.source_dir_name
+            / self.project_dir_name
+            / f"{self.project_dir_name}.{self.effective_project_extension}"
+        )
+
+    @property
+    def coarse_project_type(self) -> CoarseProjectType | None:
+        return None
+
+    def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
+        if not path.is_relative_to(self.path):
+            raise ValueError(f"Path {path} is not contained in project path {self.path}")
+
+        rel_path = path.relative_to(self.path)
+        rel_posix = rel_path.as_posix()
+        if rel_posix.startswith("src/"):
+            return CoarseFileScope.MAIN
+        if rel_posix.startswith("tests/"):
+            return CoarseFileScope.TEST
+        if rel_posix.startswith(("bin/", "obj/", "artifacts/", ".packages/")):
+            return CoarseFileScope.BUILD_TEMP
+        return None
+
+
 ##################################################################################################
 # Config
 ##################################################################################################
@@ -1205,6 +1338,7 @@ SUPPORTED_PUBLISH_TARGETS: tuple[str, ...] = (
     "jetbrains-marketplace",
     "pypi",
     "jitpack",
+    "nuget",
 )
 
 SUPPORTED_DOC_SYSTEMS: tuple[str, ...] = (
@@ -1567,6 +1701,7 @@ class Config:
     anthropic_key: str | None = None
     jetbrains_marketplace_token: str | None = None
     pypi_token: str | None = None
+    nuget_api_key: str | None = None
     maven_username: str | None = None
     maven_password: str | None = None
     maven_gpg_private_key: str | None = None
@@ -1937,6 +2072,72 @@ def load_config(start: Path | None = None) -> Config:
 
         raise ValueError(f"Unknown library or library group: {dep}")
 
+    def parse_dotnet_dependency(
+        dep: str,
+        *,
+        current_repo_id: str | None,
+    ) -> Dependency:
+        if dep.startswith(":"):
+            project_name = dep[1:]
+            resolved_project_name = project_name
+            if resolved_project_name not in config.defined_projects and current_repo_id is not None:
+                local_project_name = f"{current_repo_id}/{project_name}"
+                if local_project_name in config.defined_projects:
+                    resolved_project_name = local_project_name
+            if resolved_project_name not in config.defined_projects:
+                raise ValueError(f"Project {project_name} is not defined")
+            return Dependency(
+                scope=None,
+                target=ProjectDependencyTarget(project=resolved_project_name),
+            )
+
+        package_name, separator, version = dep.rpartition("@")
+        if not separator or not package_name.strip() or not version.strip():
+            raise ValueError(
+                f".NET dependency {dep!r} must use :project-id or Package.Id@Version syntax"
+            )
+        return Dependency(
+            scope=None,
+            target=NugetDependencyTarget(package=package_name.strip(), version=version.strip()),
+        )
+
+    def _normalize_dotnet_project_kind(project_name: str, project_kind: str | None) -> DotnetProjectKind:
+        if project_kind is None:
+            return "library"
+        if project_kind not in ("library", "exe", "tool", "test"):
+            raise ValueError(
+                f"{project_name}.projectKind has unsupported value {project_kind!r}; "
+                "expected one of: library, exe, tool, test"
+            )
+        return project_kind
+
+    def _normalize_dotnet_target_frameworks(
+        project_name: str,
+        *,
+        target_framework: str | None,
+        target_frameworks: list[str] | None,
+        default_target_framework: str | None,
+    ) -> tuple[str | None, list[str]]:
+        if target_framework is not None and target_frameworks is not None:
+            raise ValueError(
+                f"{project_name} cannot define both targetFramework and targetFrameworks"
+            )
+        if target_frameworks is not None:
+            normalized_frameworks = [framework.strip() for framework in target_frameworks if framework.strip()]
+            if not normalized_frameworks:
+                raise ValueError(f"{project_name}.targetFrameworks must not be empty")
+            return None, normalized_frameworks
+        if target_framework is not None:
+            normalized_framework = target_framework.strip()
+            if not normalized_framework:
+                raise ValueError(f"{project_name}.targetFramework must not be empty")
+            return normalized_framework, []
+        if default_target_framework is not None:
+            normalized_default_framework = default_target_framework.strip()
+            if normalized_default_framework:
+                return normalized_default_framework, []
+        raise ValueError(f"{project_name} must define targetFramework/targetFrameworks or inherit a repo default")
+
     def _project_supports_required_platforms(
         dependency_project: Project,
         required_platforms: set[str],
@@ -2113,20 +2314,40 @@ def load_config(start: Path | None = None) -> Config:
         if project.copyright_year_start is not None and project.copyright_year_start <= 0:
             raise ValueError(f"{project.name} has invalid copyright_year_start={project.copyright_year_start}")
 
-        if isinstance(project, GradleProject):
-            intellij_feature = project.resolved_features.get("intellij-plugin")
-            if isinstance(intellij_feature, IntellijPlugin):
-                _validate_intellij_feature(intellij_feature, project_name=project.name)
-            _validate_kmp_project_dependencies(project)
-            if project.docs_enabled and project.docs_system not in (None, "dokka"):
-                raise ValueError(f"{project.name} is a Gradle project and must use docsSystem 'dokka'")
-        elif isinstance(project, PythonProject):
-            if project.docs_enabled and project.docs_system not in (None, "mkdocs"):
-                raise ValueError(f"{project.name} is a Python project and must use docsSystem 'mkdocs'")
-        elif project.docs_enabled:
-            raise ValueError(
-                f"{project.name} enables docs, but {type(project).__name__} does not support docs generation"
-            )
+        match project:
+            case GradleProject():
+                intellij_feature = project.resolved_features.get("intellij-plugin")
+                if isinstance(intellij_feature, IntellijPlugin):
+                    _validate_intellij_feature(intellij_feature, project_name=project.name)
+                _validate_kmp_project_dependencies(project)
+                if project.docs_enabled and project.docs_system not in (None, "dokka"):
+                    raise ValueError(f"{project.name} is a Gradle project and must use docsSystem 'dokka'")
+            case PythonProject():
+                if project.docs_enabled and project.docs_system not in (None, "mkdocs"):
+                    raise ValueError(f"{project.name} is a Python project and must use docsSystem 'mkdocs'")
+            case DotnetProject():
+                if not project.effective_target_frameworks:
+                    raise ValueError(f"{project.name} must define at least one target framework")
+                if project.publish_target not in (None, "nuget"):
+                    raise ValueError(f"{project.name} is a .NET project and must use publishTarget 'nuget'")
+                if project.publish_snapshots:
+                    raise ValueError(f"{project.name} cannot enable publishSnapshots for NuGet publishing")
+                if project.docs_enabled and project.docs_system not in (None, "mkdocs"):
+                    raise ValueError(f"{project.name} is a .NET project and must use docsSystem 'mkdocs'")
+                for dependency in project.resolved_dependencies:
+                    target = dependency.target
+                    if not isinstance(target, ProjectDependencyTarget):
+                        continue
+                    dependency_project = config.defined_projects[target.project]
+                    if not isinstance(dependency_project, DotnetProject):
+                        raise ValueError(
+                            f".NET project {project.name} cannot depend on non-.NET project {dependency_project.name}"
+                        )
+            case _:
+                if project.docs_enabled:
+                    raise ValueError(
+                        f"{project.name} enables docs, but {type(project).__name__} does not support docs generation"
+                    )
 
         def is_publishable(input_project: Project) -> bool:
             return input_project.publish and input_project.github_repo is not None and (not input_project.quarantine)
@@ -2221,6 +2442,8 @@ def load_config(start: Path | None = None) -> Config:
         repo_root_path: Path | None,
         default_github_repo: str | None,
         repo_jvm_policy: str | None,
+        repo_dotnet_sdk_version: str | None,
+        repo_default_target_framework: str | None,
         managed_by_setup: bool,
     ) -> str | None:
         if isinstance(command, config_typed.PythonProjectCommand):
@@ -2648,6 +2871,89 @@ def load_config(start: Path | None = None) -> Config:
             register_project(project_id, gradle_project)
             return project_id
 
+        if isinstance(command, (config_typed.FsharpProjectCommand, config_typed.CsharpProjectCommand)):
+            ownership = _coerce_ownership(command.ownership)
+            path = _project_path_for(command.dir_name, repo_root_path)
+            display_name = _project_name_for(command.dir_name, command.name, repo_id)
+            project_id = _project_id_for(command.dir_name, repo_id)
+            language: DotnetLanguage
+            if isinstance(command, config_typed.FsharpProjectCommand):
+                language = "fsharp"
+            else:
+                language = "csharp"
+
+            project_kind = _normalize_dotnet_project_kind(display_name, command.projectKind)
+            target_framework, target_frameworks = _normalize_dotnet_target_frameworks(
+                display_name,
+                target_framework=command.targetFramework,
+                target_frameworks=command.targetFrameworks,
+                default_target_framework=repo_default_target_framework,
+            )
+            publish_target = _normalize_publish_target(
+                display_name,
+                command.publishTarget,
+                default_target="nuget" if command.publish else None,
+            )
+            publish_snapshots = command.publishSnapshots if command.publishSnapshots is not None else False
+            if publish_snapshots:
+                raise ValueError(f"{display_name} cannot enable publishSnapshots for NuGet publishing")
+            github_repo = _project_github_repo_for(command.repo, default_github_repo)
+            docs_enabled_default = github_repo is not None and not command.quarantine
+            docs_enabled = command.docs if command.docs is not None else docs_enabled_default
+            docs_system = _normalize_docs_system(
+                display_name,
+                command.docsSystem,
+                default_docs_system="mkdocs" if docs_enabled else None,
+            )
+            resolved_dependencies = [
+                parse_dotnet_dependency(item, current_repo_id=repo_id)
+                for item in (command.dependencies or [])
+            ]
+
+            dotnet_project = DotnetProject(
+                path=path,
+                name=display_name,
+                version=Version.parse(command.version) if command.version else None,
+                description=command.description,
+                authors=command.authors or [],
+                license=command.license,
+                quarantine=command.quarantine,
+                publish=command.publish,
+                github_repo=github_repo,
+                ownership=ownership,
+                resolved_dependencies=resolved_dependencies,
+                language=language,
+                project_kind=project_kind,
+                sdk=command.sdk or "Microsoft.NET.Sdk",
+                target_framework=target_framework,
+                target_frameworks=target_frameworks,
+                assembly_name=command.assemblyName,
+                root_namespace=command.rootNamespace,
+                package_id=command.packageId,
+                package_tags=list(command.packageTags or []),
+                generate_documentation_file=(
+                    command.generateDocumentationFile if command.generateDocumentationFile is not None else True
+                ),
+                nullable=command.nullable,
+                implicit_usings=command.implicitUsings,
+                lang_version=command.langVersion,
+                project_id=project_id,
+                repo_id=repo_id,
+                repo_root=repo_root_path,
+                managed_by_setup=managed_by_setup,
+                copyright_holder=command.copyright_holder,
+                copyright_year_start=command.copyright_year_start,
+                publish_target=publish_target,
+                publish_snapshots=publish_snapshots,
+                docs_enabled=docs_enabled,
+                docs_system=docs_system,
+                test_license=command.testLicense,
+                packable=project_kind != "test",
+            )
+            verify_project(dotnet_project)
+            register_project(project_id, dotnet_project)
+            return project_id
+
         return None
 
     def _apply_builtin_command(command: config_typed.BuiltinTopLevelCommand) -> None:
@@ -2689,6 +2995,10 @@ def load_config(start: Path | None = None) -> Config:
 
         if isinstance(command, config_typed.PypiTokenCommand):
             config.pypi_token = command.token
+            return
+
+        if isinstance(command, config_typed.NugetApiKeyCommand):
+            config.nuget_api_key = command.token
             return
 
         if isinstance(command, config_typed.MavenUsernameCommand):
@@ -2845,6 +3155,8 @@ def load_config(start: Path | None = None) -> Config:
             repo_root_path=None,
             default_github_repo=None,
             repo_jvm_policy=None,
+            repo_dotnet_sdk_version=None,
+            repo_default_target_framework=None,
             managed_by_setup=True,
         )
         if project_command_id is not None:
@@ -2863,6 +3175,8 @@ def load_config(start: Path | None = None) -> Config:
                     repo_root_path=repo_root_path,
                     default_github_repo=command.repo,
                     repo_jvm_policy=command.jvmPolicy,
+                    repo_dotnet_sdk_version=command.dotnetSdkVersion,
+                    repo_default_target_framework=command.defaultTargetFramework,
                     managed_by_setup=False,
                 )
                 if nested_project_id is None:
@@ -2886,6 +3200,10 @@ def load_config(start: Path | None = None) -> Config:
                 project_version=command.projectVersion,
                 default_kotlin_version=command.defaultKotlinVersion,
                 supported_kotlin_versions=list(command.supportedKotlinVersions or []),
+                dotnet_sdk_version=command.dotnetSdkVersion,
+                default_target_framework=command.defaultTargetFramework,
+                solution_name=command.solutionName,
+                use_central_package_management=bool(command.useCentralPackageManagement),
                 docs_project_id=docs_project_id,
                 project_ids=nested_project_ids,
             )

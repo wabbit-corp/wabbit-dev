@@ -9,6 +9,7 @@ from dev.config import (
     DataProject,
     Dependency,
     DependencyTarget,
+    DotnetProject,
     GradleProject,
     PremakeProject,
     Project,
@@ -17,6 +18,7 @@ from dev.config import (
     load_config,
 )
 from dev.discoverability import require_project
+from dev.dotnet import dotnet_project_file
 from dev.jvms import resolve_project_jvm_policy
 from dev.messages import style
 from dev.repo_resolution import (
@@ -36,6 +38,8 @@ def _colored(text: str, color: str, *, attrs: tuple[str, ...] = ()) -> str:
 def _project_type_label(project: Project) -> str:
     if isinstance(project, PythonProject):
         return "python"
+    if isinstance(project, DotnetProject):
+        return project.language
     if isinstance(project, GradleProject):
         if "scala" in project.resolved_features:
             return "scala/kmp" if project.is_kmp else "scala/jvm"
@@ -54,6 +58,8 @@ def _project_type_label(project: Project) -> str:
 def _project_type_color(project_type: str) -> str:
     if project_type == "python":
         return "green"
+    if project_type in {"fsharp", "csharp"}:
+        return "cyan"
     if project_type.endswith("/kmp"):
         return "magenta"
     if project_type.endswith("/jvm"):
@@ -113,6 +119,10 @@ def _resolved_publish_target(project: Project) -> str:
         if project.publish_target == "pypi":
             return "pypi"
         return "skip"
+    if isinstance(project, DotnetProject):
+        if project.publish_target == "nuget":
+            return "nuget"
+        return "skip"
     return "skip"
 
 
@@ -144,6 +154,9 @@ def _dependency_payload(dep: Dependency) -> dict[str, str]:
     if isinstance(target, DependencyTarget.Npm):
         payload["package"] = target.package
         payload["version"] = target.version
+    if isinstance(target, DependencyTarget.Nuget):
+        payload["package"] = target.package
+        payload["version"] = target.version
     if isinstance(target, DependencyTarget.JarFile):
         payload["path"] = str(target.path.resolve())
     return payload
@@ -168,6 +181,21 @@ def _managed_file_hints(project: Project) -> list[ManagedFileHint]:
                 ManagedFileHint(project.path / "requirements-dev.txt"),
             ]
         )
+        if project.docs_enabled and project.docs_system == "mkdocs":
+            hints.extend(
+                [
+                    ManagedFileHint(project.path / "mkdocs.yml"),
+                    ManagedFileHint(project.path / "docs" / "index.md"),
+                ]
+            )
+        return hints
+
+    if isinstance(project, DotnetProject):
+        hints.append(ManagedFileHint(project.path / ".gitignore"))
+        hints.append(ManagedFileHint(dotnet_project_file(project)))
+        hints.append(ManagedFileHint(project.effective_repo_root / "global.json"))
+        hints.append(ManagedFileHint(project.effective_repo_root / "NuGet.config"))
+        hints.append(ManagedFileHint(project.effective_repo_root / "Directory.Build.props"))
         if project.docs_enabled and project.docs_system == "mkdocs":
             hints.extend(
                 [

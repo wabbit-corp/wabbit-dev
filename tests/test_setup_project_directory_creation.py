@@ -151,6 +151,10 @@ def _make_setup_context(pyproject_template: str, codespell_words: str = "wabbit\
         gradle_gitignore_template=jinja2.Template(""),
         gradle_properties_template=jinja2.Template(""),
         python_gitignore_template=jinja2.Template("# python\n"),
+        dotnet_gitignore_template=jinja2.Template("# dotnet\n"),
+        dotnet_global_json_template=jinja2.Template("{}\n"),
+        dotnet_nuget_config_template=jinja2.Template("<configuration />\n"),
+        dotnet_directory_build_props_template=jinja2.Template("<Project />\n"),
         purescript_gitignore_template=jinja2.Template(""),
         python_pyproject_template=jinja2.Template(pyproject_template),
         python_pyrightconfig_template=jinja2.Template(
@@ -175,6 +179,9 @@ def _make_setup_context(pyproject_template: str, codespell_words: str = "wabbit\
         gradle_compiler_plugin_snapshot_publish_workflow_template=jinja2.Template("name: Compiler Snapshot Publish\n"),
         gradle_docs_quality_workflow_template=jinja2.Template("name: Gradle Docs Quality\n"),
         gradle_docs_deploy_workflow_template=jinja2.Template("name: Gradle Docs Deploy\n"),
+        dotnet_docs_quality_workflow_template=jinja2.Template("name: Dotnet Docs Quality\n"),
+        dotnet_docs_deploy_workflow_template=jinja2.Template("name: Dotnet Docs Deploy\n"),
+        dotnet_release_publish_workflow_template=jinja2.Template("name: Dotnet Release Publish\n"),
         python_codespell_ignore_words_template=jinja2.Template(codespell_words),
         python_build_executable_template=jinja2.Template(
             '#!/usr/bin/env python3\nAPP_NAME = "{{ app_name }}"\nENTRYPOINT = "{{ entrypoint_path }}"\n'
@@ -243,6 +250,44 @@ def test_setup_project_skips_remote_check_when_github_api_unavailable(
     setup_module.setup_project(ctx, project, interactive=False)
 
     assert f"Remote repository {project.github_repo} does not exist" not in error_messages
+
+
+def test_setup_project_warns_instead_of_erroring_when_github_repo_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repo_root))
+
+    import dev.tasks.setup as setup_module
+
+    project = _make_python_project(tmp_path / "pkg", github_repo=None)
+    project.path.mkdir(parents=True, exist_ok=True)
+    (project.path / ".gitignore").write_text("# test\n", encoding="utf-8")
+
+    error_messages: list[str] = []
+    warning_messages: list[str] = []
+
+    def fake_setup_python_project(ctx: object, python_project: PythonProject, interactive: bool = True) -> None:
+        del ctx, python_project, interactive
+
+    monkeypatch.setattr(setup_module, "setup_python_project", fake_setup_python_project)
+    monkeypatch.setattr(setup_module, "error", lambda message: error_messages.append(message))
+    monkeypatch.setattr(setup_module, "warning", lambda message: warning_messages.append(message))
+
+    ctx = SimpleNamespace(
+        config=SimpleNamespace(
+            default_git_user_email="test@example.com",
+            default_git_user_name="Test User",
+        ),
+        is_github_api_available=False,
+        known_repo_names=[],
+        mode=setup_module.RepoSetupMode.LOCAL,
+    )
+
+    setup_module.setup_project(ctx, project, interactive=False)
+
+    assert not error_messages
+    assert warning_messages == ["Github repository not set for pkg; skipping remote repository checks."]
 
 
 def test_setup_python_project_generates_docs_and_workflows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
