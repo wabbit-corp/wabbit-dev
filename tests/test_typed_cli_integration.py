@@ -86,7 +86,7 @@ async def test_where_bypasses_argparse_with_typed_cli(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_config_check_bypasses_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_check_config_bypasses_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev import cli
     from dev.tasks import check_config as check_config_task
     from dev.tasks import doctor as doctor_task
@@ -99,7 +99,7 @@ async def test_config_check_bypasses_argparse_with_typed_cli(monkeypatch: pytest
     monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
     monkeypatch.setattr(doctor_task, "preflight_for_command", lambda *args, **kwargs: True)
     monkeypatch.setattr(check_config_task, "check_config", fake_check_config)
-    monkeypatch.setattr("sys.argv", ["dev.py", "config", "check"])
+    monkeypatch.setattr("sys.argv", ["dev.py", "check", "config"])
 
     result = await cli.async_main()
 
@@ -566,9 +566,9 @@ async def test_check_shortcuts_bypass_argparse_with_typed_cli(monkeypatch: pytes
     from dev.tasks import doctor as doctor_task
     from dev.tasks import spdx_headers as spdx_task
 
-    check_called: list[tuple[str | None, list[str] | None, bool]] = []
+    check_called: list[tuple[str | None, list[str] | None, bool, list[str]]] = []
     list_called: list[bool] = []
-    describe_called: list[tuple[str, bool]] = []
+    show_called: list[tuple[str, bool]] = []
     spdx_called: list[tuple[str | None, bool]] = []
     secrets_called: list[str | None] = []
 
@@ -576,16 +576,18 @@ async def test_check_shortcuts_bypass_argparse_with_typed_cli(monkeypatch: pytes
         project_or_dir_or_file: str | None,
         enabled_checks: list[str] | None = None,
         fix: bool = False,
+        *,
+        bundles: list[str] | None = None,
     ) -> int:
-        check_called.append((project_or_dir_or_file, enabled_checks, fix))
+        check_called.append((project_or_dir_or_file, enabled_checks, fix, bundles or []))
         return 0
 
     def fake_list_checks(*, json_output: bool = False) -> int:
         list_called.append(json_output)
         return 0
 
-    def fake_describe_check(check_name: str, *, json_output: bool = False) -> int:
-        describe_called.append((check_name, json_output))
+    def fake_show_check(check_name: str, *, json_output: bool = False) -> int:
+        show_called.append((check_name, json_output))
         return 0
 
     def fake_spdx_headers(project_or_dir_or_file: str | None = None, fix: bool = False) -> int:
@@ -601,18 +603,18 @@ async def test_check_shortcuts_bypass_argparse_with_typed_cli(monkeypatch: pytes
     monkeypatch.setattr(doctor_task, "preflight_for_command", lambda *args, **kwargs: True)
     monkeypatch.setattr(check_task, "check_main", fake_check_main)
     monkeypatch.setattr(check_task, "list_checks", fake_list_checks)
-    monkeypatch.setattr(check_task, "describe_check", fake_describe_check)
+    monkeypatch.setattr(check_task, "show_check", fake_show_check)
     monkeypatch.setattr(check_task, "secrets_scan", fake_secrets_scan)
     monkeypatch.setattr(spdx_task, "spdx_headers", fake_spdx_headers)
 
-    monkeypatch.setattr("sys.argv", ["dev.py", "check", ".", "SpdxHeaderCheck", "--fix"])
+    monkeypatch.setattr("sys.argv", ["dev.py", "check", ".", "spdx-header", "--fix"])
     check_result = await cli.async_main()
 
     monkeypatch.setattr("sys.argv", ["dev.py", "check", "list", "--json"])
     list_result = await cli.async_main()
 
-    monkeypatch.setattr("sys.argv", ["dev.py", "check", "describe", "SpdxHeaderCheck", "--json"])
-    describe_result = await cli.async_main()
+    monkeypatch.setattr("sys.argv", ["dev.py", "check", "show", "spdx-header", "--json"])
+    show_result = await cli.async_main()
 
     monkeypatch.setattr("sys.argv", ["dev.py", "spdx", "headers", "--fix", "."])
     spdx_result = await cli.async_main()
@@ -622,11 +624,11 @@ async def test_check_shortcuts_bypass_argparse_with_typed_cli(monkeypatch: pytes
 
     assert check_result == 0
     assert list_result == 0
-    assert describe_result == 0
+    assert show_result == 0
     assert spdx_result == 0
     assert secrets_result == 0
-    assert check_called == [(".", ["SpdxHeaderCheck"], True)]
+    assert check_called == [(".", ["spdx-header"], True, [])]
     assert list_called == [True]
-    assert describe_called == [("SpdxHeaderCheck", True)]
+    assert show_called == [("spdx-header", True)]
     assert spdx_called == [(".", True)]
     assert secrets_called == ["."]

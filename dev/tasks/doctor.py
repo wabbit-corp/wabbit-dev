@@ -248,7 +248,7 @@ def _config_finding(ctx: DoctorContext) -> DoctorFinding:
         label="Config load",
         status=DoctorStatus.FAIL,
         detail=f"Failed to parse workspace config: {ctx.config_error}",
-        fix="Fix the config error and re-run `dev config check`.",
+        fix="Fix the config error and re-run `dev check config`.",
     )
 
 
@@ -580,9 +580,12 @@ FULL_CHECK_ORDER = (
 
 PREFLIGHT_CHECKS: dict[str, tuple[str, ...]] = {
     "docs/check": ("workspace-root", "root-clj", "root-private-clj", "python-version", "config"),
+    "verify/docs": ("workspace-root", "root-clj", "root-private-clj", "python-version", "config"),
     "setup": ("workspace-root", "root-clj", "root-private-clj", "python-version", "config"),
     "release/verify": ("workspace-root", "root-clj", "root-private-clj", "python-version", "git", "config", "gradle"),
+    "verify/release": ("workspace-root", "root-clj", "root-private-clj", "python-version", "git", "config", "gradle"),
     "security/scan": ("workspace-root", "root-clj", "root-private-clj", "python-version", "git", "config"),
+    "verify/security": ("workspace-root", "root-clj", "root-private-clj", "python-version", "git", "config"),
     "build": ("workspace-root", "root-clj", "root-private-clj", "python-version", "config", "gradle"),
     "publish": (
         "workspace-root",
@@ -636,8 +639,9 @@ def _ordered_unique(values: Sequence[str]) -> tuple[str, ...]:
 
 DOCTOR_ONLY_GROUPS: dict[str, tuple[str, ...]] = {
     **PREFLIGHT_CHECKS,
-    "release": PREFLIGHT_CHECKS["release/verify"],
-    "security": PREFLIGHT_CHECKS["security/scan"],
+    "docs": PREFLIGHT_CHECKS["verify/docs"],
+    "release": PREFLIGHT_CHECKS["verify/release"],
+    "security": PREFLIGHT_CHECKS["verify/security"],
     "project": _ordered_unique(
         (
             *PREFLIGHT_CHECKS["project/list"],

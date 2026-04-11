@@ -62,6 +62,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         "setup",
         "spdx",
         "status",
+        "verify",
         "where",
         "__complete",
     }:
@@ -72,6 +73,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     from wabbit_cli import (
         Argument,
         Command,
+        CommandAlias,
         CommandCompletion,
         CommandFailure,
         CommandHelp,
@@ -120,6 +122,11 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         json_output: bool
 
     @dataclass(frozen=True)
+    class InstallHooksRequest:
+        targets: list[str]
+        json_output: bool
+
+    @dataclass(frozen=True)
     class CompletionBashRequest:
         pass
 
@@ -137,6 +144,23 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     class DoctorRequest:
         targets: list[str]
         only: list[str]
+        json_output: bool
+
+    @dataclass(frozen=True)
+    class VerifyDocsRequest:
+        targets: list[str]
+        semantic: bool
+        json_output: bool
+
+    @dataclass(frozen=True)
+    class VerifyReleaseRequest:
+        targets: list[str]
+        json_output: bool
+
+    @dataclass(frozen=True)
+    class VerifySecurityRequest:
+        targets: list[str]
+        tools: list[str]
         json_output: bool
 
     @dataclass(frozen=True)
@@ -227,6 +251,16 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         dry_run: bool
 
     @dataclass(frozen=True)
+    class CommitVerifyRequest:
+        target: str | None
+        message_file: str | None
+        message: str | None
+        revision_range: str | None
+        staged: bool
+        json_output: bool
+        quiet: bool
+
+    @dataclass(frozen=True)
     class PushRequest:
         targets: list[str]
         dry_run: bool
@@ -234,7 +268,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     @dataclass(frozen=True)
     class CheckRunRequest:
         target: str | None
-        checks: list[str]
+        selectors: list[str]
+        bundles: list[str]
         fix: bool
 
     @dataclass(frozen=True)
@@ -242,8 +277,12 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         json_output: bool
 
     @dataclass(frozen=True)
-    class CheckDescribeRequest:
+    class CheckShowRequest:
         check: str
+        json_output: bool
+
+    @dataclass(frozen=True)
+    class VerifyListRequest:
         json_output: bool
 
     @dataclass(frozen=True)
@@ -294,10 +333,14 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         | InstallAppRequest
         | InstallCompletionsRequest
         | InstallToolsRequest
+        | InstallHooksRequest
         | CompletionBashRequest
         | CompletionZshRequest
         | CompletionQueryRequest
         | DoctorRequest
+        | VerifyDocsRequest
+        | VerifyReleaseRequest
+        | VerifySecurityRequest
         | DocsCheckRequest
         | DocsSnippetsRequest
         | ReleaseVerifyRequest
@@ -314,10 +357,12 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         | ClocRequest
         | StatusRequest
         | CommitRequest
+        | CommitVerifyRequest
         | PushRequest
         | CheckRunRequest
         | CheckListRequest
-        | CheckDescribeRequest
+        | CheckShowRequest
+        | VerifyListRequest
         | SpdxHeadersRequest
         | SecretsScanRequest
         | ContributorsAuditRequest
@@ -461,9 +506,13 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 configured = _configured_names(config)
                 return _dedupe([":root", *configured, *[f":{name}" for name in configured]])
             case "check-name":
-                from dev.tasks.check import list_check_names
+                from dev.tasks.check import list_check_selectors
 
-                return list(list_check_names(config))
+                return list(list_check_selectors(config))
+            case "check-bundle":
+                from dev.tasks.check import list_check_bundle_names
+
+                return list_check_bundle_names()
             case "doctor-only":
                 from dev.tasks.doctor import doctor_only_choices
 
@@ -517,6 +566,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     push_target_argument = _completion_argument("push-target", include_files=True)
     check_target_argument = _completion_argument("check-target", include_files=True)
     check_name_argument = _completion_argument("check-name")
+    check_bundle_argument = _completion_argument("check-bundle")
     doctor_only_argument = _completion_argument("doctor-only")
 
     def _security_tool_argument() -> Argument[str]:
@@ -544,7 +594,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         match command_path:
             case "doctor":
                 steps = [
-                    f"{prog} config check",
+                    f"{prog} check config",
                     f"{prog} project list",
                     f"{prog} doctor --json",
                 ]
@@ -553,7 +603,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                     steps = [f"{prog} project show {target}", f"{prog} build {target}", f"{prog} check {target}"]
                 else:
                     steps = [f"{prog} project list", f"{prog} build", f"{prog} check :root"]
-            case "release/verify":
+            case "verify/release" | "release/verify":
                 if target is not None:
                     steps = [
                         f"{prog} publish --dry-run {target}",
@@ -635,6 +685,15 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             )
         )
 
+    def _verify_docs_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        return succeed(
+            VerifyDocsRequest(
+                targets=_string_list(values.positional("target")),
+                semantic=_bool_value(values, "--semantic"),
+                json_output=_bool_value(values, "--json"),
+            )
+        )
+
     def _docs_snippets_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(
             DocsSnippetsRequest(
@@ -694,6 +753,14 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             )
         )
 
+    def _install_hooks_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        return succeed(
+            InstallHooksRequest(
+                targets=_string_list(values.positional("target")),
+                json_output=_bool_value(values, "--json"),
+            )
+        )
+
     def _doctor_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(
             DoctorRequest(
@@ -711,9 +778,26 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             )
         )
 
+    def _verify_release_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        return succeed(
+            VerifyReleaseRequest(
+                targets=_string_list(values.positional("target")),
+                json_output=_bool_value(values, "--json"),
+            )
+        )
+
     def _security_scan_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(
             SecurityScanRequest(
+                targets=_string_list(values.positional("target")),
+                tools=_option_string_list(values, "--tool"),
+                json_output=_bool_value(values, "--json"),
+            )
+        )
+
+    def _verify_security_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        return succeed(
+            VerifySecurityRequest(
                 targets=_string_list(values.positional("target")),
                 tools=_option_string_list(values, "--tool"),
                 json_output=_bool_value(values, "--json"),
@@ -811,6 +895,40 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             )
         )
 
+    def _commit_verify_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        message_file = _optional_string(values.option_or("--message-file", None), "message-file")
+        message = _optional_string(values.option_or("--message", None), "message")
+        revision_range = _optional_string(values.option_or("--range", None), "range")
+        target = _optional_string(values.positional("target"), "target")
+        match (message_file, message, revision_range, target):
+            case (Failure(issues=issues), _, _, _):
+                return fail(issues)
+            case (_, Failure(issues=issues), _, _):
+                return fail(issues)
+            case (_, _, Failure(issues=issues), _):
+                return fail(issues)
+            case (_, _, _, Failure(issues=issues)):
+                return fail(issues)
+            case (
+                Success(value=message_file_value),
+                Success(value=message_value),
+                Success(value=revision_range_value),
+                Success(value=target_value),
+            ):
+                return succeed(
+                    CommitVerifyRequest(
+                        target=target_value,
+                        message_file=message_file_value,
+                        message=message_value,
+                        revision_range=revision_range_value,
+                        staged=_bool_value(values, "--staged"),
+                        json_output=_bool_value(values, "--json"),
+                        quiet=_bool_value(values, "--quiet"),
+                    )
+                )
+            case _:
+                return fail([ValidationFailed("Invalid commit verify arguments.")])
+
     def _push_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(
             PushRequest(
@@ -822,17 +940,28 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     def _check_run_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         args = _string_list(values.positional("arg"))
         target = args[0] if args else None
-        checks = args[1:] if len(args) > 1 else []
-        return succeed(CheckRunRequest(target=target, checks=checks, fix=_bool_value(values, "--fix")))
+        legacy_selectors = args[1:] if len(args) > 1 else []
+        selectors = [*legacy_selectors, *_option_string_list(values, "--only")]
+        return succeed(
+            CheckRunRequest(
+                target=target,
+                selectors=selectors,
+                bundles=_option_string_list(values, "--bundle"),
+                fix=_bool_value(values, "--fix"),
+            )
+        )
 
     def _check_list_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(CheckListRequest(json_output=_bool_value(values, "--json")))
 
-    def _check_describe_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+    def _check_show_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         check = values.positional("check")
         if not isinstance(check, str):
             return fail([ValidationFailed("Expected <check> argument.")])
-        return succeed(CheckDescribeRequest(check=check, json_output=_bool_value(values, "--json")))
+        return succeed(CheckShowRequest(check=check, json_output=_bool_value(values, "--json")))
+
+    def _verify_list_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        return succeed(VerifyListRequest(json_output=_bool_value(values, "--json")))
 
     def _spdx_headers_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         match _optional_string(values.positional("target"), "target"):
@@ -895,6 +1024,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         match values.command_path:
             case ["where"]:
                 return _where_decode(values)
+            case ["check", "config"]:
+                return _config_check_decode(values)
             case ["config", "check"]:
                 return _config_check_decode(values)
             case ["install", "app"]:
@@ -903,6 +1034,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _install_completions_decode(values)
             case ["install", "tools"]:
                 return _install_tools_decode(values)
+            case ["install", "hooks"]:
+                return _install_hooks_decode(values)
             case ["completion", "bash"]:
                 return succeed(CompletionBashRequest())
             case ["completion", "zsh"]:
@@ -911,6 +1044,14 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _completion_query_decode(values)
             case ["doctor"]:
                 return _doctor_decode(values)
+            case ["verify", "list"]:
+                return _verify_list_decode(values)
+            case ["verify", "docs"]:
+                return _verify_docs_decode(values)
+            case ["verify", "release"]:
+                return _verify_release_decode(values)
+            case ["verify", "security"]:
+                return _verify_security_decode(values)
             case ["docs", "check"]:
                 return _docs_check_decode(values)
             case ["docs", "snippets"]:
@@ -943,14 +1084,18 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _status_decode(values)
             case ["commit"]:
                 return _commit_decode(values)
+            case ["commit", "verify"]:
+                return _commit_verify_decode(values)
             case ["push"]:
                 return _push_decode(values)
             case ["check", "run"]:
                 return _check_run_decode(values)
             case ["check", "list"]:
                 return _check_list_decode(values)
+            case ["check", "show"]:
+                return _check_show_decode(values)
             case ["check", "describe"]:
-                return _check_describe_decode(values)
+                return _check_show_decode(values)
             case ["spdx", "headers"]:
                 return _spdx_headers_decode(values)
             case ["secrets", "scan"]:
@@ -989,6 +1134,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         subcommands=(config_check_command,),
         decode=_unused_decode,
         help_on_empty=True,
+        visibility=Visibility.HIDDEN,
     )
     install_app_command = Command(
         name="app",
@@ -1033,6 +1179,20 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         ),
         decode=_unused_decode,
     )
+    install_hooks_command = Command(
+        name="hooks",
+        header="Install local Git hooks that enforce dev commit policy.",
+        options=(flag(long="json", help="Emit a machine-readable hook install report."),),
+        positionals=(
+            positional(
+                repo_target_argument,
+                "target",
+                help="Repo IDs, project IDs, or paths. Omit to use the current repo, or all repos from the workspace root.",
+                repeated=True,
+            ),
+        ),
+        decode=_unused_decode,
+    )
     install_command = Command(
         name="install",
         header="Install local developer entrypoints and shell integrations.",
@@ -1041,9 +1201,10 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             f"  {prog} install app\n"
             f"  {prog} install completions\n"
             f"  {prog} install completions --shell zsh\n"
+            f"  {prog} install hooks\n"
             f"  {prog} install tools"
         ),
-        subcommands=(install_app_command, install_completions_command, install_tools_command),
+        subcommands=(install_app_command, install_completions_command, install_hooks_command, install_tools_command),
         decode=_unused_decode,
         help_on_empty=True,
     )
@@ -1105,6 +1266,73 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         ),
         decode=_unused_decode,
     )
+    verify_list_command = Command(
+        name="list",
+        header="List the available verification workflows.",
+        options=(flag(long="json", help="Emit the verification workflow catalog as JSON."),),
+        decode=_unused_decode,
+    )
+    verify_docs_command = Command(
+        name="docs",
+        header="Run documentation verification workflows.",
+        options=(
+            flag(long="semantic", help="Add an LLM-based advisory review for semantic docs quality issues."),
+            flag(long="json", help="Emit a machine-readable docs report instead of human-oriented output."),
+        ),
+        positionals=(
+            positional(
+                project_target_argument,
+                "target",
+                help="Project IDs, repo IDs, or paths. Omit to verify the current inferred project or repo, or the full workspace from root.",
+                repeated=True,
+            ),
+        ),
+        decode=_unused_decode,
+    )
+    verify_release_command = Command(
+        name="release",
+        header="Verify publishable Python and Gradle projects without uploading them.",
+        options=(flag(long="json", help="Emit a machine-readable release verification report."),),
+        positionals=(
+            positional(
+                project_target_argument,
+                "target",
+                help="Optional project or repo targets.",
+                repeated=True,
+            ),
+        ),
+        decode=_unused_decode,
+    )
+    verify_security_command = Command(
+        name="security",
+        header="Run opt-in external security scanners against selected repos or paths.",
+        options=(
+            option(
+                _security_tool_argument(),
+                long="tool",
+                help="Run only this external security tool. Repeatable.",
+                repeated=True,
+                meta_var="TOOL",
+            ),
+            flag(long="json", help="Emit a machine-readable security scan report."),
+        ),
+        positionals=(
+            positional(
+                repo_target_argument,
+                "target",
+                help="Repo IDs, project IDs, or paths inside git repositories.",
+                repeated=True,
+            ),
+        ),
+        decode=_unused_decode,
+    )
+    verify_command = Command(
+        name="verify",
+        header="Run slower workflow-oriented verification commands.",
+        subcommands=(verify_docs_command, verify_release_command, verify_security_command, verify_list_command),
+        decode=_unused_decode,
+        help_on_empty=True,
+    )
     docs_check_command = Command(
         name="check",
         header="Check project documentation links, sections, snippets, and optional semantic quality.",
@@ -1131,6 +1359,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         subcommands=(docs_check_command, docs_snippets_command),
         decode=_unused_decode,
         help_on_empty=True,
+        visibility=Visibility.HIDDEN,
     )
     setup_command = Command(
         name="setup",
@@ -1164,6 +1393,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         subcommands=(release_verify_command,),
         decode=_unused_decode,
         help_on_empty=True,
+        visibility=Visibility.HIDDEN,
     )
     security_scan_command = Command(
         name="scan",
@@ -1194,6 +1424,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         subcommands=(security_scan_command,),
         decode=_unused_decode,
         help_on_empty=True,
+        visibility=Visibility.HIDDEN,
     )
     llmcopy_command = Command(
         name="llmcopy",
@@ -1365,10 +1596,48 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         ),
         decode=_unused_decode,
     )
+    commit_verify_command = Command(
+        name="verify",
+        header="Verify commit message policy for a message file or commit range.",
+        options=(
+            option(
+                Argument.string(),
+                long="message-file",
+                help="Validate a commit message file, usually .git/COMMIT_EDITMSG from a commit-msg hook.",
+                meta_var="FILE",
+            ),
+            option(
+                Argument.string(),
+                long="message",
+                help="Validate this commit message string.",
+                meta_var="TEXT",
+            ),
+            option(
+                Argument.string(),
+                long="range",
+                help="Validate every commit message in this revision range.",
+                meta_var="REVISION_RANGE",
+            ),
+            flag(long="staged", help="Also validate staged diff context, such as version/changelog coupling."),
+            flag(long="json", help="Emit a machine-readable verification report."),
+            flag(long="quiet", help="Suppress success output."),
+        ),
+        positionals=(
+            positional(
+                repo_target_argument,
+                "target",
+                help="Optional repo ID, project ID, or path. Omit to use the current git repo.",
+                required=False,
+            ),
+        ),
+        decode=_unused_decode,
+    )
     commit_command = Command(
         name="commit",
         header="Run setup, stage changes, and create commits for configured projects.",
         options=(flag(long="dry-run", help="Print the setup and repo commit plan without modifying files or creating commits."),),
+        subcommands=(commit_verify_command,),
+        subcommand_fallback_to_positionals=True,
         positionals=(
             positional(
                 project_target_argument,
@@ -1396,12 +1665,28 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     check_run_command = Command(
         name="run",
         header="Run the configured check suite against a project, directory, or file.",
-        options=(flag(long="fix", help="Apply fixes for issues that provide an automatic fix callback."),),
+        options=(
+            option(
+                check_bundle_argument,
+                long="bundle",
+                help="Restrict the run to one check bundle. Repeatable.",
+                repeated=True,
+                meta_var="BUNDLE",
+            ),
+            option(
+                check_name_argument,
+                long="only",
+                help="Restrict the run to specific check IDs or legacy class names. Repeatable.",
+                repeated=True,
+                meta_var="CHECK",
+            ),
+            flag(long="fix", help="Apply fixes for issues that provide an automatic fix callback."),
+        ),
         positionals=(
             positional(
                 _check_run_argument(),
                 "arg",
-                help="Optional target followed by optional explicit check class names.",
+                help="Optional target followed by optional explicit check IDs or legacy class names.",
                 repeated=True,
             ),
         ),
@@ -1409,30 +1694,52 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     )
     check_list_command = Command(
         name="list",
-        header="List the loaded checks with scope, fixability, and summaries.",
+        header="List check bundles and the loaded checks with scope, fixability, and summaries.",
         options=(flag(long="json", help="Emit the check catalog as JSON instead of text."),),
         decode=_unused_decode,
     )
-    check_describe_command = Command(
-        name="describe",
-        header="Show issue IDs, config knobs, and suppression examples for one check.",
+    check_show_command = Command(
+        name="show",
+        aliases=(CommandAlias("describe", hidden=True),),
+        header="Show issue IDs, bundles, config knobs, and suppression examples for one check.",
         options=(flag(long="json", help="Emit the detailed check description as JSON instead of text."),),
-        positionals=(positional(check_name_argument, "check", help="The loaded check class name to inspect."),),
+        positionals=(positional(check_name_argument, "check", help="The stable check ID or legacy class name to inspect."),),
+        decode=_unused_decode,
+    )
+    check_config_command = Command(
+        name="config",
+        header="Parse and validate root.clj and root.private.clj.",
         decode=_unused_decode,
     )
     check_command = Command(
         name="check",
         header="Run repository and source checks, or inspect the loaded check catalog.",
-        options=(flag(long="fix", help="Apply fixes for issues that provide an automatic fix callback."),),
+        options=(
+            option(
+                check_bundle_argument,
+                long="bundle",
+                help="Restrict the run to one check bundle. Repeatable.",
+                repeated=True,
+                meta_var="BUNDLE",
+            ),
+            option(
+                check_name_argument,
+                long="only",
+                help="Restrict the run to specific check IDs or legacy class names. Repeatable.",
+                repeated=True,
+                meta_var="CHECK",
+            ),
+            flag(long="fix", help="Apply fixes for issues that provide an automatic fix callback."),
+        ),
         positionals=(
             positional(
                 _check_run_argument(),
                 "arg",
-                help="Optional target followed by optional explicit check class names.",
+                help="Optional target followed by optional explicit check IDs or legacy class names.",
                 repeated=True,
             ),
         ),
-        subcommands=(check_run_command, check_list_command, check_describe_command),
+        subcommands=(check_run_command, check_list_command, check_show_command, check_config_command),
         decode=_unused_decode,
         help_on_empty=True,
     )
@@ -1456,6 +1763,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         subcommands=(spdx_headers_command,),
         decode=_unused_decode,
         help_on_empty=True,
+        visibility=Visibility.HIDDEN,
     )
     secrets_scan_command = Command(
         name="scan",
@@ -1476,6 +1784,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         subcommands=(secrets_scan_command,),
         decode=_unused_decode,
         help_on_empty=True,
+        visibility=Visibility.HIDDEN,
     )
     contributors_audit_command = Command(
         name="audit",
@@ -1488,6 +1797,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         subcommands=(contributors_audit_command,),
         decode=_unused_decode,
         help_on_empty=True,
+        visibility=Visibility.HIDDEN,
     )
     project_list_command = Command(
         name="list",
@@ -1559,6 +1869,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             install_command,
             completion_command,
             doctor_command,
+            verify_command,
             docs_command,
             setup_command,
             release_command,
@@ -1598,7 +1909,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
 
                 return show_where(json_output=json_output)
             case ConfigCheckRequest():
-                if not _preflight("config/check"):
+                if not _preflight("check/config"):
                     return 2
                 from dev.tasks.check_config import check_config
 
@@ -1628,6 +1939,14 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 if any(tool_result.status == "failed" for tool_result in result.results):
                     return 1
                 return 0
+            case InstallHooksRequest(targets=targets, json_output=json_output):
+                targets = _repo_targets_with_defaults(targets)
+                from dev.tasks.install import install_hooks
+
+                hook_install_result = install_hooks(targets, json_output=json_output)
+                if any(hook_result.status == "failed" for hook_result in hook_install_result.results):
+                    return 1
+                return 0
             case CompletionBashRequest():
                 print(root.render_bash_completion(prog))
                 return 0
@@ -1650,6 +1969,33 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 )
                 _print_next_steps("doctor", targets=targets, json_output=json_output)
                 return exit_code
+            case VerifyListRequest(json_output=json_output):
+                from dev.tasks.verify import list_verify_workflows
+
+                return list_verify_workflows(json_output=json_output)
+            case VerifyDocsRequest(targets=targets, semantic=semantic, json_output=json_output):
+                targets = _project_targets_with_defaults(targets)
+                if not _preflight("verify/docs", targets):
+                    return 2
+                from dev.tasks.docs_check import docs_check
+
+                return docs_check(targets, semantic=semantic, json_output=json_output)
+            case VerifyReleaseRequest(targets=targets, json_output=json_output):
+                targets = _project_targets_with_defaults(targets)
+                if not _preflight("verify/release", targets):
+                    return 2
+                from dev.tasks.release_verify import release_verify
+
+                exit_code = release_verify(targets, json_output=json_output)
+                _print_next_steps("verify/release", targets=targets, json_output=json_output)
+                return exit_code
+            case VerifySecurityRequest(targets=targets, tools=tools, json_output=json_output):
+                targets = _repo_targets_with_defaults(targets)
+                if not _preflight("verify/security", targets):
+                    return 2
+                from dev.tasks.security_scan import security_scan
+
+                return security_scan(targets, tools=tools, json_output=json_output)
             case DocsCheckRequest(targets=targets, semantic=semantic, json_output=json_output):
                 targets = _project_targets_with_defaults(targets)
                 if not _preflight("docs/check", targets):
@@ -1792,6 +2138,26 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 exit_code = commit(targets, dry_run=dry_run)
                 _print_next_steps("commit", targets=targets, dry_run=dry_run)
                 return exit_code
+            case CommitVerifyRequest(
+                target=target,
+                message_file=message_file,
+                message=message,
+                revision_range=revision_range,
+                staged=staged,
+                json_output=json_output,
+                quiet=quiet,
+            ):
+                from dev.tasks.commit_verify import commit_verify
+
+                return commit_verify(
+                    target=target,
+                    message_file=message_file,
+                    message=message,
+                    revision_range=revision_range,
+                    staged=staged,
+                    json_output=json_output,
+                    quiet=quiet,
+                )
             case PushRequest(targets=targets, dry_run=dry_run):
                 if not _preflight("push", targets, dry_run=dry_run):
                     return 2
@@ -1800,24 +2166,24 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 exit_code = push(targets, dry_run=dry_run)
                 _print_next_steps("push", targets=targets, dry_run=dry_run)
                 return exit_code
-            case CheckRunRequest(target=target, checks=checks, fix=fix):
+            case CheckRunRequest(target=target, selectors=selectors, bundles=bundles, fix=fix):
                 if not _preflight("check/run"):
                     return 2
                 from dev.tasks.check import check_main
 
-                return check_main(target, checks if checks else None, fix)
+                return check_main(target, selectors if selectors else None, fix, bundles=bundles)
             case CheckListRequest(json_output=json_output):
                 if not _preflight("check/list"):
                     return 2
                 from dev.tasks.check import list_checks
 
                 return list_checks(json_output=json_output)
-            case CheckDescribeRequest(check=check, json_output=json_output):
-                if not _preflight("check/describe"):
+            case CheckShowRequest(check=check, json_output=json_output):
+                if not _preflight("check/show"):
                     return 2
-                from dev.tasks.check import describe_check
+                from dev.tasks.check import show_check
 
-                return describe_check(check, json_output=json_output)
+                return show_check(check, json_output=json_output)
             case SpdxHeadersRequest(target=target, fix=fix):
                 if not _preflight("spdx/headers"):
                     return 2
@@ -1905,3 +2271,4 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     except ValueError as ex:
         print(f"{prog}: error: {ex}", file=sys.stderr)
         return 2
+    return None

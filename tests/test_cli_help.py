@@ -24,22 +24,18 @@ async def test_root_help_includes_command_summaries(
     assert "Install local developer entrypoints and shell integrations." in output
     assert "doctor" in output
     assert "Diagnose workspace, toolchain, and credential readiness." in output
-    assert "docs" in output
-    assert "Validate project documentation quality." in output
+    assert "verify" in output
+    assert "Run slower workflow-oriented verification commands." in output
     assert "where" in output
     assert "Show the workspace, repo, and project context inferred" in output
-    assert "config" in output
-    assert "Validate workspace configuration files." in output
-    assert "release" in output
-    assert "Verify release readiness for publishable projects." in output
-    assert "security" in output
-    assert "Run opt-in external security tooling." in output
     assert "project" in output
     assert "Inspect the configured project inventory." in output
     assert "check" in output
     assert "Run repository and source checks, or inspect the loaded" in output
-    assert "contributors" in output
-    assert "secrets" in output
+    assert "Validate workspace configuration files." not in output
+    assert "Validate project documentation quality." not in output
+    assert "Verify release readiness for publishable projects." not in output
+    assert "Run opt-in external security tooling." not in output
     assert "trufflehog" not in output
     assert "Audit git contributor identity mismatches across configured repos." not in output
 
@@ -78,6 +74,26 @@ async def test_release_parent_help_lists_verify(
     output = capsys.readouterr().out
     assert "verify" in output
     assert "Verify publishable Python and Gradle projects" in output
+
+
+@pytest.mark.asyncio
+async def test_verify_parent_help_lists_workflows(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "verify"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "docs" in output
+    assert "release" in output
+    assert "security" in output
+    assert "list" in output
+    assert "Run documentation verification workflows." in output
 
 
 @pytest.mark.asyncio
@@ -132,8 +148,10 @@ async def test_install_parent_help_lists_subcommands(
     output = capsys.readouterr().out
     assert "app" in output
     assert "completions" in output
+    assert "hooks" in output
     assert "tools" in output
     assert "dev install app" in output
+    assert "dev install hooks" in output
     assert "dev install tools" in output
 
 
@@ -176,7 +194,7 @@ async def test_project_parent_help_lists_new_subcommands(
 
 
 @pytest.mark.asyncio
-async def test_cli_config_check_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_cli_check_config_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev import cli
     from dev.tasks import check_config as check_config_task
 
@@ -186,7 +204,7 @@ async def test_cli_config_check_dispatches(monkeypatch: pytest.MonkeyPatch) -> N
         called.append("called")
 
     monkeypatch.setattr(check_config_task, "check_config", fake_check_config)
-    monkeypatch.setattr("sys.argv", ["dev.py", "config", "check"])
+    monkeypatch.setattr("sys.argv", ["dev.py", "check", "config"])
 
     result = await cli.async_main()
 
@@ -206,6 +224,25 @@ async def test_cli_config_check_slash_alias_dispatches(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(check_config_task, "check_config", fake_check_config)
     monkeypatch.setattr("sys.argv", ["dev.py", "config/check"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == ["called"]
+
+
+@pytest.mark.asyncio
+async def test_cli_hidden_config_check_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import check_config as check_config_task
+
+    called: list[str] = []
+
+    def fake_check_config() -> None:
+        called.append("called")
+
+    monkeypatch.setattr(check_config_task, "check_config", fake_check_config)
+    monkeypatch.setattr("sys.argv", ["dev.py", "config", "check"])
 
     result = await cli.async_main()
 
@@ -364,7 +401,7 @@ async def test_cli_completion_bash_prints_script(
 
 
 @pytest.mark.asyncio
-async def test_cli_check_describe_does_not_infer_target(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_cli_check_show_does_not_infer_target(monkeypatch: pytest.MonkeyPatch) -> None:
     import dev.repo_resolution as repo_resolution
     from dev import cli
     from dev.tasks import check as check_task
@@ -374,16 +411,16 @@ async def test_cli_check_describe_does_not_infer_target(monkeypatch: pytest.Monk
     monkeypatch.setattr(cli, "_load_workspace_config", lambda: object())
 
     def fail_infer(*_args, **_kwargs):
-        raise AssertionError("check describe should not infer a target")
+        raise AssertionError("check show should not infer a target")
 
     monkeypatch.setattr(repo_resolution, "inferred_project_targets", fail_infer)
-    monkeypatch.setattr(check_task, "describe_check", lambda name, json_output=False: called.append(name) or 0)
-    monkeypatch.setattr("sys.argv", ["dev.py", "check", "describe", "SpdxHeaderCheck"])
+    monkeypatch.setattr(check_task, "show_check", lambda name, json_output=False: called.append(name) or 0)
+    monkeypatch.setattr("sys.argv", ["dev.py", "check", "show", "spdx-header"])
 
     result = await cli.async_main()
 
     assert result == 0
-    assert called == ["SpdxHeaderCheck"]
+    assert called == ["spdx-header"]
 
 
 @pytest.mark.asyncio
@@ -401,7 +438,7 @@ async def test_cli_doctor_prints_next_steps(
     assert result == 0
     output = capsys.readouterr().out
     assert "Next useful commands:" in output
-    assert "dev config check" in output
+    assert "dev check config" in output
 
 
 @pytest.mark.asyncio

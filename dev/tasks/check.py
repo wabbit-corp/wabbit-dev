@@ -5,7 +5,7 @@ import json
 import re
 import string
 import sys
-from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+from argparse import SUPPRESS, ArgumentDefaultsHelpFormatter, ArgumentParser
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,15 +41,129 @@ from dev.repo_resolution import configured_repo_targets, inferred_project_target
 
 _ISSUE_ID_RE = re.compile(r"\b(E_[A-Z0-9_]+)\b")
 _QUOTED_MESSAGE_PLACEHOLDER_RE = re.compile(r"(['\"])\{(?P<field>[a-zA-Z_][a-zA-Z0-9_]*)(?P<spec>:[^}]*)?\}\1")
+_MISSING_README_IDS = {
+    "E_MISSING_README",
+    "E_README_NO_BANNER",
+    "E_README_NO_BADGES",
+    "E_README_NO_INSTALL",
+    "E_README_NO_USAGE",
+    "E_README_NO_LICENSE",
+    "E_README_NO_CONTRIBUTING",
+}
+_METADATA_ISSUE_TOKENS = (
+    "CODEOWNERS",
+    "EDITORCONFIG",
+    "ISSUE_TEMPLATE",
+    "PULL_REQUEST_TEMPLATE",
+    "SECURITY_POLICY",
+    "PUBLICATION_METADATA",
+)
+_LICENSING_ISSUE_TOKENS = ("SPDX", "LICENSE", "CLA", "LEGAL")
+_SECURITY_ISSUE_TOKENS = ("SECRET", "ENTROPY", "HARDCODED")
+_CHECK_BUNDLE_SUMMARIES = {
+    "default": "Full loaded check suite.",
+    "docs": "README, docs layout, and docs-surface checks.",
+    "repo": "Repository root, generated-file, and layout checks.",
+    "metadata": "Repository, publication, and project metadata drift checks.",
+    "security": "Deterministic secret and hardcoded-value checks.",
+    "licensing": "SPDX, license, CLA, and legal-layout checks.",
+    "kmp": "Kotlin Multiplatform target, source-set, and layout checks.",
+    "gradle": "Gradle-specific source, manifest, and publication checks.",
+    "python": "Python package, include-path, and QA-related checks.",
+}
+
+
+def _check_cli_id(name: str) -> str:
+    base = name.removesuffix("Check")
+    collapsed = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1-\2", base)
+    collapsed = re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", collapsed)
+    return collapsed.replace("_", "-").lower()
+
+
+def _bundle_names() -> tuple[str, ...]:
+    return tuple(_CHECK_BUNDLE_SUMMARIES)
+
+
+def _check_module_name(check: Check) -> str:
+    module = inspect.getmodule(check.__class__)
+    if module is None:
+        return ""
+    return module.__name__.rpartition(".")[2]
+
+
+def _bundles_for_check(check: Check, issue_types: Sequence[IssueType]) -> tuple[str, ...]:
+    entry_id = _check_cli_id(check.__class__.__name__)
+    issue_ids = {issue_type.id for issue_type in issue_types}
+    module_name = _check_module_name(check)
+    bundles: list[str] = ["default"]
+
+    if _check_kind(check) in {"root", "repo"}:
+        bundles.append("repo")
+
+    if (
+        entry_id.startswith("docs-")
+        or entry_id.startswith("readme-")
+        or any(issue_id.startswith("E_DOCS_") for issue_id in issue_ids)
+        or any(issue_id in _MISSING_README_IDS for issue_id in issue_ids)
+        or module_name in {"project_files"}
+    ):
+        bundles.append("docs")
+
+    if entry_id.startswith("kmp-") or any(issue_id.startswith("E_KMP_") for issue_id in issue_ids):
+        bundles.extend(["kmp", "gradle"])
+
+    if entry_id.startswith("gradle-") or any(issue_id.startswith("E_GRADLE_") for issue_id in issue_ids):
+        bundles.append("gradle")
+
+    if (
+        entry_id.startswith("python-")
+        or any(issue_id.startswith("E_PYTHON_") or issue_id.startswith("E_PYQA_") for issue_id in issue_ids)
+    ):
+        bundles.append("python")
+
+    if (
+        "spdx" in entry_id
+        or "license" in entry_id
+        or "legal" in entry_id
+        or any(any(token in issue_id for token in _LICENSING_ISSUE_TOKENS) for issue_id in issue_ids)
+    ):
+        bundles.append("licensing")
+
+    if (
+        "entropy" in entry_id
+        or "secret" in entry_id
+        or "hardcoded" in entry_id
+        or any(any(token in issue_id for token in _SECURITY_ISSUE_TOKENS) for issue_id in issue_ids)
+    ):
+        bundles.append("security")
+
+    if (
+        "metadata" in entry_id
+        or module_name in {"repo_properties"}
+        or any(any(token in issue_id for token in _METADATA_ISSUE_TOKENS) for issue_id in issue_ids)
+    ):
+        bundles.extend(["metadata", "repo"])
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for bundle in bundles:
+        if bundle in seen:
+            continue
+        seen.add(bundle)
+        ordered.append(bundle)
+    return tuple(ordered)
 
 
 @dataclass(frozen=True)
 class CheckCatalogEntry:
+    id: str
     name: str
     kind: str
     summary: str
     fixable: str
     issue_types: tuple[IssueType, ...]
+    bundles: tuple[str, ...]
+    legacy_names: tuple[str, ...]
     config_commands: tuple[str, ...]
 
 
@@ -227,11 +341,14 @@ def _check_summary(check: Check, issue_types: Sequence[IssueType]) -> str:
 def _catalog_entry(check: Check) -> CheckCatalogEntry:
     issue_types = _issue_types_for_check(check)
     return CheckCatalogEntry(
+        id=_check_cli_id(check.__class__.__name__),
         name=check.__class__.__name__,
         kind=_check_kind(check),
         summary=_check_summary(check, issue_types),
         fixable=_check_fixable(check),
         issue_types=issue_types,
+        bundles=_bundles_for_check(check, issue_types),
+        legacy_names=(check.__class__.__name__,),
         config_commands=_config_commands_for_check(check),
     )
 
@@ -247,6 +364,15 @@ def load_check_catalog(config: Config | None = None) -> dict[str, CheckCatalogEn
 
 def list_check_names(config: Config | None = None) -> list[str]:
     return sorted(load_check_catalog(config))
+
+
+def list_check_selectors(config: Config | None = None) -> list[str]:
+    catalog = load_check_catalog(config)
+    return sorted(entry.id for entry in catalog.values())
+
+
+def list_check_bundle_names() -> list[str]:
+    return list(_bundle_names())
 
 
 def _config_target_choices(config: Config | None) -> list[str]:
@@ -265,10 +391,13 @@ def _issue_type_payload(issue_type: IssueType) -> dict[str, str]:
 
 def _check_catalog_payload(entry: CheckCatalogEntry) -> dict[str, object]:
     return {
+        "id": entry.id,
         "name": entry.name,
         "kind": entry.kind,
         "summary": entry.summary,
         "fixable": entry.fixable,
+        "bundles": list(entry.bundles),
+        "legacyNames": list(entry.legacy_names),
         "configCommands": list(entry.config_commands),
         "issueTypes": [_issue_type_payload(issue_type) for issue_type in entry.issue_types],
     }
@@ -302,6 +431,75 @@ def _severity_reporter(severity: Severity) -> Callable[[str], None]:
     return error
 
 
+def _selector_lookup(catalog: dict[str, CheckCatalogEntry]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for entry in catalog.values():
+        lookup[entry.id] = entry.name
+        for legacy_name in entry.legacy_names:
+            lookup[legacy_name] = entry.name
+    return lookup
+
+
+def _resolve_check_names(catalog: dict[str, CheckCatalogEntry], selectors: Sequence[str]) -> tuple[str, ...]:
+    lookup = _selector_lookup(catalog)
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for selector in selectors:
+        resolved_name = lookup.get(selector)
+        if resolved_name is None:
+            raise ValueError(unknown_name_message("check", selector, lookup))
+        if resolved_name in seen:
+            continue
+        seen.add(resolved_name)
+        resolved.append(resolved_name)
+    return tuple(resolved)
+
+
+def _validate_bundle_names(bundle_names: Sequence[str]) -> tuple[str, ...]:
+    known = set(_bundle_names())
+    selected: list[str] = []
+    seen: set[str] = set()
+    for bundle_name in bundle_names:
+        if bundle_name not in known:
+            expected = ", ".join(sorted(known))
+            raise ValueError(f"Unknown check bundle: {bundle_name}. Expected one of: {expected}.")
+        if bundle_name in seen:
+            continue
+        seen.add(bundle_name)
+        selected.append(bundle_name)
+    return tuple(selected)
+
+
+def _select_check_names(
+    catalog: dict[str, CheckCatalogEntry],
+    *,
+    only_selectors: Sequence[str],
+    bundle_names: Sequence[str],
+) -> tuple[str, ...] | None:
+    selected_by_bundle: set[str] | None = None
+    normalized_bundles = _validate_bundle_names(bundle_names)
+    if normalized_bundles:
+        selected_by_bundle = {
+            entry.name
+            for entry in catalog.values()
+            if any(bundle_name in entry.bundles for bundle_name in normalized_bundles)
+        }
+
+    selected_by_name: set[str] | None = None
+    if only_selectors:
+        selected_by_name = set(_resolve_check_names(catalog, only_selectors))
+
+    match (selected_by_bundle, selected_by_name):
+        case (None, None):
+            return None
+        case (set() as selected, None):
+            return tuple(sorted(selected))
+        case (None, set() as selected):
+            return tuple(sorted(selected))
+        case (set() as bundle_selected, set() as name_selected):
+            return tuple(sorted(bundle_selected & name_selected))
+
+
 def list_checks(*, json_output: bool = False) -> int:
     catalog = _catalog(_load_optional_config())
     if not catalog:
@@ -310,28 +508,44 @@ def list_checks(*, json_output: bool = False) -> int:
 
     entries = sorted(catalog.values(), key=lambda entry: (entry.kind, entry.name))
     if json_output:
-        print(json.dumps({"checks": [_check_catalog_payload(entry) for entry in entries]}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "bundles": [
+                        {"id": bundle_name, "summary": _CHECK_BUNDLE_SUMMARIES[bundle_name]}
+                        for bundle_name in _bundle_names()
+                    ],
+                    "checks": [_check_catalog_payload(entry) for entry in entries],
+                },
+                indent=2,
+            )
+        )
         return 0
 
+    print(heading("Available bundles:"))
+    for bundle_name in _bundle_names():
+        print(f"  {accent(bundle_name)}  {_CHECK_BUNDLE_SUMMARIES[bundle_name]}")
+    print()
     print(heading(f"Available checks ({len(entries)}):"))
     for entry in entries:
         fix_color = "green" if entry.fixable == "yes" else "yellow" if entry.fixable == "unknown" else "white"
         print(
-            f"  {accent(entry.name)}  "
+            f"  {accent(entry.id)}  "
             f"[{style(entry.kind, _kind_color(entry.kind), attrs=('bold',))}]  "
             f"fix:{style(entry.fixable, fix_color, attrs=('bold',) if entry.fixable == 'yes' else ())}  "
+            f"bundles:{','.join(entry.bundles)}  "
             f"{entry.summary}"
         )
+        print(f"    legacy: {entry.name}")
     print()
-    print(f"Run `{command_text('check describe <check>')}` for issue IDs, config knobs, and suppression examples.")
+    print(f"Run `{command_text('check show <check-id>')}` for issue IDs, config knobs, and suppression examples.")
     return 0
 
 
-def describe_check(check_name: str, *, json_output: bool = False) -> int:
+def show_check(check_selector: str, *, json_output: bool = False) -> int:
     catalog = _catalog(_load_optional_config())
-    entry = catalog.get(check_name)
-    if entry is None:
-        raise ValueError(unknown_name_message("check", check_name, catalog))
+    resolved_names = _resolve_check_names(catalog, [check_selector])
+    entry = catalog[resolved_names[0]]
 
     issue_id = entry.issue_types[0].id if entry.issue_types else "E_SOME_ISSUE"
     payload = {
@@ -349,8 +563,10 @@ def describe_check(check_name: str, *, json_output: bool = False) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(f"{heading('Check')}: {accent(entry.name)}")
+    print(f"{heading('Check')}: {accent(entry.id)}")
+    print(f"{heading('Legacy name')}: {entry.name}")
     print(f"{heading('Kind')}: {style(entry.kind, _kind_color(entry.kind), attrs=('bold',))}")
+    print(f"{heading('Bundles')}: {', '.join(entry.bundles)}")
     print(f"{heading('Summary')}: {entry.summary}")
     fix_color = "green" if entry.fixable == "yes" else "yellow" if entry.fixable == "unknown" else "white"
     print(
@@ -385,17 +601,23 @@ def describe_check(check_name: str, *, json_output: bool = False) -> int:
     return 0
 
 
+def describe_check(check_name: str, *, json_output: bool = False) -> int:
+    return show_check(check_name, json_output=json_output)
+
+
 def secrets_scan(
     project_or_dir_or_file: str | None = None,
     fix: bool = False,
 ) -> int:
-    return check_main(project_or_dir_or_file, ["HighEntropyStringCheck"], fix)
+    return check_main(project_or_dir_or_file, ["high-entropy-string"], fix)
 
 
 def check_main(
     project_or_dir_or_file: str | None,
     enabled_checks: list[str] | None = None,
     fix: bool = False,
+    *,
+    bundles: Sequence[str] = (),
 ) -> int:
     """
     Main function to run checks on the project.
@@ -429,13 +651,16 @@ def check_main(
             raise ValueError(f"Path does not exist: {path}.{suggestion}")
 
     all_checks = _load_all_checks(config)
-
-    for check_name in enabled_checks or []:
-        if check_name not in all_checks:
-            raise ValueError(unknown_name_message("check", check_name, all_checks))
-
-    check_set = set(enabled_checks) if enabled_checks else set(all_checks.keys())
-    all_checks = {k: v for k, v in all_checks.items() if k in check_set}
+    catalog = _catalog(config)
+    selected_check_names = _select_check_names(
+        catalog,
+        only_selectors=enabled_checks or (),
+        bundle_names=bundles,
+    )
+    if selected_check_names is not None:
+        if not selected_check_names:
+            raise ValueError("No loaded checks matched the selected bundles or check selectors.")
+        all_checks = {name: check for name, check in all_checks.items() if name in set(selected_check_names)}
 
     TCheck = TypeVar("TCheck", bound=Check)
 
@@ -905,7 +1130,7 @@ if __name__ == "__main__":
     raw_argv = sys.argv[1:]
     if not raw_argv:
         normalized_argv = ["run"]
-    elif raw_argv[0] in {"run", "list", "describe"}:
+    elif raw_argv[0] in {"run", "list", "show", "describe"}:
         normalized_argv = raw_argv
     else:
         normalized_argv = ["run", *raw_argv]
@@ -918,10 +1143,10 @@ if __name__ == "__main__":
         epilog=(
             "Examples:\n"
             "  check.py list\n"
-            "  check.py describe SpdxHeaderCheck\n"
+            "  check.py show spdx-header\n"
             "  check.py .\n"
             "  check.py :root --fix\n"
-            "  check.py app-wabbit-dev/dev/cli.py --checks SpdxHeaderCheck"
+            "  check.py app-wabbit-dev/dev/cli.py --checks spdx-header"
         ),
         formatter_class=ArgumentDefaultsHelpFormatter,
     )
@@ -936,23 +1161,27 @@ if __name__ == "__main__":
         help="Project or directory or file to check.",
     )
     run_parser.add_argument("--checks", nargs="+", default=[], help="List of checks to run.")
+    run_parser.add_argument("--bundle", nargs="+", default=[], help="Check bundle IDs to run.")
     run_parser.add_argument("--fix", action="store_true", help="Fix issues found during checks.")
 
     list_parser = subparsers.add_parser("list", help="List all loaded checks.")
     list_parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
 
-    describe_parser = subparsers.add_parser("describe", help="Describe one loaded check.")
-    describe_parser.add_argument("check", help="Check class name to describe.")
-    describe_parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
+    show_parser = subparsers.add_parser("show", help="Describe one loaded check.")
+    show_parser.add_argument("check", help="Check ID or legacy class name to describe.")
+    show_parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
+    describe_parser = subparsers.add_parser("describe", help=SUPPRESS)
+    describe_parser.add_argument("check", help=SUPPRESS)
+    describe_parser.add_argument("--json", action="store_true", help=SUPPRESS)
 
     args = parser.parse_args(normalized_argv)
     try:
         command = args.command or "run"
         if command == "list":
             raise SystemExit(list_checks(json_output=args.json))
-        if command == "describe":
-            raise SystemExit(describe_check(args.check, json_output=args.json))
-        raise SystemExit(check_main(args.project_or_dir_or_file, args.checks, args.fix))
+        if command in {"show", "describe"}:
+            raise SystemExit(show_check(args.check, json_output=args.json))
+        raise SystemExit(check_main(args.project_or_dir_or_file, args.checks, args.fix, bundles=args.bundle))
     except ValueError as ex:
         parser.exit(2, f"{parser.prog}: error: {ex}\n")
 
@@ -962,8 +1191,11 @@ __all__ = [
     "E_GITIGNORE_WITHOUT_REPO",
     "check_main",
     "describe_check",
+    "list_check_bundle_names",
     "load_check_catalog",
     "list_check_names",
+    "list_check_selectors",
     "list_checks",
     "secrets_scan",
+    "show_check",
 ]

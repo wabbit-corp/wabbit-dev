@@ -65,7 +65,7 @@ def test_preflight_for_command_prints_doctor_hint(
                 label="Config load",
                 status=DoctorStatus.FAIL,
                 detail="Failed to parse workspace config.",
-                fix="Run `dev config check` after fixing root.clj.",
+                fix="Run `dev check config` after fixing root.clj.",
             )
         ],
     )

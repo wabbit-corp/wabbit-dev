@@ -50,9 +50,11 @@ def test_completion_lists_top_level_commands(capsys) -> None:
     assert "completion" in candidates
     assert "install" in candidates
     assert "doctor" in candidates
-    assert "docs" in candidates
-    assert "release" in candidates
-    assert "security" in candidates
+    assert "verify" in candidates
+    assert "config" not in candidates
+    assert "docs" not in candidates
+    assert "release" not in candidates
+    assert "security" not in candidates
 
 
 def test_completion_lists_project_subcommands(capsys) -> None:
@@ -66,11 +68,13 @@ def test_completion_lists_project_subcommands(capsys) -> None:
     assert "versions" in candidates
 
 
-def test_completion_lists_docs_subcommands(capsys) -> None:
-    candidates = _run_typed_completion(["dev", "docs", ""], 2, capsys)
+def test_completion_lists_verify_subcommands(capsys) -> None:
+    candidates = _run_typed_completion(["dev", "verify", ""], 2, capsys)
 
-    assert "check" in candidates
-    assert "snippets" in candidates
+    assert "docs" in candidates
+    assert "release" in candidates
+    assert "security" in candidates
+    assert "list" in candidates
 
 
 def test_completion_lists_install_subcommands_and_tools(capsys) -> None:
@@ -78,6 +82,7 @@ def test_completion_lists_install_subcommands_and_tools(capsys) -> None:
 
     assert "app" in candidates
     assert "completions" in candidates
+    assert "hooks" in candidates
     assert "tools" in candidates
 
     tool_candidates = _run_typed_completion(["dev", "install", "tools", "--tool", ""], 4, capsys)
@@ -90,12 +95,14 @@ def test_completion_lists_install_subcommands_and_tools(capsys) -> None:
     assert "csharpier" in tool_candidates
 
 
-def test_completion_lists_security_subcommands_and_tools(capsys) -> None:
-    candidates = _run_typed_completion(["dev", "security", ""], 2, capsys)
+def test_completion_lists_commit_subcommands(capsys) -> None:
+    candidates = _run_typed_completion(["dev", "commit", ""], 2, capsys)
 
-    assert "scan" in candidates
+    assert "verify" in candidates
 
-    tool_candidates = _run_typed_completion(["dev", "security", "scan", "--tool", ""], 4, capsys)
+
+def test_completion_lists_verify_security_tools(capsys) -> None:
+    tool_candidates = _run_typed_completion(["dev", "verify", "security", "--tool", ""], 4, capsys)
 
     assert "gitleaks" in tool_candidates
     assert "trufflehog" in tool_candidates
@@ -119,7 +126,6 @@ def test_completion_suggests_project_and_repo_targets(monkeypatch, capsys) -> No
 
 
 def test_completion_suggests_check_targets_and_colon_forms(monkeypatch, capsys) -> None:
-    import dev.tasks.check as check_task
     import dev.typed_cli as typed_cli
 
     config = SimpleNamespace(
@@ -128,12 +134,12 @@ def test_completion_suggests_check_targets_and_colon_forms(monkeypatch, capsys) 
     )
 
     monkeypatch.setattr(typed_cli, "_load_workspace_config", lambda: config)
-    monkeypatch.setattr(check_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck"])
 
     candidates = _run_typed_completion(["dev", "check", ""], 2, capsys)
 
     assert "list" in candidates
-    assert "describe" in candidates
+    assert "show" in candidates
+    assert "config" in candidates
     assert ":root" in candidates
     assert "app-wabbit-dev" in candidates
     assert "jeeves" in candidates
@@ -146,23 +152,35 @@ def test_completion_suggests_check_names_after_target(monkeypatch, capsys) -> No
     import dev.typed_cli as typed_cli
 
     monkeypatch.setattr(typed_cli, "_load_workspace_config", lambda: None)
-    monkeypatch.setattr(check_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck", "TextQualityCheck"])
+    monkeypatch.setattr(check_task, "list_check_selectors", lambda config=None: ["spdx-header", "text-quality"])
 
     candidates = _run_typed_completion(["dev", "check", "app-wabbit-dev", ""], 3, capsys)
 
-    assert candidates == ("SpdxHeaderCheck", "TextQualityCheck")
+    assert candidates == ("spdx-header", "text-quality")
 
 
-def test_completion_suggests_check_names_for_describe(monkeypatch, capsys) -> None:
+def test_completion_suggests_check_names_for_show(monkeypatch, capsys) -> None:
     import dev.tasks.check as check_task
     import dev.typed_cli as typed_cli
 
     monkeypatch.setattr(typed_cli, "_load_workspace_config", lambda: None)
-    monkeypatch.setattr(check_task, "list_check_names", lambda config=None: ["SpdxHeaderCheck"])
+    monkeypatch.setattr(check_task, "list_check_selectors", lambda config=None: ["spdx-header"])
 
-    candidates = _run_typed_completion(["dev", "check", "describe", ""], 3, capsys)
+    candidates = _run_typed_completion(["dev", "check", "show", ""], 3, capsys)
 
-    assert candidates == ("SpdxHeaderCheck",)
+    assert candidates == ("spdx-header",)
+
+
+def test_completion_suggests_check_bundles(monkeypatch, capsys) -> None:
+    import dev.tasks.check as check_task
+    import dev.typed_cli as typed_cli
+
+    monkeypatch.setattr(typed_cli, "_load_workspace_config", lambda: None)
+    monkeypatch.setattr(check_task, "list_check_bundle_names", lambda: ["docs", "security"])
+
+    candidates = _run_typed_completion(["dev", "check", "--bundle", ""], 3, capsys)
+
+    assert candidates == ("docs", "security")
 
 
 def test_completion_suggests_push_targets_and_dot(monkeypatch, capsys) -> None:
@@ -196,5 +214,5 @@ def test_completion_query_compatibility_command_uses_typed_grammar(capsys) -> No
     output = _run_typed_command(["completion", "query", "bash", "1", "dev", "do"], capsys)
 
     candidates = tuple(line.split("\t", 1)[0] for line in output.splitlines() if line)
-    assert "docs" in candidates
     assert "doctor" in candidates
+    assert "docs" not in candidates

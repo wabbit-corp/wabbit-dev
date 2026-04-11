@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from weakref import WeakKeyDictionary
 
 from dev.config import Config, load_config
-from dev.tasks.check import list_check_names
+from dev.tasks.check import list_check_bundle_names, list_check_selectors
 from dev.tasks.doctor import doctor_only_choices
 
 _ALLOW_FILES_PREFIX = "__wabbit_dev_allow_files__="
@@ -112,7 +112,9 @@ def _candidates_for_kind(kind: str | None, config: Config | None) -> tuple[str, 
     if kind == "check-target":
         return _check_target_candidates(config)
     if kind == "check-name":
-        return tuple(list_check_names(config))
+        return tuple(list_check_selectors(config))
+    if kind == "check-bundle":
+        return tuple(list_check_bundle_names())
     if kind == "doctor-only":
         return doctor_only_choices()
     return ()
@@ -181,7 +183,7 @@ def _normalize_completion_words(words: list[str], cword: int) -> tuple[list[str]
         return words, cword
     if len(words) == 2:
         return words, cword
-    if len(words) > 2 and words[2] in {"run", "list", "describe"}:
+    if len(words) > 2 and words[2] in {"run", "list", "show", "describe", "config"}:
         return words, cword
     normalized = words[:2] + ["run"] + words[2:]
     adjusted_cword = cword + 1 if cword >= 2 else cword

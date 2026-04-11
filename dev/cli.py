@@ -81,8 +81,13 @@ class ArgsWithTargets(Protocol):
 _INVALID_CHOICE_RE = re.compile(r"invalid choice: '([^']+)' \(choose from (.+)\)")
 _CONFIG_CONTEXT_COMMANDS = {
     "where",
+    "check/config",
     "config/check",
+    "install/hooks",
     "doctor",
+    "verify/docs",
+    "verify/release",
+    "verify/security",
     "docs/check",
     "docs/snippets",
     "setup",
@@ -95,6 +100,7 @@ _CONFIG_CONTEXT_COMMANDS = {
     "cloc",
     "status",
     "commit",
+    "commit/verify",
     "push",
     "project/list",
     "project/show",
@@ -123,7 +129,28 @@ class SuggestingArgumentParser(argparse.ArgumentParser):
 
 
 class HelpFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentDefaultsHelpFormatter):
-    pass
+    def _iter_indented_subactions(self, action: argparse.Action):  # type: ignore[override]
+        self._indent()
+        try:
+            get_subactions = action._get_subactions
+        except AttributeError:
+            pass
+        else:
+            for subaction in get_subactions():
+                if getattr(subaction, "help", None) == argparse.SUPPRESS:
+                    continue
+                yield subaction
+        self._dedent()
+
+
+def _update_subparser_help(parent: argparse.ArgumentParser, name: str, help_text: str) -> None:
+    for action in parent._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        for choice_action in action._choices_actions:
+            if choice_action.dest == name:
+                choice_action.help = help_text
+                return
 
 
 def _add_argument(
@@ -168,7 +195,7 @@ def _normalize_cli_argv(raw_argv: Sequence[str], commands: "Commands") -> list[s
         if len(argv) == 1:
             return ["check", "run"]
         second = argv[1]
-        if second in {"run", "list", "describe"}:
+        if second in {"run", "list", "show", "describe", "config"}:
             return argv
         return ["check", "run", *argv[1:]]
 
@@ -230,8 +257,8 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
             if args.json:
                 tokens.append("--json")
             return tokens
-        case "config/check":
-            return ["config", "check"]
+        case "check/config" | "config/check":
+            return ["check", "config"]
         case "install/app":
             tokens = ["install", "app"]
             if args.bin_dir is not None:
@@ -253,6 +280,12 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
             if args.json:
                 tokens.append("--json")
             return tokens
+        case "install/hooks":
+            tokens = ["install", "hooks"]
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
         case "doctor":
             tokens = ["doctor"]
             only_values = _namespace_string_list(args, "only")
@@ -262,8 +295,35 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
                 tokens.append("--json")
             tokens.extend(args.targets or [])
             return tokens
+        case "verify/list":
+            tokens = ["verify", "list"]
+            if args.json:
+                tokens.append("--json")
+            return tokens
+        case "verify/docs":
+            tokens = ["verify", "docs"]
+            if args.semantic:
+                tokens.append("--semantic")
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "verify/release":
+            tokens = ["verify", "release"]
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
+        case "verify/security":
+            tokens = ["verify", "security"]
+            for tool in _namespace_string_list(args, "tools"):
+                tokens.extend(["--tool", tool])
+            if args.json:
+                tokens.append("--json")
+            tokens.extend(args.targets or [])
+            return tokens
         case "docs/check":
-            tokens = ["docs", "check"]
+            tokens = ["verify", "docs"]
             if args.semantic:
                 tokens.append("--semantic")
             if args.json:
@@ -289,13 +349,13 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
             tokens.extend(args.targets or [])
             return tokens
         case "release/verify":
-            tokens = ["release", "verify"]
+            tokens = ["verify", "release"]
             if args.json:
                 tokens.append("--json")
             tokens.extend(args.targets or [])
             return tokens
         case "security/scan":
-            tokens = ["security", "scan"]
+            tokens = ["verify", "security"]
             for tool in _namespace_string_list(args, "tools"):
                 tokens.extend(["--tool", tool])
             if args.json:
@@ -384,6 +444,10 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
             tokens = ["check"]
             if args.fix:
                 tokens.append("--fix")
+            for bundle_name in _namespace_string_list(args, "bundle"):
+                tokens.extend(["--bundle", bundle_name])
+            for selector in _namespace_string_list(args, "only"):
+                tokens.extend(["--only", selector])
             if args.project_or_dir_or_file is not None:
                 tokens.append(args.project_or_dir_or_file)
             tokens.extend(args.checks or [])
@@ -393,8 +457,8 @@ def _command_tokens(command_path: str, args: argparse.Namespace) -> list[str]:
             if args.json:
                 tokens.append("--json")
             return tokens
-        case "check/describe":
-            tokens = ["check", "describe", args.check]
+        case "check/show" | "check/describe":
+            tokens = ["check", "show", args.check]
             if args.json:
                 tokens.append("--json")
             return tokens
@@ -498,10 +562,12 @@ def _apply_context_defaults(command_path: str, args: argparse.Namespace) -> None
     from dev.repo_resolution import inferred_project_targets, inferred_repo_targets
 
     if command_path in {
+        "verify/docs",
         "docs/check",
         "docs/snippets",
         "setup",
         "build",
+        "verify/release",
         "release/verify",
         "clean",
         "cloc",
@@ -522,7 +588,7 @@ def _apply_context_defaults(command_path: str, args: argparse.Namespace) -> None
             if inferred_targets is not None:
                 args.targets = inferred_targets
 
-    if command_path == "security/scan":
+    if command_path in {"verify/security", "security/scan"}:
         if isinstance(args, ArgsWithTargets) and not args.targets:
             inferred_targets = inferred_repo_targets(config)
             if inferred_targets is not None:
@@ -560,17 +626,17 @@ def _print_next_steps(command_path: str, *, prog: str, args: argparse.Namespace)
     steps: list[str]
     match command_path:
         case "doctor":
-            steps = [
-                f"{prog} config check",
-                f"{prog} project list",
-                f"{prog} doctor --json",
-            ]
+                steps = [
+                    f"{prog} check config",
+                    f"{prog} project list",
+                    f"{prog} doctor --json",
+                ]
         case "setup":
             if target is not None:
                 steps = [f"{prog} project show {target}", f"{prog} build {target}", f"{prog} check {target}"]
             else:
                 steps = [f"{prog} project list", f"{prog} build", f"{prog} check :root"]
-        case "release/verify":
+        case "verify/release" | "release/verify":
             if target is not None:
                 steps = [f"{prog} publish --dry-run {target}", f"{prog} publish {target}", f"{prog} status {target}"]
             else:
@@ -696,6 +762,8 @@ class Commands:
                             parser_kwargs["epilog"] = epilog
                     parsers[p] = subparsers[p0](path[i - 1], **parser_kwargs)
                     register_parser_child(parsers[p0], path[i - 1], parsers[p])
+                elif i == len(path) and help is not None:
+                    _update_subparser_help(parsers[p0], path[i - 1], help)
                 if p not in subparsers and i != len(path):
                     child_subparsers = parsers[p].add_subparsers(
                         dest=subcommand(i),
@@ -764,8 +832,8 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             f"{prog} completion bash",
             f"{prog} setup --local app-datatron",
             f"{prog} build app-datatron",
-            f"{prog} secrets scan .",
-            f"{prog} security scan .",
+            f"{prog} check --bundle security .",
+            f"{prog} verify security .",
             f"{prog} project list",
         ],
         notes=[
@@ -802,7 +870,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
 
     with commands(
         "config",
-        help="Validate workspace configuration files.",
+        help=argparse.SUPPRESS,
         description=_doc("""
             Parse and validate the workspace configuration files.
 
@@ -810,8 +878,9 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             into the internal project model before you rely on setup, build, check,
             or publish workflows.
             """),
-        epilog=examples("config check"),
+        epilog=examples("check config"),
     ) as cmd:
+        register_parser_metadata(cmd, hidden=True)
         del cmd
 
     with commands(
@@ -821,7 +890,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             Generate shell completion scripts for the dev CLI.
 
             The generated completions include top-level commands, nested
-            subcommands, configured project and repo IDs, and loaded check names.
+            subcommands, configured project and repo IDs, and loaded check IDs.
             """),
         epilog=examples(
             "completion bash",
@@ -844,12 +913,14 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             Use `install app` to refresh the global `dev` and `wabbit-dev`
             launcher wrappers. Use `install completions` to write shell
             completion scripts and register managed shell rc snippets. Use
+            `install hooks` to register local Git commit policy hooks. Use
             `install tools` to provision optional local scanners and formatters.
             """),
         epilog=examples(
             "install app",
             "install completions",
             "install completions --shell zsh",
+            "install hooks",
             "install tools",
         ),
     ) as cmd:
@@ -940,6 +1011,35 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         )
 
     with commands(
+        "install",
+        "hooks",
+        help="Install local Git hooks that enforce dev commit policy.",
+        description=_doc("""
+            Generate a local commit-msg hook for selected repositories.
+
+            The hook runs `dev commit verify --staged` before local commits. By
+            default the command targets the current repo, or every configured
+            repo when run from the workspace root.
+            """),
+        epilog=examples("install hooks", "install hooks app-wabbit-dev", "install hooks --json ."),
+    ) as cmd:
+        _add_argument(
+            cmd,
+            "targets",
+            metavar="TARGET",
+            type=str,
+            nargs="*",
+            completion_kind="repo-target",
+            completion_allow_files=True,
+            help="Repo IDs, project IDs, or paths. Omit to use the current repo, or all repos from the workspace root.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit a machine-readable hook install report.",
+        )
+
+    with commands(
         "completion",
         "bash",
         help="Print a bash completion script.",
@@ -980,19 +1080,10 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "config",
         "check",
-        help="Parse and validate root.clj and root.private.clj.",
-        description=_doc("""
-            Parse root.clj and root.private.clj and fail fast on invalid command
-            forms, unknown references, malformed dependency definitions, or other
-            configuration errors.
-            """),
-        epilog=examples(
-            "config check",
-            notes=[
-                "This command validates configuration only. It does not build or modify projects.",
-            ],
-        ),
+        help=argparse.SUPPRESS,
+        description=argparse.SUPPRESS,
     ) as cmd:
+        register_parser_metadata(cmd, hidden=True)
         del cmd
 
     with commands(
@@ -1044,8 +1135,173 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         )
 
     with commands(
+        "verify",
+        help="Run slower workflow-oriented verification commands.",
+        description=_doc("""
+            Run verification workflows that prove selected artifacts or
+            publish-facing behavior actually work.
+
+            Use `verify docs` for documentation verification, `verify release`
+            for release readiness, and `verify security` for optional external
+            security tooling.
+            """),
+        epilog=examples("verify docs", "verify release app-wabbit-dev", "verify security jeeves"),
+    ) as cmd:
+        del cmd
+
+    with commands(
+        "verify",
+        "list",
+        help="List the available verification workflows.",
+        description=_doc("""
+            List the verification workflows exposed through the canonical
+            `verify` command surface.
+            """),
+        epilog=examples("verify list", "verify list --json"),
+    ) as cmd:
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit the verification workflow catalog as JSON.",
+        )
+
+    with commands(
+        "verify",
         "docs",
-        help="Validate project documentation quality.",
+        help="Run documentation verification workflows.",
+        description=_doc("""
+            Validate docs for one or more configured projects.
+
+            This runs the documentation verification workflow, including link
+            checks, README section coverage, docs hooks, snippet parsing, and
+            optional semantic review.
+            """),
+        epilog=examples(
+            "verify docs",
+            "verify docs app-wabbit-dev",
+            "verify docs --semantic app-wabbit-dev",
+            "verify docs --json jeeves",
+            notes=[
+                "Targets can be project IDs, repo IDs, or paths inside configured projects or repos.",
+                "With no targets from inside a configured project or repo, verify docs defaults to that current project or repo.",
+                "`--semantic` is advisory by design and requires an OpenAI key.",
+            ],
+        ),
+    ) as cmd:
+        _add_argument(
+            cmd,
+            "targets",
+            metavar="TARGET",
+            type=str,
+            nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
+            help="Project IDs, repo IDs, or paths. Omit to verify the current inferred project or repo, or the full workspace from root.",
+        )
+        cmd.add_argument(
+            "--semantic",
+            action="store_true",
+            help="Add an LLM-based advisory review for semantic docs quality issues.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit a machine-readable docs report instead of human-oriented output.",
+        )
+
+    with commands(
+        "verify",
+        "release",
+        help="Verify publishable Python and Gradle projects without uploading them.",
+        description=_doc("""
+            Verify release readiness in dependency order for the selected targets.
+
+            Python projects build wheel and sdist artifacts, run `twine check`,
+            run `check-manifest`, and inspect artifact metadata and packaged
+            files. Gradle projects check cross-repo publication availability and
+            then run publication-oriented verification tasks.
+            """),
+        epilog=examples(
+            "verify release",
+            "verify release app-wabbit-dev",
+            "verify release jeeves",
+            "verify release --json app-wabbit-dev",
+            notes=[
+                "Targets can be project IDs, repo IDs, or paths inside configured projects or repos.",
+                "With no targets from inside a configured project or repo, verify release defaults to that current project or repo.",
+                "Gradle verification skips expensive builds when required cross-repo project dependencies are not yet available from Maven Central.",
+            ],
+        ),
+    ) as cmd:
+        _add_argument(
+            cmd,
+            "targets",
+            metavar="TARGET",
+            type=str,
+            nargs="*",
+            completion_kind="project-target",
+            completion_allow_files=True,
+            help="Project IDs, repo IDs, or paths. Omit to verify the current inferred project or repo, or the full workspace from root.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit a machine-readable release verification report instead of human-oriented progress output.",
+        )
+
+    with commands(
+        "verify",
+        "security",
+        help="Run opt-in external security scanners against selected repos or paths.",
+        description=_doc("""
+            Run available external security scanners for selected repo targets.
+
+            These scanners can be slower, noisier, depend on optional local
+            binaries, or contact vulnerability databases. Tools that are not
+            installed or not relevant to the selected targets are reported as
+            skipped rather than blocking the command itself.
+            """),
+        epilog=examples(
+            "verify security",
+            "verify security app-wabbit-dev",
+            "verify security --tool gitleaks --tool shellcheck .",
+            "verify security --json jeeves",
+            notes=[
+                "With no targets from inside a configured repo, verify security defaults to that current repo.",
+                "From the workspace root, omitting targets scans every configured repo target.",
+            ],
+        ),
+    ) as cmd:
+        from dev.tasks.security_scan import security_tool_names
+
+        _add_argument(
+            cmd,
+            "targets",
+            metavar="TARGET",
+            type=str,
+            nargs="*",
+            completion_kind="repo-target",
+            completion_allow_files=True,
+            help="Repo IDs, project IDs, or paths inside git repositories.",
+        )
+        _add_argument(
+            cmd,
+            "--tool",
+            dest="tools",
+            action="append",
+            metavar="TOOL",
+            choices=security_tool_names(),
+            help="Run only this external security tool. Repeatable.",
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit a machine-readable security scan report.",
+        )
+
+    with commands(
+        "docs",
+        help=argparse.SUPPRESS,
         description=_doc("""
             Run deterministic and optional semantic documentation checks.
 
@@ -1203,7 +1459,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
 
     with commands(
         "release",
-        help="Verify release readiness for publishable projects.",
+        help=argparse.SUPPRESS,
         description=_doc("""
             Run release-oriented verification for publishable projects.
 
@@ -1260,7 +1516,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
 
     with commands(
         "security",
-        help="Run opt-in external security tooling.",
+        help=argparse.SUPPRESS,
         description=_doc("""
             Run security-oriented external tools separately from the normal check
             suite.
@@ -2036,25 +2292,29 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         description=_doc("""
             Run the configured check suite against a project, directory, or file.
 
-            Use bare `check` to execute checks, `check list` to browse the
-            loaded catalog, and `check describe` to inspect one check in detail.
+            Use bare `check` to execute checks, `check list` to browse bundles
+            and loaded checks, `check show` to inspect one check in detail, and
+            `check config` to validate workspace configuration files.
             """),
         epilog=examples(
+            "check config",
             "check",
             "check app-wabbit-dev/dev/cli.py",
             "check app-wabbit-dev",
             "check :app-wabbit-dev",
             "check jeeves",
             "check :root --fix",
-            "check . SpdxHeaderCheck",
+            "check --only spdx-header .",
+            "check --bundle docs",
             "check list",
             "check list --json",
-            "check describe SpdxHeaderCheck",
-            "check describe SpdxHeaderCheck --json",
+            "check show spdx-header",
+            "check show spdx-header --json",
             notes=[
                 "When TARGET is omitted from inside a configured project or repo, the command defaults to that current project or repo.",
-                "Use `check list` to browse loaded checks and `check describe <check>` for issue IDs and suppression examples.",
-                "Explicit check names use the Python class names registered by the check modules.",
+                "Use `--bundle` for broad categories such as `docs`, `repo`, `metadata`, `security`, `licensing`, `kmp`, `gradle`, or `python`.",
+                "Use `--only` with stable check IDs such as `spdx-header` or `kmp-target-expansion`.",
+                "Legacy Python class names still work when you need backwards compatibility.",
                 "Checks honor `.gitignore`, `.checkignore`, and suppressions configured in root.clj.",
             ],
         ),
@@ -2095,7 +2355,23 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             type=str,
             nargs="*",
             completion_kind="check-name",
-            help="Optional explicit check class names. Omit to run every loaded check.",
+            help="Optional explicit check IDs or legacy class names. Omit to run every loaded check.",
+        )
+        _add_argument(
+            cmd,
+            "--bundle",
+            action="append",
+            metavar="BUNDLE",
+            completion_kind="check-bundle",
+            help="Restrict the run to one bundle such as `docs`, `repo`, `metadata`, `security`, `licensing`, `kmp`, `gradle`, or `python`. Repeatable.",
+        )
+        _add_argument(
+            cmd,
+            "--only",
+            action="append",
+            metavar="CHECK",
+            completion_kind="check-name",
+            help="Restrict the run to specific check IDs or legacy class names. Repeatable.",
         )
         cmd.add_argument(
             "--fix",
@@ -2106,9 +2382,10 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
     with commands(
         "check",
         "list",
-        help="List the loaded checks with scope, fixability, and summaries.",
+        help="List check bundles and the loaded checks with scope, fixability, and summaries.",
         description=_doc("""
-            List the checks currently loaded from the workspace and check modules.
+            List the available check bundles and the checks currently loaded from
+            the workspace and check modules.
             """),
         epilog=examples("check list", "check list --json"),
     ) as cmd:
@@ -2121,13 +2398,14 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
 
     with commands(
         "check",
-        "describe",
-        help="Show issue IDs, config knobs, and suppression examples for one check.",
+        "show",
+        help="Show issue IDs, bundles, config knobs, and suppression examples for one check.",
         description=_doc("""
             Print detailed information about one loaded check, including issue
-            IDs, typed config commands, and suppression examples.
+            IDs, bundle membership, typed config commands, and suppression
+            examples.
             """),
-        epilog=examples("check describe SpdxHeaderCheck", "check describe SpdxHeaderCheck --json"),
+        epilog=examples("check show spdx-header", "check show spdx-header --json"),
     ) as cmd:
         _add_argument(
             cmd,
@@ -2135,7 +2413,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
             metavar="CHECK",
             type=str,
             completion_kind="check-name",
-            help="The loaded check class name to inspect.",
+            help="The stable check ID or legacy class name to inspect.",
         )
         cmd.add_argument(
             "--json",
@@ -2144,8 +2422,52 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
         )
 
     with commands(
+        "check",
+        "describe",
+        help=argparse.SUPPRESS,
+        description=argparse.SUPPRESS,
+    ) as cmd:
+        register_parser_metadata(cmd, hidden=True)
+        _add_argument(
+            cmd,
+            "check",
+            metavar="CHECK",
+            type=str,
+            completion_kind="check-name",
+            help=argparse.SUPPRESS,
+        )
+        cmd.add_argument(
+            "--json",
+            action="store_true",
+            help=argparse.SUPPRESS,
+        )
+
+    with commands(
+        "check",
+        "config",
+        help="Parse and validate root.clj and root.private.clj.",
+        description=_doc("""
+            Parse root.clj and root.private.clj and fail fast on invalid command
+            forms, unknown references, malformed dependency definitions, or other
+            configuration errors.
+
+            This lives under `check`, but it remains a dedicated bootstrap-time
+            command rather than a normal loaded check because other checks depend
+            on configuration loading succeeding first.
+            """),
+        epilog=examples(
+            "check config",
+            notes=[
+                "This command validates configuration only. It does not build or modify projects.",
+                "`config check` remains available as a hidden compatibility alias.",
+            ],
+        ),
+    ) as cmd:
+        del cmd
+
+    with commands(
         "spdx",
-        help="SPDX-related quality commands.",
+        help=argparse.SUPPRESS,
         description=_doc("""
             Run SPDX-specific tooling derived from the general check runner.
             """),
@@ -2190,7 +2512,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
 
     with commands(
         "secrets",
-        help="Scan for secrets and secret-like strings.",
+        help=argparse.SUPPRESS,
         description=_doc("""
             Run secret-related scanning commands.
 
@@ -2235,7 +2557,7 @@ def build_parser() -> tuple[SuggestingArgumentParser, Commands]:
 
     with commands(
         "contributors",
-        help="Inspect repository contributor identity.",
+        help=argparse.SUPPRESS,
         description=_doc("""
             Run contributor-related repository audits.
             """),
@@ -2307,6 +2629,9 @@ async def async_main() -> int:
     if (
         command_path
         in {
+            "verify/docs",
+            "verify/release",
+            "verify/security",
             "docs/check",
             "docs/snippets",
             "setup",
@@ -2368,6 +2693,26 @@ async def async_main() -> int:
 
                 exit_code = doctor(json_output=args.json, only=args.only, targets=args.targets)
 
+            case "verify/list":
+                from dev.tasks.verify import list_verify_workflows
+
+                exit_code = list_verify_workflows(json_output=args.json)
+
+            case "verify/docs":
+                from dev.tasks.docs_check import docs_check
+
+                exit_code = docs_check(args.targets, semantic=args.semantic, json_output=args.json)
+
+            case "verify/release":
+                from dev.tasks.release_verify import release_verify
+
+                exit_code = release_verify(args.targets, json_output=args.json)
+
+            case "verify/security":
+                from dev.tasks.security_scan import security_scan
+
+                exit_code = security_scan(args.targets, tools=args.tools, json_output=args.json)
+
             case "docs/check":
                 from dev.tasks.docs_check import docs_check
 
@@ -2382,7 +2727,7 @@ async def async_main() -> int:
                     json_output=args.json,
                 )
 
-            case "config/check":
+            case "check/config" | "config/check":
                 from dev.tasks.check_config import check_config
 
                 check_config()
@@ -2392,6 +2737,13 @@ async def async_main() -> int:
 
                 result = install_tools(args.tools, force=args.force, json_output=args.json)
                 if any(tool_result.status == "failed" for tool_result in result.results):
+                    exit_code = 1
+
+            case "install/hooks":
+                from dev.tasks.install import install_hooks
+
+                hook_install_result = install_hooks(args.targets, json_output=args.json)
+                if any(hook_result.status == "failed" for hook_result in hook_install_result.results):
                     exit_code = 1
 
             case "setup":
@@ -2519,20 +2871,24 @@ async def async_main() -> int:
             case "check/run":
                 from dev.tasks.check import check_main
 
-                checks = args.checks
-                if not checks:
-                    checks = None
-                return check_main(args.project_or_dir_or_file, checks, args.fix)
+                selectors = list(args.checks or [])
+                selectors.extend(args.only or [])
+                return check_main(
+                    args.project_or_dir_or_file,
+                    selectors or None,
+                    args.fix,
+                    bundles=args.bundle or (),
+                )
 
             case "check/list":
                 from dev.tasks.check import list_checks
 
                 return list_checks(json_output=args.json)
 
-            case "check/describe":
-                from dev.tasks.check import describe_check
+            case "check/show" | "check/describe":
+                from dev.tasks.check import show_check
 
-                return describe_check(args.check, json_output=args.json)
+                return show_check(args.check, json_output=args.json)
 
             case "spdx/headers":
                 from dev.tasks.spdx_headers import spdx_headers
@@ -2560,7 +2916,7 @@ async def async_main() -> int:
         _print_failure_context(command_path, args=args)
         return 2
 
-    if command_path in {"doctor", "setup", "release/verify", "build", "publish", "project/show", "commit", "push"}:
+    if command_path in {"doctor", "setup", "verify/release", "release/verify", "build", "publish", "project/show", "commit", "push"}:
         _print_next_steps(command_path, prog=prog, args=args)
 
     return exit_code
