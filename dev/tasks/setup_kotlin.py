@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -1011,8 +1012,28 @@ def _github_pages_url(repo_full_name: str) -> str:
     return f"https://{owner}.github.io/{repo_name}/"
 
 
-def _supports_gradle_maven_central(project: GradleProject) -> bool:
-    return _is_maven_central_publishable_project(project) and not _is_nested_gradle_project(project)
+def _asset_slug(value: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
+    collapsed = normalized.strip("-")
+    return collapsed or "asset"
+
+
+def _gradle_release_publish_target(project: GradleProject) -> str:
+    if project.publish_target == "jetbrains-marketplace" or "intellij-plugin" in project.resolved_features:
+        return "intellij-marketplace"
+    if project.publish_target == "jitpack":
+        return "jitpack"
+    if project.publish_target == "maven-central":
+        return "maven-central"
+    return "skip"
+
+
+def _is_gradle_release_publishable_project(project: GradleProject) -> bool:
+    return project.publish and not project.quarantine and project.github_repo is not None and _gradle_release_publish_target(project) != "skip"
+
+
+def _supports_gradle_release_workflow(project: GradleProject) -> bool:
+    return _is_gradle_release_publishable_project(project) and not _is_nested_gradle_project(project)
 
 
 def _supports_gradle_dokka_docs(project: GradleProject) -> bool:
@@ -1020,12 +1041,7 @@ def _supports_gradle_dokka_docs(project: GradleProject) -> bool:
 
 
 def _is_maven_central_publishable_project(project: GradleProject) -> bool:
-    return (
-        project.publish
-        and not project.quarantine
-        and project.publish_target == "maven-central"
-        and project.github_repo is not None
-    )
+    return _is_gradle_release_publishable_project(project) and _gradle_release_publish_target(project) == "maven-central"
 
 
 def _is_dokka_docs_project(project: GradleProject) -> bool:
@@ -1098,6 +1114,50 @@ def _relative_output_path(root_path: Path, output_path: Path) -> str:
     return Path(os.path.relpath(output_path.resolve(), start=root_path.resolve())).as_posix()
 
 
+def _intellij_marketplace_token_env_name(project: GradleProject) -> str:
+    feature = project.resolved_features.get("intellij-plugin")
+    match feature:
+        case IntellijPlugin(marketplaceTokenEnv=str() as token_env) if token_env.strip():
+            return token_env.strip()
+        case _:
+            return "JETBRAINS_MARKETPLACE_TOKEN"
+
+
+def _shared_intellij_marketplace_token_env(projects: Sequence[GradleProject]) -> str | None:
+    env_names = {_intellij_marketplace_token_env_name(project) for project in projects}
+    if len(env_names) != 1:
+        return None
+    return next(iter(env_names))
+
+
+def _gradle_release_bundle_projects_json(*, root_path: Path, projects: Sequence[GradleProject]) -> str:
+    bundle_projects: list[dict[str, str]] = []
+    for project in projects:
+        project_id = project.project_id or project.name
+        publish_target = _gradle_release_publish_target(project)
+        match publish_target:
+            case "intellij-marketplace":
+                source_dir = _relative_output_path(root_path, project.path / "build" / "distributions")
+                archive_prefix = "distributions"
+                bundle_kind = "intellij-plugin"
+            case "maven-central" | "jitpack":
+                source_dir = _relative_output_path(root_path, project.path / "build" / "publications")
+                archive_prefix = "publications"
+                bundle_kind = "gradle-publications"
+            case _:
+                continue
+        bundle_projects.append(
+            {
+                "projectId": project_id,
+                "assetSlug": _asset_slug(project_id),
+                "bundleKind": bundle_kind,
+                "archivePrefix": archive_prefix,
+                "sourceDir": source_dir,
+            }
+        )
+    return json.dumps(bundle_projects)
+
+
 def _workflow_context(
     *,
     project_name: str,
@@ -1109,10 +1169,13 @@ def _workflow_context(
     release_validation_command: str,
     release_build_command: str,
     release_publish_command: str,
+    release_publish_step_name: str,
+    release_publish_env: dict[str, str],
+    release_bundle_projects_json: str,
     snapshot_publish_command: str,
     docs_build_command: str,
     docs_output_dir: str,
-) -> dict[str, str | bool]:
+) -> dict[str, str | bool | dict[str, str]]:
     return {
         "project_name": project_name,
         "github_repo": github_repo,
@@ -1124,6 +1187,9 @@ def _workflow_context(
         "release_validation_command": release_validation_command,
         "release_build_command": release_build_command,
         "release_publish_command": release_publish_command,
+        "release_publish_step_name": release_publish_step_name,
+        "release_publish_env": release_publish_env,
+        "release_bundle_projects_json": release_bundle_projects_json,
         "snapshot_publish_command": snapshot_publish_command,
         "docs_build_command": docs_build_command,
         "docs_output_dir": docs_output_dir,
@@ -1140,7 +1206,7 @@ def _gradle_workflow_context_for_projects(
     projects: Sequence[GradleProject],
     docs_project: GradleProject | None,
     java_version: int,
-) -> dict[str, str | bool]:
+) -> dict[str, str | bool | dict[str, str]]:
     if not projects:
         raise ValueError("At least one Gradle project is required for workflow generation")
 
@@ -1148,7 +1214,13 @@ def _gradle_workflow_context_for_projects(
     if github_repo is None:
         raise ValueError(f"{projects[0].name} requires github_repo for workflow generation")
 
-    publish_projects = [project for project in projects if _is_maven_central_publishable_project(project)]
+    publish_projects = [project for project in projects if _is_gradle_release_publishable_project(project)]
+    maven_central_publish_projects = [project for project in projects if _is_maven_central_publishable_project(project)]
+    publish_targets = {_gradle_release_publish_target(project) for project in publish_projects}
+    if len(publish_targets) > 1:
+        raise ValueError(f"Release workflow projects must share one publish target, got: {sorted(publish_targets)}")
+
+    shared_publish_target = next(iter(publish_targets)) if publish_targets else None
     snapshot_projects = [project for project in publish_projects if project.publish_snapshots]
     context_projects = [*publish_projects]
     if docs_project is not None:
@@ -1157,13 +1229,60 @@ def _gradle_workflow_context_for_projects(
     version_print_tasks = [_workflow_task_name(project, "printVersion") for project in publish_projects]
     snapshot_version_print_tasks = [_workflow_task_name(project, "printVersion") for project in snapshot_projects]
     release_validation_tasks = [_workflow_task_name(project, "assertReleaseVersion") for project in publish_projects]
-    release_publish_tasks = [
-        _workflow_task_name(project, "publishAndReleaseToMavenCentral") for project in publish_projects
-    ]
-    snapshot_publish_tasks = [_workflow_task_name(project, "assertSnapshotVersion") for project in snapshot_projects]
-    snapshot_publish_tasks.extend(
-        _workflow_task_name(project, "publishToMavenCentral") for project in snapshot_projects
-    )
+    snapshot_publish_tasks: list[str] = []
+
+    match shared_publish_target:
+        case "maven-central":
+            release_build_command = _workflow_command(["build"])
+            release_publish_command = _workflow_command(
+                ["build", *[_workflow_task_name(project, "publishAndReleaseToMavenCentral") for project in publish_projects]]
+            )
+            release_publish_step_name = "Publish release to Maven Central"
+            release_publish_env = {
+                "ORG_GRADLE_PROJECT_mavenCentralUsername": "${{ secrets.MAVEN_USERNAME }}",
+                "ORG_GRADLE_PROJECT_mavenCentralPassword": "${{ secrets.MAVEN_PASSWORD }}",
+                "ORG_GRADLE_PROJECT_signingInMemoryKey": "${{ secrets.MAVEN_GPG_PRIVATE_KEY }}",
+                "ORG_GRADLE_PROJECT_signingInMemoryKeyPassword": "${{ secrets.MAVEN_GPG_PASSPHRASE }}",
+            }
+            snapshot_publish_tasks = [_workflow_task_name(project, "assertSnapshotVersion") for project in snapshot_projects]
+            snapshot_publish_tasks.extend(
+                _workflow_task_name(project, "publishToMavenCentral") for project in snapshot_projects
+            )
+        case "jitpack":
+            release_build_command = _workflow_command(["build"])
+            release_publish_command = _workflow_command(
+                ["build", *[_workflow_task_name(project, "publishToMavenLocal") for project in publish_projects]]
+            )
+            release_publish_step_name = "Build release artifacts"
+            release_publish_env = {}
+        case "intellij-marketplace":
+            token_env_name = _shared_intellij_marketplace_token_env(publish_projects)
+            if token_env_name is None:
+                raise ValueError("IntelliJ release workflow projects must share one marketplace token env name")
+            release_build_command = _workflow_command(
+                [
+                    *[_workflow_task_name(project, "verifyPlugin") for project in publish_projects],
+                    *[_workflow_task_name(project, "buildPlugin") for project in publish_projects],
+                ]
+            )
+            release_publish_command = _workflow_command(
+                [
+                    *[_workflow_task_name(project, "verifyPlugin") for project in publish_projects],
+                    *[_workflow_task_name(project, "buildPlugin") for project in publish_projects],
+                    *[_workflow_task_name(project, "publishPlugin") for project in publish_projects],
+                ]
+            )
+            release_publish_step_name = "Publish release to JetBrains Marketplace"
+            release_publish_env = {
+                token_env_name: "${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}",
+            }
+        case None:
+            release_build_command = _workflow_command(["build"])
+            release_publish_command = _workflow_command(["build"])
+            release_publish_step_name = "Build release artifacts"
+            release_publish_env = {}
+        case _:
+            raise ValueError(f"Unsupported Gradle release workflow publish target: {shared_publish_target}")
 
     docs_tasks: list[str] = []
     docs_output_dir = "build/dokka/html"
@@ -1181,8 +1300,11 @@ def _gradle_workflow_context_for_projects(
             snapshot_version_print_tasks or version_print_tasks or ["printVersion"], quiet=True
         ),
         release_validation_command=_workflow_command(release_validation_tasks or ["assertReleaseVersion"]),
-        release_build_command=_workflow_command(["build"]),
-        release_publish_command=_workflow_command(["build", *release_publish_tasks]),
+        release_build_command=release_build_command,
+        release_publish_command=release_publish_command,
+        release_publish_step_name=release_publish_step_name,
+        release_publish_env=release_publish_env,
+        release_bundle_projects_json=_gradle_release_bundle_projects_json(root_path=root_path, projects=publish_projects),
         snapshot_publish_command=_workflow_command(["build", *snapshot_publish_tasks]),
         docs_build_command=_workflow_command(["build", *docs_tasks]),
         docs_output_dir=docs_output_dir,
@@ -1199,7 +1321,7 @@ def _compiler_plugin_repo_workflow_context(
     publish_projects = [project for project in projects if _is_maven_central_publishable_project(project)]
     compiler_plugin_projects = [
         project
-        for project in publish_projects
+        for project in maven_central_publish_projects
         if isinstance(project.resolved_features.get("kotlin-compiler-plugin"), KotlinCompilerPlugin)
     ]
     if not compiler_plugin_projects:
@@ -1254,6 +1376,11 @@ def _compiler_plugin_repo_workflow_context(
         "core_release_validation_command": _workflow_command(core_release_validation_tasks or ["assertReleaseVersion"]),
         "core_release_build_command": _workflow_command(["build"]),
         "core_release_publish_command": _workflow_command(["build", *core_release_publish_tasks]),
+        "has_core_release_bundle_projects": bool(core_publish_projects),
+        "core_release_bundle_projects_json": _gradle_release_bundle_projects_json(
+            root_path=root_path,
+            projects=core_publish_projects,
+        ),
         "core_snapshot_publish_command": _workflow_command(["build", *core_snapshot_tasks]),
         "compiler_release_validation_command": _workflow_command(
             compiler_release_validation_tasks or ["assertReleaseVersion"],
@@ -1276,6 +1403,10 @@ def _compiler_plugin_repo_workflow_context(
             compiler_snapshot_tasks or ["assertSnapshotVersion", "publishToMavenCentral"],
             extra_args=[matrix_property_arg],
         ),
+        "compiler_release_bundle_projects_json": _gradle_release_bundle_projects_json(
+            root_path=root_path,
+            projects=compiler_plugin_projects,
+        ),
     }
 
 
@@ -1286,7 +1417,7 @@ def _write_gradle_workflows(ctx: GradleSetupContext, project: GradleProject, *, 
     docs_quality_path = workflows_dir / "docs-quality.yml"
     docs_deploy_path = workflows_dir / "docs-deploy.yml"
 
-    if _supports_gradle_maven_central(project):
+    if _supports_gradle_release_workflow(project):
         workflow_context = _gradle_workflow_context_for_projects(
             root_path=project.path,
             projects=[project],
@@ -1351,16 +1482,22 @@ def write_gradle_repo_root_workflows(
         None,
     )
 
-    publish_projects = [project for project in projects if _is_maven_central_publishable_project(project)]
+    publish_projects = [project for project in projects if _is_gradle_release_publishable_project(project)]
     release_workflow_projects: list[GradleProject] = []
     if publish_projects:
         publish_versions = {str(project.version) for project in publish_projects if project.version is not None}
-        if len(publish_versions) == 1:
+        publish_targets = {_gradle_release_publish_target(project) for project in publish_projects}
+        if len(publish_versions) == 1 and len(publish_targets) == 1:
             release_workflow_projects = publish_projects
+        elif len(publish_versions) != 1:
+            warning(
+                f"Skipping repo-root release workflows for {root_path}: "
+                f"publishable modules have differing versions {sorted(publish_versions)}"
+            )
         else:
             warning(
-                f"Skipping repo-root Maven Central workflows for {root_path}: "
-                f"publishable modules have differing versions {sorted(publish_versions)}"
+                f"Skipping repo-root release workflows for {root_path}: "
+                f"publishable modules have differing publish targets {sorted(publish_targets)}"
             )
 
     compiler_plugin_projects = [
@@ -1389,7 +1526,7 @@ def write_gradle_repo_root_workflows(
                 render_template(ctx.gradle_compiler_plugin_release_publish_workflow_template, **workflow_context)
             ),
         )
-        if any(project.publish_snapshots for project in publish_projects):
+        if any(project.publish_snapshots for project in maven_central_publish_projects):
             dev.io.write_text_file(
                 snapshot_publish_path,
                 clean_text(

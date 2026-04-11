@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import importlib
 import json
 import subprocess
@@ -7,6 +8,7 @@ import sys
 import tarfile
 import tempfile
 import zipfile
+import xml.etree.ElementTree as ET
 from contextlib import nullcontext, redirect_stdout
 from email import policy
 from email.message import EmailMessage
@@ -21,6 +23,7 @@ from dev.config import (
     Dependency,
     DependencyTarget,
     GradleProject,
+    IntellijPlugin,
     PremakeProject,
     Project,
     PurescriptProject,
@@ -496,6 +499,109 @@ def _verify_python_project(
     return result
 
 
+def _intellij_feature(project: GradleProject) -> IntellijPlugin:
+    feature = project.resolved_features.get("intellij-plugin")
+    match feature:
+        case IntellijPlugin() as intellij_feature:
+            return intellij_feature
+        case _:
+            raise ReleaseVerifyError(f"{project.name} is missing required intellij-plugin feature metadata.")
+
+
+def _normalized_xml_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    collapsed = " ".join(value.split())
+    return collapsed if collapsed else None
+
+
+def _display_optional_text(value: str | None) -> str:
+    return value if value is not None else "(missing)"
+
+
+def _packaged_plugin_xml_text(root: ET.Element, tag: str) -> str | None:
+    element = root.find(tag)
+    if element is None:
+        return None
+    return _normalized_xml_text(element.text)
+
+
+def _summarize_intellij_plugin_artifacts(project: GradleProject) -> JSONObject:
+    feature = _intellij_feature(project)
+    distributions_dir = project.path / "build" / "distributions"
+    if not distributions_dir.is_dir():
+        raise ReleaseVerifyError(f"{project.name} is missing build/distributions after buildPlugin.")
+
+    built_archives = sorted(path for path in distributions_dir.iterdir() if path.is_file() and path.suffix == ".zip")
+    if not built_archives:
+        raise ReleaseVerifyError(f"{project.name} did not produce a plugin ZIP in build/distributions.")
+
+    distribution_path = built_archives[0]
+    with zipfile.ZipFile(distribution_path) as distribution_archive:
+        distribution_entries = distribution_archive.namelist()
+        plugin_jar_entry: str | None = None
+        plugin_jar_entries: list[str] = []
+        plugin_xml_root: ET.Element | None = None
+
+        for entry_name in distribution_entries:
+            if not entry_name.endswith(".jar"):
+                continue
+            with zipfile.ZipFile(io.BytesIO(distribution_archive.read(entry_name))) as jar_archive:
+                jar_entries = jar_archive.namelist()
+                if "META-INF/plugin.xml" not in jar_entries:
+                    continue
+                plugin_jar_entry = entry_name
+                plugin_jar_entries = jar_entries
+                try:
+                    plugin_xml_root = ET.fromstring(jar_archive.read("META-INF/plugin.xml").decode("utf-8"))
+                except (UnicodeDecodeError, ET.ParseError) as ex:
+                    raise ReleaseVerifyError(f"{distribution_path.name} contains an unreadable META-INF/plugin.xml: {ex}.") from ex
+                break
+
+    if plugin_jar_entry is None or plugin_xml_root is None:
+        raise ReleaseVerifyError(f"{distribution_path.name} does not package META-INF/plugin.xml inside any plugin JAR.")
+
+    expected_id = _normalized_xml_text(feature.pluginId) or f"{project.group_name}.{project.name}"
+    actual_id = _packaged_plugin_xml_text(plugin_xml_root, "id")
+    if actual_id != expected_id:
+        raise ReleaseVerifyError(
+            f"{distribution_path.name} packages plugin id {_display_optional_text(actual_id)!r}; expected {expected_id!r}."
+        )
+
+    expected_name = _normalized_xml_text(feature.pluginName)
+    actual_name = _packaged_plugin_xml_text(plugin_xml_root, "name")
+    if expected_name is not None and actual_name != expected_name:
+        raise ReleaseVerifyError(
+            f"{distribution_path.name} packages plugin name {_display_optional_text(actual_name)!r}; expected {expected_name!r}."
+        )
+
+    expected_version = str(project.version) if project.version is not None else None
+    actual_version = _packaged_plugin_xml_text(plugin_xml_root, "version")
+    if expected_version is not None and actual_version != expected_version:
+        raise ReleaseVerifyError(
+            f"{distribution_path.name} packages plugin version {_display_optional_text(actual_version)!r}; expected {expected_version!r}."
+        )
+
+    if "META-INF/pluginIcon.svg" not in plugin_jar_entries:
+        raise ReleaseVerifyError(
+            f"{distribution_path.name} does not package META-INF/pluginIcon.svg in {plugin_jar_entry}."
+        )
+
+    return {
+        "distribution": {
+            "path": str(distribution_path.resolve()),
+            "entryCount": len(distribution_entries),
+        },
+        "packagedPlugin": {
+            "jarPath": plugin_jar_entry,
+            "id": actual_id or "",
+            "name": actual_name or "",
+            "version": actual_version or "",
+            "hasPluginIcon": True,
+        },
+    }
+
+
 def _verify_gradle_project(
     config: Config,
     project: GradleProject,
@@ -523,15 +629,14 @@ def _verify_gradle_project(
         result["reason"] = "unsupported-publish-target"
         return result
 
-    preflight = _maven_central_preflight_for_gradle_project(config, project)
-    result["preflight"] = {"mavenCentral": preflight}
-    if preflight["status"] == "missing":
-        result["status"] = "skipped"
-        result["reason"] = "external-project-dependencies-missing-from-maven-central"
-        result["missingDependencies"] = preflight["missing"]
-        return result
-
     if publish_target == "maven-central":
+        preflight = _maven_central_preflight_for_gradle_project(config, project)
+        result["preflight"] = {"mavenCentral": preflight}
+        if preflight["status"] == "missing":
+            result["status"] = "skipped"
+            result["reason"] = "external-project-dependencies-missing-from-maven-central"
+            result["missingDependencies"] = preflight["missing"]
+            return result
         if project.is_kmp:
             tasks = [gradle_task_name(project, "publishKotlinMultiplatformPublicationToMavenLocal")]
         else:
@@ -556,6 +661,9 @@ def _verify_gradle_project(
             subprocess.run(command, cwd=gradle_root, check=True)
     finally:
         _restore_local_overlay(overlay_state)
+
+    if publish_target == "intellij-marketplace":
+        result["artifacts"] = _summarize_intellij_plugin_artifacts(project)
 
     result["status"] = "success"
     return result

@@ -18,6 +18,7 @@ from packaging.version import InvalidVersion
 from packaging.version import Version as PythonVersion
 
 import dev.io
+import dev.repo_docs
 from dev.config import Config, PythonProject
 from dev.generated_files import is_setup_managed_file, prepend_generated_comment, stamp_managed_text
 from dev.licenses import canonicalize_license_key, python_spdx_for_license
@@ -59,6 +60,7 @@ class PythonSetupContext(Protocol):
     python_contributing_template: jinja2.Template
     python_docs_quality_workflow_template: jinja2.Template
     python_docs_deploy_workflow_template: jinja2.Template
+    python_release_publish_workflow_template: jinja2.Template
     python_codespell_ignore_words_template: jinja2.Template
     python_build_executable_template: jinja2.Template
 
@@ -289,6 +291,31 @@ def _toml_inline_table_array(entries: Sequence[Mapping[str, str | Sequence[str]]
     return "\n".join(lines)
 
 
+def _asset_slug(value: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
+    collapsed = normalized.strip("-")
+    return collapsed or "asset"
+
+
+def _python_release_bundle_projects_json(project: PythonProject) -> str:
+    project_id = project.project_id or project.name
+    return json.dumps(
+        [
+            {
+                "projectId": project_id,
+                "assetSlug": _asset_slug(project_id),
+                "bundleKind": "python-dist",
+                "archivePrefix": "dist",
+                "sourceDir": "dist",
+            }
+        ]
+    )
+
+
+def _supports_python_release_workflow(project: PythonProject) -> bool:
+    return project.publish and not project.quarantine and project.publish_target == "pypi" and project.github_repo is not None
+
+
 def _toml_string_array(items: list[str]) -> str:
     if not items:
         return "[]"
@@ -452,6 +479,13 @@ def _default_site_url(project: PythonProject) -> str | None:
     if not owner or not repo_name:
         return None
     return f"https://{owner}.github.io/{repo_name}/"
+
+
+def _python_docs_site_url(ctx: PythonSetupContext, project: PythonProject) -> str | None:
+    repo_docs_url = dev.repo_docs.repo_docs_site_url(ctx.config, project)
+    if repo_docs_url is not None:
+        return repo_docs_url
+    return _default_site_url(project)
 
 
 def _default_deptry_map(project_path: Path, dependencies: list[str]) -> dict[str, str]:
@@ -916,7 +950,7 @@ def _write_python_docs_files(ctx: PythonSetupContext, project: PythonProject) ->
     repository_name = _python_repository_name(project)
     site_name = project.name
     site_description = project.description or f"Documentation for {project.name}."
-    site_url = _default_site_url(project) or ""
+    site_url = _python_docs_site_url(ctx, project) or ""
     docs_workflow_context = {
         "has_changelog_guard_script": (project.path / "scripts" / "check_changelog_guard.py").is_file(),
         "has_generate_api_docs_script": (project.path / "scripts" / "generate_api_docs.py").is_file(),
@@ -983,14 +1017,18 @@ def _write_python_docs_files(ctx: PythonSetupContext, project: PythonProject) ->
         codespell_words,
     )
 
-    dev.io.write_text_file(
-        project.path / ".github" / "workflows" / "docs-quality.yml",
-        clean_text(render_template(ctx.python_docs_quality_workflow_template, **docs_workflow_context)),
-    )
-    dev.io.write_text_file(
-        project.path / ".github" / "workflows" / "docs-deploy.yml",
-        clean_text(render_template(ctx.python_docs_deploy_workflow_template)),
-    )
+    if not dev.repo_docs.repo_docs_workflows_owned_by_repo(ctx.config, project):
+        dev.io.write_text_file(
+            project.path / ".github" / "workflows" / "docs-quality.yml",
+            clean_text(render_template(ctx.python_docs_quality_workflow_template, **docs_workflow_context)),
+        )
+        dev.io.write_text_file(
+            project.path / ".github" / "workflows" / "docs-deploy.yml",
+            clean_text(render_template(ctx.python_docs_deploy_workflow_template)),
+        )
+    else:
+        dev.io.delete_if_exists(project.path / ".github" / "workflows" / "docs-quality.yml")
+        dev.io.delete_if_exists(project.path / ".github" / "workflows" / "docs-deploy.yml")
 
 
 def _write_python_application_files(ctx: PythonSetupContext, project: PythonProject) -> None:
@@ -1008,6 +1046,23 @@ def _write_python_application_files(ctx: PythonSetupContext, project: PythonProj
             )
         ),
     )
+
+
+def _write_python_release_workflow(ctx: PythonSetupContext, project: PythonProject) -> None:
+    release_workflow_path = project.path / ".github" / "workflows" / "release-publish.yml"
+    if _supports_python_release_workflow(project):
+        dev.io.write_text_file(
+            release_workflow_path,
+            clean_text(
+                render_template(
+                    ctx.python_release_publish_workflow_template,
+                    release_bundle_projects_json=_python_release_bundle_projects_json(project),
+                )
+            ),
+        )
+        return
+
+    dev.io.delete_if_exists(release_workflow_path)
 
 
 def setup_python_project(ctx: PythonSetupContext, project: PythonProject, interactive: bool = True) -> None:
@@ -1055,6 +1110,7 @@ def setup_python_project(ctx: PythonSetupContext, project: PythonProject, intera
     else:
         dev.io.delete_if_exists(project.path / ".github" / "workflows" / "docs-quality.yml")
         dev.io.delete_if_exists(project.path / ".github" / "workflows" / "docs-deploy.yml")
+    _write_python_release_workflow(ctx, project)
     _write_python_application_files(ctx, project)
 
 

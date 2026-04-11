@@ -729,11 +729,26 @@ def _semantic_prompt(project: Project, markdown_files: Sequence[Path]) -> str:
         "Return strict JSON with this shape:",
         '{"summary": "string", "findings": [{"code": "string", "severity": "warning", "path": "string|null", "message": "string", "evidence": "string"}]}',
         "Use at most 7 findings.",
-        "Allowed codes: missing-project-why, quickstart-not-actionable, examples-not-core-or-compelling, docs-audience-mismatch, maturity-or-status-misleading, docs-journey-fragmented, support-path-unclear.",
+        (
+            "Allowed codes: missing-project-why, quickstart-not-actionable, "
+            "examples-not-core-or-compelling, docs-audience-mismatch, "
+            "maturity-or-status-misleading, docs-journey-fragmented, "
+            "support-path-unclear, readme-first-use-buried."
+        ),
         "Findings must be warning severity only.",
         "Every finding must include short concrete evidence quoted or paraphrased from the provided docs files.",
         "Do not complain about writing style, tone, badges, visuals, or generic polish.",
         "Do not suggest adding sections that already exist unless their content is substantively weak or misleading.",
+        (
+            "For README.md specifically, prefer the landing pattern: one-sentence description, "
+            "then a concrete quick start code example that shows what using the project actually "
+            "looks like, then deeper material."
+        ),
+        (
+            "Use readme-first-use-buried when the README makes a newcomer scroll through module "
+            "tables, design philosophy, status sections, badges, or artifact coordinates before "
+            "showing any concrete usage."
+        ),
         "Base your judgment only on the facts and files provided.",
         "",
         "<project-facts>",

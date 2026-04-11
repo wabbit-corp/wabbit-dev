@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import dev.io
+from dev.tasks.setup_common import render_template
+
 
 def _template_text(relative_path: str) -> str:
     repo_root = Path(__file__).resolve().parents[2]
@@ -21,6 +24,24 @@ def test_gradle_docs_deploy_template_uses_gh_pages_publish() -> None:
     assert "peaceiris/actions-gh-pages@v4" not in text
 
 
+def test_gradle_docs_deploy_template_renders_without_jinja_runner_errors() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    template = dev.io.read_template(
+        repo_root / "data-repo-template" / "gradle-files" / ".github" / "workflows" / "docs-deploy.yml.jinja2",
+        strict=True,
+    )
+
+    text = render_template(
+        template,
+        java_version="21",
+        needs_android=False,
+        docs_build_command="./gradlew dokkaGenerate",
+        docs_output_dir="build/dokka/html",
+    )
+
+    assert "${{ runner.temp }}/pages-site" in text
+
+
 def test_gradle_docs_quality_template_builds_markdown_site() -> None:
     text = _template_text("data-repo-template/gradle-files/.github/workflows/docs-quality.yml.jinja2")
 
@@ -37,6 +58,22 @@ def test_python_docs_deploy_template_uses_pages_artifact_publish() -> None:
     assert "actions/upload-pages-artifact@v4" in text
     assert "actions/deploy-pages@v4" in text
     assert "peaceiris/actions-gh-pages@v4" not in text
+
+
+def test_repo_docs_deploy_template_builds_generated_repo_docs_site() -> None:
+    text = _template_text("data-repo-template/repo-files/.github/workflows/docs-deploy.yml.jinja2")
+
+    assert "actions/configure-pages@v5" in text
+    assert "actions/upload-pages-artifact@v4" in text
+    assert "actions/deploy-pages@v4" in text
+    assert 'python3 scripts/build_repo_docs_site.py --mode deploy --output-dir "$RUNNER_TEMP/pages-site"' in text
+
+
+def test_repo_docs_quality_template_runs_generated_repo_docs_site_builder() -> None:
+    text = _template_text("data-repo-template/repo-files/.github/workflows/docs-quality.yml.jinja2")
+
+    assert "actions/setup-python@v5" in text
+    assert 'python3 scripts/build_repo_docs_site.py --mode quality --output-dir "$RUNNER_TEMP/pages-site"' in text
 
 
 def test_gradle_publish_workflows_do_not_force_optional_gpg_key_id() -> None:
@@ -64,6 +101,70 @@ def test_gradle_release_publish_template_checks_tag_ref_type_explicitly() -> Non
     assert 'git cat-file -t "${GITHUB_REF_NAME}"' not in text
 
 
+def test_gradle_release_publish_template_uploads_github_release_assets() -> None:
+    text = _template_text("data-repo-template/gradle-files/.github/workflows/release-publish.yml.jinja2")
+
+    assert "softprops/action-gh-release@v2" in text
+    assert "build/releases/*.zip" in text
+    assert "build/releases/release-manifest.json" in text
+    assert "build/releases/SHA256SUMS" in text
+    assert "contents: write" in text
+
+
+def test_gradle_release_publish_template_renders_bundle_fields_without_jinja_errors() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    template = dev.io.read_template(
+        repo_root / "data-repo-template" / "gradle-files" / ".github" / "workflows" / "release-publish.yml.jinja2",
+        strict=True,
+    )
+
+    text = render_template(
+        template,
+        java_version="21",
+        needs_android=False,
+        version_print_command="./gradlew --quiet printVersion",
+        snapshot_version_print_command="./gradlew --quiet printVersion",
+        release_validation_command="./gradlew assertReleaseVersion",
+        release_build_command="./gradlew build",
+        release_publish_command="./gradlew publish",
+        release_publish_step_name="Publish release",
+        release_publish_env={"TOKEN": "${{ secrets.TOKEN }}"},
+        release_bundle_projects_json='[{"projectId":"demo","assetSlug":"demo","bundleKind":"gradle-publications","archivePrefix":"publications","sourceDir":"build/publications"}]',
+        snapshot_publish_command="./gradlew publishSnapshots",
+        docs_build_command="./gradlew dokkaGenerate",
+        docs_output_dir="build/dokka/html",
+    )
+
+    assert "Publish release" in text
+    assert 'projects = json.loads(r\'\'\'' in text
+
+
+def test_python_release_publish_template_builds_and_uploads_release_assets() -> None:
+    text = _template_text("data-repo-template/python-files/.github/workflows/release-publish.yml.jinja2")
+
+    assert "python -m build" in text
+    assert "python -m twine upload dist/*" in text
+    assert "softprops/action-gh-release@v2" in text
+    assert "build/releases/*.zip" in text
+    assert "build/releases/release-manifest.json" in text
+    assert "build/releases/SHA256SUMS" in text
+
+
+def test_python_release_publish_template_renders_without_jinja_errors() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    template = dev.io.read_template(
+        repo_root / "data-repo-template" / "python-files" / ".github" / "workflows" / "release-publish.yml.jinja2",
+        strict=True,
+    )
+
+    text = render_template(
+        template,
+        release_bundle_projects_json='[{"projectId":"demo","assetSlug":"demo","bundleKind":"python-dist","archivePrefix":"dist","sourceDir":"dist"}]',
+    )
+
+    assert 'projects = json.loads(r\'\'\'' in text
+
+
 def test_compiler_plugin_publish_workflows_read_supported_kotlin_matrix_from_gradle_properties() -> None:
     release_text = _template_text(
         "data-repo-template/gradle-files/.github/workflows/compiler-plugin-release-publish.yml.jinja2"
@@ -88,6 +189,7 @@ def test_compiler_plugin_publish_workflows_split_core_and_compiler_jobs() -> Non
 
     assert "publish-core:" in release_text
     assert "publish-compiler-plugin:" in release_text
+    assert "github-release:" in release_text
     assert "repo_base_version_print_command" in release_text
     assert "compiler_release_publish_command" in release_text
 

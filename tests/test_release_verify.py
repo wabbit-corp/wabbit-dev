@@ -330,6 +330,87 @@ def test_release_verify_kmp_gradle_uses_multiplatform_publication(
     assert commands == [["gradle", "--no-daemon", "publishKotlinMultiplatformPublicationToMavenLocal"]]
 
 
+def test_release_verify_intellij_marketplace_inspects_packaged_plugin_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import dev.tasks.release_verify as release_task
+    from dev.config import Config, IntellijPlugin
+
+    project_path = tmp_path / "alpha"
+    project_path.mkdir()
+    project = _make_gradle_project(project_path)
+    project.publish_target = "jetbrains-marketplace"
+    project.resolved_features = {
+        "intellij-plugin": IntellijPlugin(
+            pluginName="Alpha Tool",
+            pluginId="one.wabbit.alpha",
+            sinceBuild="232",
+            vendorName="Wabbit Consulting Corporation",
+            vendorEmail="wabbit@wabbit.one",
+            vendorUrl="https://wabbit.one",
+            pluginDescription="Alpha IntelliJ plugin.",
+            pluginChangeNotes="Initial release.",
+            depends=["com.intellij.modules.platform"],
+        )
+    }
+
+    config = Config(raw=parse("()"))
+    config.defined_projects["alpha"] = project
+
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(release_task, "load_config", lambda: config)
+    monkeypatch.setattr(release_task, "resolve_project_ids", lambda _config, targets: list(targets))
+    monkeypatch.setattr(release_task, "toposort_projects", lambda _projects, target_project=None: ["alpha"])
+
+    def fake_run(command: list[str], cwd: Path, check: bool, **kwargs) -> SimpleNamespace:
+        del cwd, check, kwargs
+        commands.append(command)
+        distributions_dir = project.path / "build" / "distributions"
+        distributions_dir.mkdir(parents=True, exist_ok=True)
+
+        plugin_jar_bytes = io.BytesIO()
+        with zipfile.ZipFile(plugin_jar_bytes, "w") as jar_archive:
+            jar_archive.writestr(
+                "META-INF/plugin.xml",
+                "\n".join(
+                    [
+                        "<idea-plugin>",
+                        "    <id>one.wabbit.alpha</id>",
+                        "    <name>Alpha Tool</name>",
+                        "    <version>0.1.0</version>",
+                        "</idea-plugin>",
+                        "",
+                    ]
+                ),
+            )
+            jar_archive.writestr(
+                "META-INF/pluginIcon.svg",
+                '<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"></svg>\n',
+            )
+
+        with zipfile.ZipFile(distributions_dir / "alpha-0.1.0.zip", "w") as distribution_archive:
+            distribution_archive.writestr("alpha/lib/alpha.jar", plugin_jar_bytes.getvalue())
+
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(release_task.subprocess, "run", fake_run)
+
+    result = release_task.release_verify(["alpha"], json_output=True)
+
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["summary"]["success"] == 1
+    assert payload["results"][0]["status"] == "success"
+    assert payload["results"][0]["publishTarget"] == "intellij-marketplace"
+    assert "preflight" not in payload["results"][0]
+    assert payload["results"][0]["artifacts"]["packagedPlugin"]["id"] == "one.wabbit.alpha"
+    assert payload["results"][0]["artifacts"]["packagedPlugin"]["hasPluginIcon"] is True
+    assert commands == [["gradle", "--no-daemon", "verifyPlugin", "buildPlugin"]]
+
+
 def test_release_verify_gradle_skips_when_cross_repo_dependency_missing_from_maven_central(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

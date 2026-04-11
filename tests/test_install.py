@@ -110,6 +110,41 @@ def test_install_completions_no_rc_only_writes_scripts(tmp_path: Path, monkeypat
     assert not (home / ".bashrc").exists()
 
 
+def test_install_hooks_writes_commit_msg_hook_and_configures_git(tmp_path: Path) -> None:
+    from dev.tasks.install import install_hooks
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(("git", "init"), cwd=repo, check=True, capture_output=True, text=True)
+
+    result = install_hooks([str(repo)], json_output=True)
+
+    assert result.results[0].status == "installed"
+    hook_path = result.results[0].hook_path
+    assert hook_path.is_file()
+    assert "dev commit verify --message-file" in hook_path.read_text(encoding="utf-8")
+    configured_hooks_path = subprocess.run(
+        ("git", "config", "--get", "core.hooksPath"),
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert configured_hooks_path == str(result.results[0].hooks_path)
+
+
+def test_install_hooks_skips_non_git_path(tmp_path: Path) -> None:
+    from dev.tasks.install import install_hooks
+
+    repo = tmp_path / "not-a-repo"
+    repo.mkdir()
+
+    result = install_hooks([str(repo)], json_output=True)
+
+    assert result.results[0].status == "skipped"
+    assert "not a git repository" in result.results[0].details
+
+
 def test_install_tools_downloads_verified_ktfmt_into_managed_tools(
     tmp_path: Path,
     monkeypatch,

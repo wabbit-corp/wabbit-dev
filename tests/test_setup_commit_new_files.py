@@ -13,6 +13,7 @@ def test_commit_repo_changes_handles_added_files_without_a_path(monkeypatch: pyt
     from git import Repo
 
     import dev.tasks.setup as setup_module
+    from dev.commit_policy import CommitDiffContext
     from dev.config import Project
     from dev.git_changes import ChangeType, FileDiff, FileType
 
@@ -42,6 +43,7 @@ def test_commit_repo_changes_handles_added_files_without_a_path(monkeypatch: pyt
             self.head = DummyHead()
             self.git = DummyGit()
             self.index = DummyIndex()
+            self.working_tree_dir = str(repo_root)
 
     diff_calls: list[bool] = []
 
@@ -61,6 +63,11 @@ def test_commit_repo_changes_handles_added_files_without_a_path(monkeypatch: pyt
         ]
 
     monkeypatch.setattr(setup_module, "compute_repo_diffs", fake_compute_repo_diffs)
+    monkeypatch.setattr(
+        setup_module,
+        "staged_diff_context",
+        lambda _repo_root: CommitDiffContext(version_changed=False, changelog_changed=False, has_version_tag=False),
+    )
 
     def fake_suggest_commit_name(*_args: object, **_kwargs: object) -> str:
         return "Add new file"

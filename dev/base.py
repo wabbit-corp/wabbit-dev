@@ -17,6 +17,7 @@ CHECK_MODULE_IMPORTS: tuple[str, ...] = (
     "dev.checks.file_paths",
     "dev.checks.hardcoded",
     "dev.checks.identifier_uniqueness",
+    "dev.checks.intellij_marketplace",
     "dev.checks.kmp_target_expansion",
     "dev.checks.layout_drift",
     "dev.checks.large_files",

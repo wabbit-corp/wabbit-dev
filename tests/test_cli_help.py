@@ -12,10 +12,9 @@ async def test_root_help_includes_command_summaries(
 
     monkeypatch.setattr("sys.argv", ["dev.py", "--help"])
 
-    with pytest.raises(SystemExit) as excinfo:
-        await cli.async_main()
+    result = await cli.async_main()
 
-    assert excinfo.value.code == 0
+    assert result == 0
     output = capsys.readouterr().out
     assert "Wabbit development toolkit." in output
     assert "completion" in output
@@ -29,7 +28,7 @@ async def test_root_help_includes_command_summaries(
     assert "where" in output
     assert "Show the workspace, repo, and project context inferred" in output
     assert "project" in output
-    assert "Inspect the configured project inventory." in output
+    assert "Explore the projects defined in root.clj" in output
     assert "check" in output
     assert "Run repository and source checks, or inspect the loaded" in output
     assert "Validate workspace configuration files." not in output
@@ -73,7 +72,9 @@ async def test_release_parent_help_lists_verify(
     assert result == 0
     output = capsys.readouterr().out
     assert "verify" in output
+    assert "bundle" in output
     assert "Verify publishable Python and Gradle projects" in output
+    assert "Build and package GitHub Release assets" in output
 
 
 @pytest.mark.asyncio
@@ -294,6 +295,26 @@ async def test_cli_release_verify_dispatches(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
+async def test_cli_release_bundle_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import release_bundle as release_bundle_task
+
+    called: list[tuple[list[str], bool]] = []
+
+    def fake_release_bundle(targets=None, *, json_output: bool = False) -> int:
+        called.append((targets or [], json_output))
+        return 0
+
+    monkeypatch.setattr(release_bundle_task, "release_bundle", fake_release_bundle)
+    monkeypatch.setattr("sys.argv", ["dev.py", "release", "bundle", "--json", "app-wabbit-dev"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [(["app-wabbit-dev"], True)]
+
+
+@pytest.mark.asyncio
 async def test_cli_docs_check_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev import cli
     from dev.tasks import docs_check as docs_check_task
@@ -408,8 +429,6 @@ async def test_cli_check_show_does_not_infer_target(monkeypatch: pytest.MonkeyPa
 
     called: list[str] = []
 
-    monkeypatch.setattr(cli, "_load_workspace_config", lambda: object())
-
     def fail_infer(*_args, **_kwargs):
         raise AssertionError("check show should not infer a target")
 
@@ -523,13 +542,12 @@ async def test_unknown_command_suggests_similar_name(
 
     monkeypatch.setattr("sys.argv", ["dev.py", "proje", "list"])
 
-    with pytest.raises(SystemExit) as excinfo:
-        await cli.async_main()
+    result = await cli.async_main()
 
-    assert excinfo.value.code == 2
+    assert result == 2
     err = capsys.readouterr().err
-    assert "invalid choice: 'proje'" in err
-    assert "Did you mean 'project'?" in err
+    assert "Unknown subcommand: proje" in err
+    assert "Did you mean: project?" in err
 
 
 @pytest.mark.asyncio
@@ -541,10 +559,9 @@ async def test_help_alias_prints_root_help(
 
     monkeypatch.setattr("sys.argv", ["dev.py", "help"])
 
-    with pytest.raises(SystemExit) as excinfo:
-        await cli.async_main()
+    result = await cli.async_main()
 
-    assert excinfo.value.code == 0
+    assert result == 0
     output = capsys.readouterr().out
     assert "Wabbit development toolkit." in output
 
@@ -570,8 +587,6 @@ def test_print_failure_context_includes_rerun_command(
     tmp_path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from argparse import Namespace
-
     from dev import cli
 
     workspace_root = tmp_path / "workspace"
@@ -581,13 +596,7 @@ def test_print_failure_context_includes_rerun_command(
     (workspace_root / "dev").write_text("#!/bin/sh\n", encoding="utf-8")
     monkeypatch.chdir(nested)
 
-    cli._print_failure_context(
-        "build",
-        args=Namespace(
-            targets=["demo"],
-            json=False,
-        ),
-    )
+    cli._print_failure_context(["build", "demo"])
 
     err = capsys.readouterr().err
     assert "Resolved context:" in err
@@ -605,9 +614,8 @@ async def test_removed_command_names_are_not_registered(
 
     monkeypatch.setattr("sys.argv", ["dev.py", "trufflehog"])
 
-    with pytest.raises(SystemExit) as excinfo:
-        await cli.async_main()
+    result = await cli.async_main()
 
-    assert excinfo.value.code == 2
+    assert result == 2
     err = capsys.readouterr().err
-    assert "invalid choice: 'trufflehog'" in err
+    assert "Unknown subcommand: trufflehog" in err

@@ -381,7 +381,40 @@ def test_semantic_prompt_includes_new_semantic_categories_and_project_facts(tmp_
     assert "maturity-or-status-misleading" in prompt
     assert "docs-journey-fragmented" in prompt
     assert "support-path-unclear" in prompt
+    assert "readme-first-use-buried" in prompt
+    assert "one-sentence description" in prompt
+    assert "concrete quick start code example" in prompt
     assert "You may use the provided local tools" in prompt
+
+
+def test_semantic_coercion_preserves_readme_first_use_buried_code(tmp_path: Path) -> None:
+    import dev.tasks.docs_check as docs_task
+
+    project_path = tmp_path / "alpha"
+    project_path.mkdir()
+    project = _make_python_project(project_path)
+
+    findings = docs_task._coerce_semantic_findings(
+        project,
+        {
+            "findings": [
+                {
+                    "code": "readme-first-use-buried",
+                    "severity": "warning",
+                    "path": "README.md",
+                    "message": "README postpones concrete usage until after topology and philosophy sections.",
+                    "evidence": "The first code example appears only after module tables and artifact coordinates.",
+                }
+            ]
+        },
+    )
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.code == "W_DOCS_README_FIRST_USE_BURIED"
+    assert finding.source == "semantic"
+    assert finding.path == str((project_path / "README.md").resolve())
+    assert "Evidence:" in finding.message
 
 
 def test_semantic_tools_can_list_read_and_grep_project_files(tmp_path: Path) -> None:

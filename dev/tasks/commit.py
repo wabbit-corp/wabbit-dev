@@ -65,7 +65,7 @@ def commit(projects: str | list[str] | None = None, *, dry_run: bool = False) ->
             error(contextualize_failure(str(ex), ["commit", *requested_projects]))
             return 1
 
-        if getattr(config, "openai_key", None) is None:
+        if config.openai_key is None:
             if dry_run:
                 warning("OpenAI key is not configured. A real commit run would fail before generating messages.")
             else:

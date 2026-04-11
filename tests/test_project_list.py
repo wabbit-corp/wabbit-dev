@@ -466,13 +466,14 @@ async def test_cli_project_show_defaults_to_current_project(monkeypatch: pytest.
     from dev import cli
     from dev.tasks import doctor as doctor_task
     from dev.tasks import project_list
+    from dev import typed_cli
 
     called: list[list[str]] = []
 
     monkeypatch.setattr(
         doctor_task, "preflight_for_command", lambda command_path, prog, projects=None, dry_run=False: True
     )
-    monkeypatch.setattr(cli, "_load_workspace_config", lambda: object())
+    monkeypatch.setattr(typed_cli, "_load_workspace_config", _empty_config)
     monkeypatch.setattr(repo_resolution, "inferred_project_targets", lambda config, targets=None: ["app-wabbit-dev"])
 
     def fake_show_projects(project_ids: list[str], *, json_output: bool = False) -> None:

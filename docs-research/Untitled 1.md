@@ -1,0 +1,13 @@
+
+- [ ] Jitpack api
+- [ ] Checkers
+- [ ] Git changes, git commit, git tag list, git add tag, git push, git pull
+- [ ] Github api
+- [ ] Maven api
+- [ ] pypi api
+- [ ] header generation
+- [ ] static analysis
+- [ ] documentation generation 
+- [ ] cla server
+- [ ] compelling usage examples agent (examples that are compelling, can't be done without the library, show non-trivial and practical use, compile and run well, etc)
+- [ ] documentation linting agent

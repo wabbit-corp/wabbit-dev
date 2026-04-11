@@ -60,6 +60,7 @@ _METADATA_ISSUE_TOKENS = (
 )
 _LICENSING_ISSUE_TOKENS = ("SPDX", "LICENSE", "CLA", "LEGAL")
 _SECURITY_ISSUE_TOKENS = ("SECRET", "ENTROPY", "HARDCODED")
+_INTELLIJ_ISSUE_TOKENS = ("INTELLIJ",)
 _CHECK_BUNDLE_SUMMARIES = {
     "default": "Full loaded check suite.",
     "docs": "README, docs layout, and docs-surface checks.",
@@ -143,6 +144,11 @@ def _bundles_for_check(check: Check, issue_types: Sequence[IssueType]) -> tuple[
         or any(any(token in issue_id for token in _METADATA_ISSUE_TOKENS) for issue_id in issue_ids)
     ):
         bundles.extend(["metadata", "repo"])
+
+    if entry_id.startswith("intellij-") or any(
+        any(token in issue_id for token in _INTELLIJ_ISSUE_TOKENS) for issue_id in issue_ids
+    ):
+        bundles.extend(["metadata", "gradle"])
 
     seen: set[str] = set()
     ordered: list[str] = []

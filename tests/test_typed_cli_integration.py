@@ -45,6 +45,76 @@ async def test_docs_commands_bypass_argparse_with_typed_cli(
 
 
 @pytest.mark.asyncio
+async def test_root_help_bypasses_argparse_with_typed_cli(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
+    monkeypatch.setattr("sys.argv", ["dev.py", "--help"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "Wabbit development toolkit." in output
+    assert "Usage: dev <subcommand>" in output
+
+
+@pytest.mark.asyncio
+async def test_bare_invocation_bypasses_argparse_with_typed_cli(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
+    monkeypatch.setattr("sys.argv", ["dev.py"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "Wabbit development toolkit." in output
+    assert "Usage: dev <subcommand>" in output
+
+
+@pytest.mark.asyncio
+async def test_help_alias_bypasses_argparse_with_typed_cli(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
+    monkeypatch.setattr("sys.argv", ["dev.py", "help"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "Wabbit development toolkit." in output
+
+
+@pytest.mark.asyncio
+async def test_parent_help_alias_bypasses_argparse_with_typed_cli(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
+    monkeypatch.setattr("sys.argv", ["dev.py", "project", "help"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "Explore the projects defined in root.clj" in output
+
+
+@pytest.mark.asyncio
 async def test_release_parent_help_bypasses_argparse_with_typed_cli(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -58,8 +128,31 @@ async def test_release_parent_help_bypasses_argparse_with_typed_cli(
 
     assert result == 0
     output = capsys.readouterr().out
-    assert "Verify release readiness for publishable projects." in output
+    assert "Verify or package release assets for publishable projects." in output
     assert "verify" in output
+    assert "bundle" in output
+
+
+@pytest.mark.asyncio
+async def test_slash_alias_bypasses_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import check_config as check_config_task
+    from dev.tasks import doctor as doctor_task
+
+    called: list[str] = []
+
+    def fake_check_config() -> None:
+        called.append("check")
+
+    monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda *args, **kwargs: True)
+    monkeypatch.setattr(check_config_task, "check_config", fake_check_config)
+    monkeypatch.setattr("sys.argv", ["dev.py", "config/check"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == ["check"]
 
 
 @pytest.mark.asyncio

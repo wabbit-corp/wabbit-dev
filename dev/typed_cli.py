@@ -35,38 +35,6 @@ def _load_workspace_config() -> Config | None:
 
 
 async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
-    if not argv:
-        return None
-    if argv[0] not in {
-        "build",
-        "clean",
-        "cloc",
-        "commit",
-        "completion",
-        "config",
-        "check",
-        "contributors",
-        "dep",
-        "docs",
-        "doctor",
-        "duplicates",
-        "install",
-        "jitpack",
-        "llmcopy",
-        "project",
-        "publish",
-        "push",
-        "release",
-        "security",
-        "secrets",
-        "setup",
-        "spdx",
-        "status",
-        "verify",
-        "where",
-        "__complete",
-    }:
-        return None
     if not _ensure_wabbit_cli_importable():
         return None
 
@@ -177,6 +145,11 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
 
     @dataclass(frozen=True)
     class ReleaseVerifyRequest:
+        targets: list[str]
+        json_output: bool
+
+    @dataclass(frozen=True)
+    class ReleaseBundleRequest:
         targets: list[str]
         json_output: bool
 
@@ -327,6 +300,58 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         targets: list[str]
         json_output: bool
 
+    def _command_paths(command: Command[TypedRequest], prefix: tuple[str, ...] = ()) -> set[str]:
+        paths: set[str] = set()
+        for child in command.subcommands:
+            child_path = (*prefix, child.name)
+            paths.add("/".join(child_path))
+            paths.update(_command_paths(child, child_path))
+        return paths
+
+    def _normalize_argv(raw_argv: Sequence[str], root_command: Command[TypedRequest]) -> list[str]:
+        argv_list = list(raw_argv)
+        if not argv_list:
+            return []
+
+        valid_paths = _command_paths(root_command)
+        normalized: list[str] = []
+        current_parts: list[str] = []
+        index = 0
+
+        while index < len(argv_list):
+            token = argv_list[index]
+
+            if token == "help" and index == len(argv_list) - 1:
+                current_path = "/".join(current_parts)
+                if not current_parts or current_path in valid_paths:
+                    normalized.append("--help")
+                    return normalized
+
+            if token == "--" or token.startswith("-"):
+                normalized.extend(argv_list[index:])
+                return normalized
+
+            if "/" in token:
+                split_parts = [part for part in token.split("/") if part]
+                split_path = "/".join([*current_parts, *split_parts])
+                if split_parts and split_path in valid_paths:
+                    normalized.extend(split_parts)
+                    current_parts.extend(split_parts)
+                    index += 1
+                    continue
+
+            candidate_path = "/".join([*current_parts, token])
+            if candidate_path in valid_paths:
+                normalized.append(token)
+                current_parts.append(token)
+                index += 1
+                continue
+
+            normalized.extend(argv_list[index:])
+            return normalized
+
+        return normalized
+
     TypedRequest = (
         WhereRequest
         | ConfigCheckRequest
@@ -344,6 +369,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         | DocsCheckRequest
         | DocsSnippetsRequest
         | ReleaseVerifyRequest
+        | ReleaseBundleRequest
         | SecurityScanRequest
         | LlmcopyRequest
         | SetupRequest
@@ -676,6 +702,269 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         for step in steps:
             print(f"  {command_text(step)}")
 
+    def _format_failure_context() -> str:
+        try:
+            from dev.repo_resolution import format_workspace_context, resolve_workspace_context
+
+            return format_workspace_context(resolve_workspace_context())
+        except Exception:
+            from dev.bootstrap import find_workspace_root
+
+            cwd = Path.cwd().resolve()
+            workspace_root = find_workspace_root(cwd)
+            workspace_root_text = str(workspace_root) if workspace_root is not None else "-"
+            return "\n".join(
+                [
+                    "Resolved context:",
+                    f"  cwd: {cwd}",
+                    f"  workspace root: {workspace_root_text}",
+                    "  current project: -",
+                    "  current repo: -",
+                ]
+            )
+
+    def _request_command_tokens(request: TypedRequest) -> list[str] | None:
+        match request:
+            case WhereRequest(json_output=json_output):
+                tokens = ["where"]
+                if json_output:
+                    tokens.append("--json")
+                return tokens
+            case ConfigCheckRequest():
+                return ["check", "config"]
+            case InstallHooksRequest(targets=targets, json_output=json_output):
+                tokens = ["install", "hooks"]
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case DoctorRequest(targets=targets, only=only, json_output=json_output):
+                tokens = ["doctor"]
+                for value in only:
+                    tokens.extend(["--only", value])
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case VerifyDocsRequest(targets=targets, semantic=semantic, json_output=json_output):
+                tokens = ["verify", "docs"]
+                if semantic:
+                    tokens.append("--semantic")
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case VerifyReleaseRequest(targets=targets, json_output=json_output):
+                tokens = ["verify", "release"]
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case VerifySecurityRequest(targets=targets, tools=tools, json_output=json_output):
+                tokens = ["verify", "security"]
+                for tool in tools:
+                    tokens.extend(["--tool", tool])
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case DocsCheckRequest(targets=targets, semantic=semantic, json_output=json_output):
+                tokens = ["verify", "docs"]
+                if semantic:
+                    tokens.append("--semantic")
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case DocsSnippetsRequest(targets=targets, verify=verify, json_output=json_output):
+                tokens = ["docs", "snippets"]
+                if verify:
+                    tokens.append("--verify")
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case ReleaseVerifyRequest(targets=targets, json_output=json_output):
+                tokens = ["verify", "release"]
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case SecurityScanRequest(targets=targets, tools=tools, json_output=json_output):
+                tokens = ["verify", "security"]
+                for tool in tools:
+                    tokens.extend(["--tool", tool])
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case SetupRequest(targets=targets, dev_mode=dev_mode, local_mode=local_mode, json_output=json_output):
+                tokens = ["setup"]
+                if dev_mode:
+                    tokens.append("--dev")
+                if local_mode:
+                    tokens.append("--local")
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case PublishRequest(targets=targets, dry_run=dry_run):
+                tokens = ["publish"]
+                if dry_run:
+                    tokens.append("--dry-run")
+                tokens.extend(targets)
+                return tokens
+            case DepGraphRequest(targets=targets, artifacts=artifacts):
+                tokens = ["dep", "graph"]
+                if artifacts:
+                    tokens.append("--artifacts")
+                tokens.extend(targets)
+                return tokens
+            case DepUpdatesRequest():
+                return ["dep", "updates"]
+            case BuildRequest(targets=targets, json_output=json_output):
+                tokens = ["build"]
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case CleanRequest(targets=targets):
+                return ["clean", *targets]
+            case ClocRequest(targets=targets):
+                return ["cloc", *targets]
+            case StatusRequest(targets=targets, json_output=json_output):
+                tokens = ["status"]
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case CommitRequest(targets=targets, dry_run=dry_run):
+                tokens = ["commit"]
+                if dry_run:
+                    tokens.append("--dry-run")
+                tokens.extend(targets)
+                return tokens
+            case CommitVerifyRequest(
+                target=target,
+                message_file=message_file,
+                message=message,
+                revision_range=revision_range,
+                staged=staged,
+                json_output=json_output,
+                quiet=quiet,
+            ):
+                tokens = ["commit", "verify"]
+                if message_file is not None:
+                    tokens.extend(["--message-file", message_file])
+                if message is not None:
+                    tokens.extend(["--message", message])
+                if revision_range is not None:
+                    tokens.extend(["--range", revision_range])
+                if staged:
+                    tokens.append("--staged")
+                if json_output:
+                    tokens.append("--json")
+                if quiet:
+                    tokens.append("--quiet")
+                if target is not None:
+                    tokens.append(target)
+                return tokens
+            case PushRequest(targets=targets, dry_run=dry_run):
+                tokens = ["push"]
+                if dry_run:
+                    tokens.append("--dry-run")
+                tokens.extend(targets)
+                return tokens
+            case CheckRunRequest(target=target, selectors=selectors, bundles=bundles, fix=fix):
+                tokens = ["check"]
+                if fix:
+                    tokens.append("--fix")
+                for bundle_name in bundles:
+                    tokens.extend(["--bundle", bundle_name])
+                for selector in selectors:
+                    tokens.extend(["--only", selector])
+                if target is not None:
+                    tokens.append(target)
+                return tokens
+            case CheckListRequest(json_output=json_output):
+                tokens = ["check", "list"]
+                if json_output:
+                    tokens.append("--json")
+                return tokens
+            case CheckShowRequest(check=check, json_output=json_output):
+                tokens = ["check", "show", check]
+                if json_output:
+                    tokens.append("--json")
+                return tokens
+            case SpdxHeadersRequest(target=target, fix=fix):
+                tokens = ["spdx", "headers"]
+                if fix:
+                    tokens.append("--fix")
+                if target is not None:
+                    tokens.append(target)
+                return tokens
+            case SecretsScanRequest(target=target):
+                tokens = ["secrets", "scan"]
+                if target is not None:
+                    tokens.append(target)
+                return tokens
+            case ContributorsAuditRequest():
+                return ["contributors", "audit"]
+            case ProjectListRequest():
+                return ["project", "list"]
+            case ProjectShowRequest(targets=targets, json_output=json_output):
+                tokens = ["project", "show"]
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case ProjectDepsRequest(targets=targets, json_output=json_output):
+                tokens = ["project", "deps"]
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case ProjectRepoRequest(targets=targets, json_output=json_output):
+                tokens = ["project", "repo"]
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case ProjectTargetsRequest(targets=targets, json_output=json_output):
+                tokens = ["project", "targets"]
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case ProjectVersionsRequest(targets=targets, json_output=json_output):
+                tokens = ["project", "versions"]
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case _:
+                return None
+
+    def _print_failure_context(request: TypedRequest | None) -> None:
+        if request is None:
+            return
+
+        tokens = _request_command_tokens(request)
+        if tokens is None:
+            return
+
+        from dev.bootstrap import canonical_rerun_command
+        from dev.messages import command_text, heading
+
+        print(_format_failure_context(), file=sys.stderr)
+        rerun_command = canonical_rerun_command(tokens)
+        if rerun_command is None:
+            return
+
+        print(file=sys.stderr)
+        print(heading("Retry from workspace root:", stream=sys.stderr), file=sys.stderr)
+        print(f"  {command_text(rerun_command, stream=sys.stderr)}", file=sys.stderr)
+
     def _docs_check_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(
             DocsCheckRequest(
@@ -773,6 +1062,14 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     def _release_verify_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(
             ReleaseVerifyRequest(
+                targets=_string_list(values.positional("target")),
+                json_output=_bool_value(values, "--json"),
+            )
+        )
+
+    def _release_bundle_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        return succeed(
+            ReleaseBundleRequest(
                 targets=_string_list(values.positional("target")),
                 json_output=_bool_value(values, "--json"),
             )
@@ -1060,6 +1357,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _setup_decode(values)
             case ["release", "verify"]:
                 return _release_verify_decode(values)
+            case ["release", "bundle"]:
+                return _release_bundle_decode(values)
             case ["security", "scan"]:
                 return _security_scan_decode(values)
             case ["llmcopy"]:
@@ -1088,6 +1387,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _commit_verify_decode(values)
             case ["push"]:
                 return _push_decode(values)
+            case ["check"]:
+                return _check_run_decode(values)
             case ["check", "run"]:
                 return _check_run_decode(values)
             case ["check", "list"]:
@@ -1387,10 +1688,17 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         positionals=(positional(project_target_argument, "target", help="Optional project or repo targets.", repeated=True),),
         decode=_unused_decode,
     )
+    release_bundle_command = Command(
+        name="bundle",
+        header="Build and package GitHub Release assets for publishable Python and Gradle projects.",
+        options=(flag(long="json", help="Emit a machine-readable release bundle report."),),
+        positionals=(positional(project_target_argument, "target", help="Optional project or repo targets.", repeated=True),),
+        decode=_unused_decode,
+    )
     release_command = Command(
         name="release",
-        header="Verify release readiness for publishable projects.",
-        subcommands=(release_verify_command,),
+        header="Verify or package release assets for publishable projects.",
+        subcommands=(release_verify_command, release_bundle_command),
         decode=_unused_decode,
         help_on_empty=True,
         visibility=Visibility.HIDDEN,
@@ -1740,6 +2048,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             ),
         ),
         subcommands=(check_run_command, check_list_command, check_show_command, check_config_command),
+        subcommand_fallback_to_positionals=True,
         decode=_unused_decode,
         help_on_empty=True,
     )
@@ -1862,7 +2171,12 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     )
     root = Command(
         name=prog,
-        header="Wabbit development toolkit.",
+        header=(
+            "Wabbit development toolkit.\n\n"
+            "The CLI reads workspace metadata from root.clj and root.private.clj to\n"
+            "generate project files, run checks, inspect dependencies, build projects,\n"
+            "publish releases, and automate repository maintenance tasks."
+        ),
         subcommands=(
             where_command,
             config_command,
@@ -1892,6 +2206,22 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             project_command,
         ),
         decode=_root_decode,
+        help_on_empty=True,
+        footer=(
+            "Examples:\n"
+            f"  {prog} doctor\n"
+            f"  {prog} where\n"
+            f"  {prog} completion bash\n"
+            f"  {prog} setup --local app-datatron\n"
+            f"  {prog} build app-datatron\n"
+            f"  {prog} check --bundle security .\n"
+            f"  {prog} verify security .\n"
+            f"  {prog} project list\n\n"
+            "Notes:\n"
+            "  - Install the package and run `dev` (or `wabbit-dev`) from anywhere in the workspace.\n"
+            "  - When a workspace `.venv` exists next to `root.clj`, the launcher prefers it automatically.\n"
+            "  - Config-driven commands walk upward from the current directory to find root.clj and root.private.clj."
+        ),
     )
 
     def _preflight(command_path: str, targets: list[str] | None = None, *, dry_run: bool = False) -> bool:
@@ -2022,7 +2352,12 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                     mode = RepoSetupMode.DEV
                 else:
                     mode = RepoSetupMode.PROD
-                exit_code = setup(mode, projects=targets, json_output=json_output)
+                exit_code = setup(
+                    mode,
+                    projects=targets,
+                    interactive=sys.stdin.isatty() and not json_output,
+                    json_output=json_output,
+                )
                 _print_next_steps("setup", targets=targets, json_output=json_output)
                 return exit_code
             case ReleaseVerifyRequest(targets=targets, json_output=json_output):
@@ -2033,6 +2368,15 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
 
                 exit_code = release_verify(targets, json_output=json_output)
                 _print_next_steps("release/verify", targets=targets, json_output=json_output)
+                return exit_code
+            case ReleaseBundleRequest(targets=targets, json_output=json_output):
+                targets = _project_targets_with_defaults(targets)
+                if not _preflight("release/bundle", targets):
+                    return 2
+                from dev.tasks.release_bundle import release_bundle
+
+                exit_code = release_bundle(targets, json_output=json_output)
+                _print_next_steps("release/bundle", targets=targets, json_output=json_output)
                 return exit_code
             case SecurityScanRequest(targets=targets, tools=tools, json_output=json_output):
                 targets = _repo_targets_with_defaults(targets)
@@ -2252,8 +2596,10 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             case None:
                 return 0
 
+    active_request: TypedRequest | None = None
     try:
-        match root.dispatch(list(argv)):
+        normalized_argv = _normalize_argv(argv, root)
+        match root.dispatch(normalized_argv):
             case CommandCompletion(text=text):
                 print(text)
                 return 0
@@ -2264,11 +2610,14 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 print(root.render_failure(issues), file=sys.stderr)
                 return 2
             case CommandParsed(value=request, issues=issues):
+                active_request = request
                 return await _run_request(request, issues)
     except ModuleNotFoundError as ex:
         print(f"{prog}: error: Missing Python dependency: {ex.name!r}.", file=sys.stderr)
+        _print_failure_context(active_request)
         return 2
     except ValueError as ex:
         print(f"{prog}: error: {ex}", file=sys.stderr)
+        _print_failure_context(active_request)
         return 2
     return None

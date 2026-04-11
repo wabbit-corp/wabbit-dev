@@ -28,6 +28,7 @@ from openai.types.responses.response_input_param import ResponseInputParam
 from openai.types.shared_params.reasoning import Reasoning
 
 from dev.caching import DEFAULT_CACHE_DB_PATH, cache
+from dev.commit_policy import ensure_semver_impact_line
 from dev.config import load_config
 from dev.file_properties import get_expected_file_properties
 from dev.io import read_ignore_file, read_text_file, walk_files
@@ -91,7 +92,6 @@ README_PROMPT_TEMPLATE_ENV = jinja2.Environment(
 )
 
 
-SEMVER_IMPACT_PATTERN = re.compile(r"^Semver Impact:\s*(MAJOR|MINOR|PATCH|NONE)\s*$", re.MULTILINE | re.IGNORECASE)
 GIT_TOOL_TIMEOUT_SECONDS = 15
 GIT_TOOL_MAX_OUTPUT_CHARS = 12000
 AGENT_CALL_MAX_STEPS = 1024
@@ -149,15 +149,6 @@ class ChatNamespaceLike(Protocol):
 class OpenAIChatClientLike(Protocol):
     @property
     def chat(self) -> ChatNamespaceLike: ...
-
-
-def ensure_semver_impact_line(commit_message: str) -> str:
-    message = commit_message.strip()
-    if not message:
-        return "chore: update repository\n\nSemver Impact: NONE"
-    if SEMVER_IMPACT_PATTERN.search(message):
-        return message
-    return f"{message}\n\nSemver Impact: NONE"
 
 
 def _normalize_tool_command(command: str) -> str:
