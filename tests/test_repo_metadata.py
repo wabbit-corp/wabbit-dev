@@ -89,6 +89,67 @@ def test_write_repo_metadata_files_generates_editorconfig_and_github_bundle(tmp_
     assert "security@wabbit.one" in security_text
 
 
+def test_write_repo_metadata_files_preserves_custom_gitignore_rules_and_drops_legacy_mode_markers(tmp_path: Path) -> None:
+    import dev.tasks.setup as setup_module
+
+    repo_root = tmp_path / "demo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    project = _make_python_project(repo_root, github_repo="wabbit-corp/demo")
+    project.project_id = "demo"
+
+    (repo_root / ".gitignore").write_text(
+        "\n".join(
+            [
+                ".DS_Store",
+                "Thumbs.db",
+                "",
+                "# Python .gitignore",
+                "__pycache__/",
+                "",
+                "/.is-dev-mode",
+                "/.is-local-mode",
+                "/.is-ij-mode",
+                "# custom",
+                "/custom-data/",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    repo = Repo.init(repo_root)
+    repo.index.add([".gitignore"])
+    repo.index.commit("Initial repo metadata\n\nSemver Impact: NONE")
+    repo.close()
+
+    config = Config(raw=parse("()"))
+    config.default_company_email = "security@wabbit.one"
+    config.default_code_owners = [CodeOwner(name="Sir Wabbit", email="wabbit@wabbit.one")]
+    config.defined_projects["demo"] = project
+
+    ctx = SimpleNamespace(
+        config=config,
+        gitignore_template=jinja2.Template(".DS_Store\nThumbs.db\n/tmp/\n"),
+        editorconfig_template=jinja2.Template("root = true\n"),
+        gradle_gitignore_template=jinja2.Template("/build\n"),
+        python_gitignore_template=jinja2.Template("__pycache__/\n"),
+        purescript_gitignore_template=jinja2.Template("output/\n"),
+        github_codeowners_template=jinja2.Template("* owner@example.com\n"),
+        github_security_template=jinja2.Template("# Security Policy\n"),
+        github_pull_request_template=jinja2.Template("## Summary\n"),
+        github_issue_bug_template=jinja2.Template("name: Bug report\n"),
+        github_issue_feature_template=jinja2.Template("name: Feature request\n"),
+    )
+
+    setup_module._write_repo_metadata_files(ctx, [project])
+
+    gitignore_text = (repo_root / ".gitignore").read_text(encoding="utf-8")
+    assert "# custom" in gitignore_text
+    assert "/custom-data/" in gitignore_text
+    assert "/.is-dev-mode" not in gitignore_text
+    assert "/.is-local-mode" not in gitignore_text
+    assert "/.is-ij-mode" not in gitignore_text
+
+
 def test_repo_metadata_hygiene_check_reports_missing_repo_files(tmp_path: Path) -> None:
     workspace_root = tmp_path
     repo_root = workspace_root / "demo"

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import jinja2
 
-from dev.config import OwnershipType
+from dev.config import DataProject, OwnershipType
 from dev.tasks.setup_common import write_wabbit_legal_files
 
 
@@ -187,3 +187,155 @@ def test_write_wabbit_legal_files_copies_test_license_into_existing_test_directo
     write_wabbit_legal_files(context, project)
 
     assert (tmp_path / "tests" / "LICENSE.md").read_text(encoding="utf-8").startswith("# Wabbit Public Tests License")
+
+
+def test_write_wabbit_legal_files_can_skip_local_test_license_copies(tmp_path: Path) -> None:
+    (tmp_path / "tests").mkdir()
+    project = _FakeProject(
+        path=tmp_path,
+        ownership=OwnershipType.WABBIT,
+        license="MIT",
+        test_license="LicenseRef-Wabbit-Public-Test-License",
+        name="demo-proj",
+        description="Example project",
+        authors=["Alice Example <alice@example.com>"],
+    )
+    context = _FakeContext(
+        config=SimpleNamespace(
+            default_company_email="legal@example.com",
+            default_company_legal_name="Example Legal Co",
+            default_company_short_name="Example Co",
+        ),
+        licenses={
+            "MIT": "MIT body for {{ project_name }}\n",
+            "LicenseRef-Wabbit-Public-Test-License": (
+                "# Wabbit Public Tests License\n" "Custom test license for {{ project_name }}\n"
+            ),
+        },
+        coc=jinja2.Template("CODE OF CONDUCT {{ company_short_name }} {{ legal_contact_email }}\n"),
+        cla=jinja2.Template(
+            "CLA {{ company_legal_name }} {{ company_short_name }} {{ project_primary_license_reference }} {{ legal_contact_email }}\n"
+        ),
+        cla_explanations=jinja2.Template(
+            "CLA EXPLAIN {{ company_short_name }} {{ project_primary_license_reference }} {{ legal_contact_email }}\n"
+        ),
+        contributor_privacy_policy=jinja2.Template(
+            "PRIVACY {{ company_legal_name }} {{ company_short_name }} {{ legal_contact_email }}\n"
+        ),
+        repo_template=tmp_path,
+    )
+
+    write_wabbit_legal_files(context, project, write_test_license_copies=False, cleanup_layout=False)
+
+    assert not (tmp_path / "tests" / "LICENSE.md").exists()
+    assert (tmp_path / "NOTICE.md").is_file()
+    assert (tmp_path / "LICENSES" / "LicenseRef-Wabbit-Public-Test-License-1.1.md").is_file()
+
+
+def test_write_wabbit_legal_files_removes_managed_legal_docs_for_data_projects(tmp_path: Path) -> None:
+    project = DataProject(
+        path=tmp_path,
+        name="data-demo",
+        description="Data repository",
+        authors=[],
+        quarantine=False,
+        publish=False,
+        license="MIT",
+        github_repo=None,
+        ownership=OwnershipType.WABBIT,
+        version=None,
+        resolved_dependencies=[],
+    )
+    context = _FakeContext(
+        config=SimpleNamespace(
+            default_company_email="legal@example.com",
+            default_company_legal_name="Example Legal Co",
+            default_company_short_name="Example Co",
+        ),
+        licenses={"MIT": "MIT body for {{ project_name }}\n"},
+        coc=jinja2.Template("CODE OF CONDUCT {{ company_short_name }} {{ legal_contact_email }}\n"),
+        cla=jinja2.Template(
+            "CLA {{ company_legal_name }} {{ company_short_name }} {{ project_primary_license_reference }} {{ legal_contact_email }}\n"
+        ),
+        cla_explanations=jinja2.Template(
+            "CLA EXPLAIN {{ company_short_name }} {{ project_primary_license_reference }} {{ legal_contact_email }}\n"
+        ),
+        contributor_privacy_policy=jinja2.Template(
+            "PRIVACY {{ company_legal_name }} {{ company_short_name }} {{ legal_contact_email }}\n"
+        ),
+        repo_template=tmp_path,
+    )
+
+    (tmp_path / "LICENSE.md").write_text("stale license\n", encoding="utf-8")
+    (tmp_path / "NOTICE.md").write_text("stale notice\n", encoding="utf-8")
+    (tmp_path / "LICENSES" / "LicenseRef-Wabbit-Public-Test-License-1.1.md").parent.mkdir(parents=True)
+    (tmp_path / "LICENSES" / "LicenseRef-Wabbit-Public-Test-License-1.1.md").write_text(
+        "stale test license\n", encoding="utf-8"
+    )
+    (tmp_path / "legal" / "cla" / "v1.0.0").mkdir(parents=True)
+    (tmp_path / "legal" / "cla" / "v1.0.0" / "CLA.md").write_text("stale cla\n", encoding="utf-8")
+    (tmp_path / "legal" / "code-of-conduct" / "v1.0.0").mkdir(parents=True)
+    (tmp_path / "legal" / "code-of-conduct" / "v1.0.0" / "CODE_OF_CONDUCT.md").write_text(
+        "stale coc\n", encoding="utf-8"
+    )
+
+    write_wabbit_legal_files(context, project)
+
+    assert not (tmp_path / "LICENSE.md").exists()
+    assert not (tmp_path / "NOTICE.md").exists()
+    assert not (tmp_path / "LICENSES").exists()
+    assert not (tmp_path / "legal").exists()
+
+
+def test_write_wabbit_legal_files_preserves_source_legal_docs_for_opted_in_data_projects(tmp_path: Path) -> None:
+    project = DataProject(
+        path=tmp_path,
+        name="data-template",
+        description="Template repository",
+        authors=[],
+        quarantine=False,
+        publish=False,
+        license="MIT",
+        github_repo=None,
+        ownership=OwnershipType.WABBIT,
+        version=None,
+        resolved_dependencies=[],
+        preserve_legal_files=True,
+    )
+    context = _FakeContext(
+        config=SimpleNamespace(
+            default_company_email="legal@example.com",
+            default_company_legal_name="Example Legal Co",
+            default_company_short_name="Example Co",
+        ),
+        licenses={"MIT": "MIT body for {{ project_name }}\n"},
+        coc=jinja2.Template("CODE OF CONDUCT {{ company_short_name }} {{ legal_contact_email }}\n"),
+        cla=jinja2.Template(
+            "CLA {{ company_legal_name }} {{ company_short_name }} {{ project_primary_license_reference }} {{ legal_contact_email }}\n"
+        ),
+        cla_explanations=jinja2.Template(
+            "CLA EXPLAIN {{ company_short_name }} {{ project_primary_license_reference }} {{ legal_contact_email }}\n"
+        ),
+        contributor_privacy_policy=jinja2.Template(
+            "PRIVACY {{ company_legal_name }} {{ company_short_name }} {{ legal_contact_email }}\n"
+        ),
+        repo_template=tmp_path,
+    )
+
+    (tmp_path / "LICENSE.md").write_text("template license\n", encoding="utf-8")
+    (tmp_path / "legal" / "cla" / "v1.0.0").mkdir(parents=True)
+    (tmp_path / "legal" / "cla" / "v1.0.0" / "CLA.md").write_text("template cla\n", encoding="utf-8")
+    (tmp_path / "legal" / "code-of-conduct" / "v1.0.0").mkdir(parents=True)
+    (tmp_path / "legal" / "code-of-conduct" / "v1.0.0" / "CODE_OF_CONDUCT.md").write_text(
+        "template coc\n", encoding="utf-8"
+    )
+
+    write_wabbit_legal_files(context, project)
+
+    assert (tmp_path / "LICENSE.md").read_text(encoding="utf-8") == "template license\n"
+    assert (tmp_path / "legal" / "cla" / "v1.0.0" / "CLA.md").read_text(encoding="utf-8") == "template cla\n"
+    assert (
+        tmp_path / "legal" / "code-of-conduct" / "v1.0.0" / "CODE_OF_CONDUCT.md"
+    ).read_text(encoding="utf-8") == "template coc\n"
+    assert not (tmp_path / "NOTICE.md").exists()
+    assert not (tmp_path / "LICENSES").exists()

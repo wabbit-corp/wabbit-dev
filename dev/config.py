@@ -1021,6 +1021,7 @@ class DataProject(Project):
     docs_enabled: bool = False
     docs_system: str | None = None
     test_license: str | None = None
+    preserve_legal_files: bool = False
 
     def get_coarse_file_scope(self, path: Path) -> CoarseFileScope | None:
         # Check that path is contained in the project path
@@ -1158,6 +1159,7 @@ class DotnetProject(Project):
     language: DotnetLanguage
     project_kind: DotnetProjectKind
     sdk: str
+    output_type: str | None = None
     target_framework: str | None = None
     target_frameworks: list[str] = dataclasses.field(default_factory=list)
     assembly_name: str | None = None
@@ -1207,6 +1209,14 @@ class DotnetProject(Project):
         if self.package_id is not None:
             return self.package_id
         return self.effective_assembly_name
+
+    @property
+    def effective_output_type(self) -> str | None:
+        if self.output_type is not None:
+            return self.output_type
+        if self.project_kind in ("exe", "tool", "test"):
+            return "Exe"
+        return None
 
     @property
     def effective_project_extension(self) -> str:
@@ -2640,6 +2650,7 @@ def load_config(start: Path | None = None) -> Config:
                 copyright_holder=command.copyright_holder,
                 copyright_year_start=command.copyright_year_start,
                 test_license=command.testLicense,
+                preserve_legal_files=command.preserveLegalFiles if command.preserveLegalFiles is not None else False,
             )
             verify_project(data_project)
             register_project(project_id, data_project)
@@ -2968,6 +2979,7 @@ def load_config(start: Path | None = None) -> Config:
                 language=language,
                 project_kind=project_kind,
                 sdk=command.sdk or "Microsoft.NET.Sdk",
+                output_type=command.outputType,
                 target_framework=target_framework,
                 target_frameworks=target_frameworks,
                 assembly_name=command.assemblyName,

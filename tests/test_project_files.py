@@ -10,7 +10,7 @@ from dev.checks.project_files import (
     E_MISSING_LICENSE,
     GenericProjectStructureCheck,
 )
-from dev.config import OwnershipType
+from dev.config import DataProject, OwnershipType
 
 
 @dataclass
@@ -84,3 +84,45 @@ def test_generic_project_structure_check_marks_generated_repo_files_fixable_for_
     assert E_MISSING_CLA.id in fixable_ids
     assert E_MISSING_CLA_SIMPLE.id in fixable_ids
     assert E_MISSING_GITIGNORE.id in fixable_ids
+
+
+def test_generic_project_structure_check_does_not_require_license_or_cla_for_data_projects(tmp_path: Path) -> None:
+    repo_root = tmp_path / "data-demo"
+    repo_root.mkdir(parents=True)
+    (repo_root / "README.md").write_text(
+        "\n".join(
+            [
+                '<img src=".banner.png"/>',
+                '<img src="https://img.shields.io/example"/>',
+                "## 🚀 Installation",
+                "## 🚀 Usage",
+                "## Licensing",
+                "## Contributing",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (repo_root / ".gitignore").write_text("generated/\n", encoding="utf-8")
+
+    project = DataProject(
+        path=repo_root,
+        name="data-demo",
+        description="Data repository",
+        authors=[],
+        quarantine=False,
+        publish=False,
+        license="AGPL",
+        github_repo=None,
+        ownership=OwnershipType.WABBIT,
+        version=None,
+        resolved_dependencies=[],
+        project_id="data-demo",
+    )
+
+    issues = GenericProjectStructureCheck().check(repo_root, project)
+
+    issue_ids = {issue.issue_type.id for issue in issues}
+    assert E_MISSING_LICENSE.id not in issue_ids
+    assert E_MISSING_CLA.id not in issue_ids
+    assert E_MISSING_CLA_SIMPLE.id not in issue_ids

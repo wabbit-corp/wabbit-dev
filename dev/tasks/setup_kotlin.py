@@ -21,8 +21,8 @@ from dev.config import (
     DependencyTarget,
     GradleProject,
     GradleTargetSpec,
-    IntellijPlugin,
     IntellijPlatformLibrary,
+    IntellijPlugin,
     JarFileDependencyTarget,
     KmpAndroidLibrary,
     KmpJvmRuns,
@@ -1253,7 +1253,6 @@ def _gradle_workflow_context_for_projects(
         raise ValueError(f"{projects[0].name} requires github_repo for workflow generation")
 
     publish_projects = [project for project in projects if _is_gradle_release_publishable_project(project)]
-    maven_central_publish_projects = [project for project in projects if _is_maven_central_publishable_project(project)]
     publish_targets = {_gradle_release_publish_target(project) for project in publish_projects}
     if len(publish_targets) > 1:
         raise ValueError(f"Release workflow projects must share one publish target, got: {sorted(publish_targets)}")
@@ -1623,7 +1622,10 @@ def write_gradle_repo_root_workflows(
         dev.io.delete_if_exists(snapshot_publish_path)
 
     docs_workflows_owned_by_repo = (
-        docs_project is not None and dev.repo_docs.repo_docs_workflows_owned_by_repo(ctx.config, docs_project)
+        repo_definition is not None and dev.repo_docs.repo_definition_docs_workflows_owned_by_repo(
+            ctx.config,
+            repo_definition,
+        )
     )
     if (
         repo_github_repo is not None

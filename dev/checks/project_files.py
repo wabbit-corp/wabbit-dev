@@ -40,6 +40,7 @@ from dev.checks.base import (
     ProjectCheck,
 )
 from dev.config import Project
+from dev.project_layout import project_uses_managed_legal_files
 
 E_MISSING_README = IssueType("E_MISSING_README", "Missing README file")
 E_README_NO_BANNER = IssueType("E_README_NO_BANNER", "README file does not contain a project banner")
@@ -95,7 +96,7 @@ class GenericProjectStructureCheck(ProjectCheck):
                 if "## Contributing" not in readme_content:
                     issues.append(E_README_NO_CONTRIBUTING.at(readme_path))
 
-        if writes_repo_root_files:
+        if writes_repo_root_files and (project is None or project_uses_managed_legal_files(project)):
             if not (path / "LICENSE").exists() and not (path / "LICENSE.md").exists():
                 issue = E_MISSING_LICENSE.at(path)
                 if fix_generated_structure is not None:

@@ -10,8 +10,6 @@ from typing import Protocol, cast
 from urllib.parse import urlparse
 
 import jinja2
-from git import Repo
-from git.exc import BadName, GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion
@@ -21,6 +19,7 @@ import dev.io
 import dev.repo_docs
 from dev.config import Config, PythonProject
 from dev.generated_files import is_setup_managed_file, prepend_generated_comment, stamp_managed_text
+from dev.gitignore_files import merged_gitignore_text
 from dev.licenses import canonicalize_license_key, python_spdx_for_license
 from dev.messages import warning
 from dev.python_sdist_policy import (
@@ -508,41 +507,6 @@ def _default_deptry_map(project_path: Path, dependencies: list[str]) -> dict[str
     return {pkg: module for pkg, module in merged.items() if pkg in present_dependency_names}
 
 
-def _merge_gitignore_content(generated_content: str, existing_content: str | None) -> str:
-    generated_lines = generated_content.rstrip("\n").splitlines()
-    if not existing_content:
-        return "\n".join(generated_lines).rstrip("\n") + "\n"
-
-    merged_lines = list(generated_lines)
-    seen = set(generated_lines)
-    extra_lines = [line for line in existing_content.rstrip("\n").splitlines() if line not in seen]
-    if extra_lines:
-        if merged_lines and merged_lines[-1] != "":
-            merged_lines.append("")
-        merged_lines.extend(extra_lines)
-    return "\n".join(merged_lines).rstrip("\n") + "\n"
-
-
-def _load_tracked_gitignore(project_path: Path) -> str | None:
-    if not (project_path / ".git").exists():
-        return None
-
-    try:
-        repo = Repo(project_path)
-    except (InvalidGitRepositoryError, NoSuchPathError, OSError, ValueError):
-        return None
-
-    try:
-        if not repo.head.is_valid():
-            return None
-        tracked_gitignore = repo.git.show("HEAD:.gitignore")
-        return tracked_gitignore if isinstance(tracked_gitignore, str) else None
-    except (BadName, GitCommandError, OSError, ValueError):
-        return None
-    finally:
-        repo.close()
-
-
 def _load_existing_poetry_metadata(project_path: Path) -> dict[str, object]:
     pyproject_path = project_path / "pyproject.toml"
     if not pyproject_path.is_file():
@@ -599,8 +563,6 @@ def _normalize_python_license(project_license: str | None, existing_license: obj
 def render_python_pyproject(ctx: PythonSetupContext, project: PythonProject) -> str:
     defaults = ctx.config.python_defaults
     requires_python = project.requires_python or defaults.requires_python or ">=3.10"
-    if project.requires_python is None and defaults.requires_python is None:
-        warning(f"No requires-python set for {project.name}; defaulting to {requires_python}")
 
     line_length = _coerce_int_setting(
         defaults.line_length,
@@ -1066,18 +1028,12 @@ def _write_python_release_workflow(ctx: PythonSetupContext, project: PythonProje
 
 
 def setup_python_project(ctx: PythonSetupContext, project: PythonProject, interactive: bool = True) -> None:
-    existing_gitignore_path = project.path / ".gitignore"
-    existing_gitignore = (
-        existing_gitignore_path.read_text(encoding="utf-8") if existing_gitignore_path.is_file() else None
-    )
-    tracked_gitignore = _load_tracked_gitignore(project.path)
     generated_gitignore = clean_text(
         render_template(ctx.gitignore_template) + "\n" + render_template(ctx.python_gitignore_template)
     )
-    merged_gitignore = _merge_gitignore_content(generated_gitignore, tracked_gitignore)
     dev.io.write_text_file(
         project.path / ".gitignore",
-        _merge_gitignore_content(merged_gitignore, existing_gitignore),
+        merged_gitignore_text(project.path, generated_gitignore),
     )
 
     write_wabbit_legal_files(ctx, project)

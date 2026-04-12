@@ -31,6 +31,8 @@ from dev.project_layout import (
     cleanup_misplaced_legal_files,
     discover_test_license_roots,
     expected_test_license_copy_paths,
+    project_preserves_root_legal_files,
+    project_uses_managed_legal_files,
 )
 
 
@@ -340,8 +342,25 @@ def write_wabbit_legal_documents(ctx: CommonSetupContext, project: Project) -> N
     _cleanup_legacy_root_legal_paths(project)
 
 
-def write_wabbit_legal_files(ctx: CommonSetupContext, project: Project) -> None:
+def write_wabbit_legal_files(
+    ctx: CommonSetupContext,
+    project: Project,
+    *,
+    write_test_license_copies: bool = True,
+    cleanup_layout: bool = True,
+) -> None:
     if project.ownership != OwnershipType.WABBIT:
+        return
+
+    if not project_uses_managed_legal_files(project):
+        if project.path == project.effective_repo_root:
+            dev.io.delete_if_exists(_license_notice_path(project))
+            _cleanup_test_license_outputs(project)
+            if not project_preserves_root_legal_files(project):
+                dev.io.delete_if_exists(project.path / "LICENSE.md")
+                _cleanup_legacy_root_legal_paths(project)
+                cleanup_misplaced_legal_files(project.path, [project])
+        _cleanup_test_license_copies(project)
         return
 
     project_license = canonicalize_license_key(project.license)
@@ -385,19 +404,20 @@ def write_wabbit_legal_files(ctx: CommonSetupContext, project: Project) -> None:
         dev.io.delete_if_exists(_license_notice_path(project))
         _cleanup_test_license_outputs(project)
 
-    if test_license is not None:
+    if test_license is not None and write_test_license_copies:
         test_license_text = _resolve_license_text(ctx.licenses, test_license)
         if test_license_text is None:
             supported = ", ".join(sorted(ctx.licenses))
             error(f"Unknown test license key: {test_license}. Supported keys: {supported}")
             return
         _write_test_license_copies(project, render_project_license(test_license_text, project))
-    else:
+    elif write_test_license_copies:
         _cleanup_test_license_copies(project)
 
     if write_root_legal_files:
         write_wabbit_legal_documents(ctx, project)
-        cleanup_misplaced_legal_files(project.path, [project])
+        if cleanup_layout:
+            cleanup_misplaced_legal_files(project.path, [project])
 
 
 def write_banner(ctx: CommonSetupContext, project: Project) -> None:

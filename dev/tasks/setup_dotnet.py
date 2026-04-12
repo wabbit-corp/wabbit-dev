@@ -14,16 +14,20 @@ import dev.io
 import dev.repo_docs
 from dev.config import (
     Config,
-    Dependency,
-    DependencyTarget,
     DotnetProject,
     NugetDependencyTarget,
     Project,
     ProjectDependencyTarget,
     RepoDefinition,
 )
-from dev.dotnet import NUGET_V3_INDEX_URL, dotnet_project_file, fsharp_compile_entries, workspace_local_nuget_feed
+from dev.dotnet import (
+    dotnet_project_file,
+    fsharp_compile_entries,
+    preserved_msbuild_project_sections,
+    workspace_local_nuget_feed,
+)
 from dev.generated_files import is_setup_managed_file, prepend_generated_comment
+from dev.gitignore_files import merged_gitignore_text
 from dev.licenses import canonicalize_license_key
 from dev.tasks.setup_common import RepoSetupMode, clean_text, render_template, write_banner, write_wabbit_legal_files
 
@@ -36,6 +40,33 @@ _DEFAULT_TEST_PACKAGES: tuple[tuple[str, str], ...] = (
     ("xunit", "2.5.3"),
     ("xunit.runner.visualstudio", "2.5.3"),
 )
+_MANAGED_DOTNET_PROPERTY_NAMES: frozenset[str] = frozenset(
+    {
+        "TargetFramework",
+        "TargetFrameworks",
+        "OutputType",
+        "AssemblyName",
+        "RootNamespace",
+        "Version",
+        "PackageId",
+        "Description",
+        "Authors",
+        "PackageTags",
+        "RepositoryUrl",
+        "RepositoryType",
+        "PackageLicenseExpression",
+        "Nullable",
+        "ImplicitUsings",
+        "LangVersion",
+        "IsPackable",
+        "GenerateDocumentationFile",
+        "GenerateProgramFile",
+        "IsTestProject",
+        "PackAsTool",
+        "ToolCommandName",
+    }
+)
+_MANAGED_DOTNET_ITEM_NAMES: frozenset[str] = frozenset({"Compile", "PackageReference", "ProjectReference"})
 
 
 class DotnetSetupContext(Protocol):
@@ -56,21 +87,6 @@ class DotnetSetupContext(Protocol):
     python_docs_development_template: jinja2.Template
     python_contributing_template: jinja2.Template
     mode: RepoSetupMode
-
-
-def _merge_gitignore_content(generated_content: str, existing_content: str | None) -> str:
-    generated_lines = generated_content.rstrip("\n").splitlines()
-    if not existing_content:
-        return "\n".join(generated_lines).rstrip("\n") + "\n"
-
-    merged_lines = list(generated_lines)
-    seen = set(generated_lines)
-    extra_lines = [line for line in existing_content.rstrip("\n").splitlines() if line not in seen]
-    if extra_lines:
-        if merged_lines and merged_lines[-1] != "":
-            merged_lines.append("")
-        merged_lines.extend(extra_lines)
-    return "\n".join(merged_lines).rstrip("\n") + "\n"
 
 
 def _xml_escape(value: str) -> str:
@@ -131,12 +147,6 @@ def _implicit_usings_xml(project: DotnetProject) -> str | None:
     return "enable" if project.implicit_usings else "disable"
 
 
-def _output_type(project: DotnetProject) -> str | None:
-    if project.project_kind in ("exe", "tool", "test"):
-        return "Exe"
-    return None
-
-
 def _package_id_for_project(project: DotnetProject) -> str:
     return project.effective_package_id
 
@@ -144,30 +154,34 @@ def _package_id_for_project(project: DotnetProject) -> str:
 def _project_reference_dependencies(
     config: Config,
     project: DotnetProject,
+    *,
+    mode: RepoSetupMode,
 ) -> tuple[list[DotnetProject], list[tuple[str, str]]]:
     local_project_dependencies: list[DotnetProject] = []
     package_references: list[tuple[str, str]] = []
 
     for dependency in project.resolved_dependencies:
         target = dependency.target
-        if isinstance(target, NugetDependencyTarget):
-            package_references.append((target.package, target.version))
-            continue
-        if not isinstance(target, ProjectDependencyTarget):
-            raise ValueError(f"Unsupported .NET dependency target for {project.name}: {type(target).__name__}")
-
-        dependency_project = config.defined_projects[target.project]
-        if not isinstance(dependency_project, DotnetProject):
-            raise ValueError(
-                f".NET project {project.name} depends on non-.NET project {dependency_project.name}"
-            )
-        if dependency_project.effective_repo_root.resolve() == project.effective_repo_root.resolve():
-            local_project_dependencies.append(dependency_project)
-            continue
-        dependency_version = dependency_project.version
-        if dependency_version is None:
-            raise ValueError(f"Cross-repo .NET dependency {dependency_project.name} is missing a version")
-        package_references.append((_package_id_for_project(dependency_project), str(dependency_version)))
+        match target:
+            case NugetDependencyTarget(package=package, version=version):
+                package_references.append((package, version))
+            case ProjectDependencyTarget(project=dependency_project_id):
+                dependency_project = config.defined_projects[dependency_project_id]
+                if not isinstance(dependency_project, DotnetProject):
+                    raise ValueError(
+                        f".NET project {project.name} depends on non-.NET project {dependency_project.name}"
+                    )
+                dependency_project_file = dotnet_project_file(dependency_project)
+                same_repo = dependency_project.effective_repo_root.resolve() == project.effective_repo_root.resolve()
+                if same_repo or (mode == RepoSetupMode.LOCAL and dependency_project_file.is_file()):
+                    local_project_dependencies.append(dependency_project)
+                    continue
+                dependency_version = dependency_project.version
+                if dependency_version is None:
+                    raise ValueError(f"Cross-repo .NET dependency {dependency_project.name} is missing a version")
+                package_references.append((_package_id_for_project(dependency_project), str(dependency_version)))
+            case _:
+                raise ValueError(f"Unsupported .NET dependency target for {project.name}: {type(target).__name__}")
 
     if project.project_kind == "test":
         for package_name, version in _DEFAULT_TEST_PACKAGES:
@@ -242,7 +256,16 @@ def _package_metadata_items(project: DotnetProject, project_file: Path) -> list[
 def _render_project_xml(ctx: DotnetSetupContext, project: DotnetProject) -> str:
     project_file = dotnet_project_file(project)
     compile_entries = _compile_entries_for_fsharp(project)
-    local_project_dependencies, package_references = _project_reference_dependencies(ctx.config, project)
+    preserved_sections = preserved_msbuild_project_sections(
+        project_file,
+        managed_property_names=_MANAGED_DOTNET_PROPERTY_NAMES,
+        managed_item_names=_MANAGED_DOTNET_ITEM_NAMES,
+    )
+    local_project_dependencies, package_references = _project_reference_dependencies(
+        ctx.config,
+        project,
+        mode=ctx.mode,
+    )
     target_frameworks = project.effective_target_frameworks
 
     property_lines = ["  <PropertyGroup>"]
@@ -252,9 +275,9 @@ def _render_project_xml(ctx: DotnetSetupContext, project: DotnetProject) -> str:
         property_lines.append(
             f"    <TargetFrameworks>{_xml_escape(';'.join(target_frameworks))}</TargetFrameworks>"
         )
-    output_type = _output_type(project)
+    output_type = project.effective_output_type
     if output_type is not None:
-        property_lines.append(f"    <OutputType>{output_type}</OutputType>")
+        property_lines.append(f"    <OutputType>{_xml_escape(output_type)}</OutputType>")
     property_lines.append(f"    <AssemblyName>{_xml_escape(project.effective_assembly_name)}</AssemblyName>")
     property_lines.append(f"    <RootNamespace>{_xml_escape(project.effective_root_namespace)}</RootNamespace>")
     property_lines.append(f"    <Version>{_xml_escape(str(project.version) if project.version is not None else '0.0.0')}</Version>")
@@ -323,7 +346,15 @@ def _render_project_xml(ctx: DotnetSetupContext, project: DotnetProject) -> str:
         item_groups.extend(metadata_items)
         item_groups.append("  </ItemGroup>")
 
-    xml_lines = [f'<Project Sdk="{_xml_escape(project.sdk)}">', *property_lines, *item_groups, "</Project>"]
+    xml_lines = [
+        f'<Project Sdk="{_xml_escape(project.sdk)}">',
+        *property_lines,
+        *preserved_sections.property_groups,
+        *item_groups,
+        *preserved_sections.item_groups,
+        *preserved_sections.top_level_elements,
+        "</Project>",
+    ]
     body_lines = [
         "This file is generated from workspace configuration in root.clj.",
         "To change managed project metadata or dependencies, update root.clj and regenerate with:",
@@ -334,6 +365,13 @@ def _render_project_xml(ctx: DotnetSetupContext, project: DotnetProject) -> str:
             [
                 "For F# projects, the ordered <Compile Include=...> list is preserved from the checked-in fsproj",
                 "and remains the source of truth for compile order.",
+            ]
+        )
+    if preserved_sections.property_groups or preserved_sections.item_groups or preserved_sections.top_level_elements:
+        body_lines.extend(
+            [
+                "Unmanaged MSBuild items such as custom resources, linked files, and targets are preserved from the",
+                "checked-in project file until they are modeled explicitly in root.clj.",
             ]
         )
     return _generated_xml("\n".join(xml_lines) + "\n", body_lines=body_lines)
@@ -529,14 +567,10 @@ def _write_repo_root_files(
     root_path = repo_definition.path
     root_path.mkdir(parents=True, exist_ok=True)
 
-    existing_gitignore = None
-    gitignore_path = root_path / ".gitignore"
-    if gitignore_path.is_file():
-        existing_gitignore = gitignore_path.read_text(encoding="utf-8")
     generated_gitignore = clean_text(
         render_template(ctx.gitignore_template) + "\n" + render_template(ctx.dotnet_gitignore_template)
     )
-    dev.io.write_text_file(gitignore_path, _merge_gitignore_content(generated_gitignore, existing_gitignore))
+    dev.io.write_text_file(root_path / ".gitignore", merged_gitignore_text(root_path, generated_gitignore))
 
     global_json = clean_text(
         render_template(
@@ -600,14 +634,10 @@ def setup_dotnet_repo_root(
 
 
 def setup_dotnet_project(ctx: DotnetSetupContext, project: DotnetProject) -> None:
-    existing_gitignore = None
-    gitignore_path = project.path / ".gitignore"
-    if gitignore_path.is_file():
-        existing_gitignore = gitignore_path.read_text(encoding="utf-8")
     generated_gitignore = clean_text(
         render_template(ctx.gitignore_template) + "\n" + render_template(ctx.dotnet_gitignore_template)
     )
-    dev.io.write_text_file(gitignore_path, _merge_gitignore_content(generated_gitignore, existing_gitignore))
+    dev.io.write_text_file(project.path / ".gitignore", merged_gitignore_text(project.path, generated_gitignore))
 
     write_wabbit_legal_files(ctx, project)
     write_banner(ctx, project)

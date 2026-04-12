@@ -8,7 +8,7 @@ import jinja2
 import pathspec
 from pathspec.patterns.gitwildmatch import GitWildMatchPattern
 
-from dev.generated_files import is_setup_managed_text, managed_file_repair_guidance
+from dev.generated_files import is_setup_managed_text, managed_file_repair_guidance, verify_managed_text_integrity
 from dev.messages import info
 
 ##################################################################################################
@@ -146,9 +146,25 @@ def write_text_file(path: Path, content: str) -> None:
 
 
 def _generated_file_guidance(path: Path, new_content: str, old_content: str | None) -> str | None:
-    if not is_setup_managed_text(new_content) and not (old_content is not None and is_setup_managed_text(old_content)):
+    new_is_managed = is_setup_managed_text(new_content)
+    old_is_managed = old_content is not None and is_setup_managed_text(old_content)
+    if not new_is_managed and not old_is_managed:
         return None
-    return f"Generated managed file: {managed_file_repair_guidance(path)}"
+
+    guidance = managed_file_repair_guidance(path)
+    if old_content is None:
+        return None
+
+    if old_is_managed:
+        verification = verify_managed_text_integrity(old_content)
+        if verification.is_valid:
+            return None
+        return f"Overwriting manually edited managed file: {guidance}"
+
+    if new_is_managed:
+        return f"Replacing unmanaged file with managed file: {guidance}"
+
+    return None
 
 
 def write_text_file_if_missing(path: Path, content: str) -> bool:

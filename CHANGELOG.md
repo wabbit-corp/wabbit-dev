@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- add supported Gradle flags to generated settings/build templates for disabling `settings.local.gradle.kts` overlays and enabling `MavenLocal` fallback for `one.wabbit*` artifacts during local verification lanes
 - derive generated Paper Gradle plugin and `paperDevBundle` versions from config instead of hardcoded template defaults, and update the paperweight fallback to `2.0.0-beta.17`
 - let `dev setup` create or refresh a minimal repo-root `AGENTS.md` facts block without overwriting existing human-authored agent guidance
 - fix multiple check/runtime correctness issues across AI tooling, caching, banner generation, AGENTS block replacement, and file/check diagnostics (line numbers, locations, formatter failure classification, symlink/path validation, naming conventions, stale TODO aging, and issue deduplication)

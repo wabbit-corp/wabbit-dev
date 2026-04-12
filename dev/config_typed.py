@@ -863,6 +863,7 @@ class DataProjectCommand:
     repo: str | None = None
     ownership: str | None = None
     testLicense: str | None = None
+    preserveLegalFiles: bool | None = None
 
 
 @tag("premake")
@@ -944,6 +945,7 @@ class FsharpProjectCommand:
     targetFramework: str | None = None
     targetFrameworks: list[str] | None = None
     sdk: str | None = None
+    outputType: str | None = None
     assemblyName: str | None = None
     rootNamespace: str | None = None
     packageId: str | None = None
@@ -979,6 +981,7 @@ class CsharpProjectCommand:
     targetFramework: str | None = None
     targetFrameworks: list[str] | None = None
     sdk: str | None = None
+    outputType: str | None = None
     assemblyName: str | None = None
     rootNamespace: str | None = None
     packageId: str | None = None

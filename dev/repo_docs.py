@@ -230,6 +230,10 @@ def repo_docs_plan(config: Config, repo_definition: RepoDefinition) -> RepoDocsP
     )
 
 
+def repo_definition_docs_workflows_owned_by_repo(config: Config, repo_definition: RepoDefinition) -> bool:
+    return repo_docs_plan(config, repo_definition).needs_repo_workflows
+
+
 def standalone_project_repo_docs_plan(project: Project) -> RepoDocsPlan | None:
     match project:
         case GradleProject() if (
@@ -269,7 +273,7 @@ def repo_docs_workflows_owned_by_repo(config: Config, project: Project) -> bool:
     repo_definition = config.defined_repos.get(repo_id)
     if repo_definition is None:
         return False
-    return repo_docs_plan(config, repo_definition).needs_repo_workflows
+    return repo_definition_docs_workflows_owned_by_repo(config, repo_definition)
 
 
 def project_repo_docs_published_path(config: Config, project: Project) -> str | None:
@@ -310,6 +314,7 @@ __all__ = [
     "RepoDocsEntry",
     "RepoDocsPlan",
     "project_repo_docs_published_path",
+    "repo_definition_docs_workflows_owned_by_repo",
     "repo_docs_plan",
     "repo_docs_site_url",
     "repo_docs_workflows_owned_by_repo",
