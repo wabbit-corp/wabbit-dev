@@ -569,10 +569,15 @@ async def test_service_commands_bypass_argparse_with_typed_cli(monkeypatch: pyte
         called.append(("status", None))
         return 0
 
+    def fake_service_dashboard(*, interval_seconds: int = 60) -> int:
+        called.append(("dashboard", interval_seconds))
+        return 0
+
     monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
     monkeypatch.setattr(service_task, "service_start", fake_service_start)
     monkeypatch.setattr(service_task, "service_stop", fake_service_stop)
     monkeypatch.setattr(service_task, "service_status", fake_service_status)
+    monkeypatch.setattr(service_task, "service_dashboard", fake_service_dashboard)
 
     monkeypatch.setattr("sys.argv", ["dev.py", "service", "start", "--interval-seconds", "15"])
     start_result = await cli.async_main()
@@ -580,13 +585,17 @@ async def test_service_commands_bypass_argparse_with_typed_cli(monkeypatch: pyte
     monkeypatch.setattr("sys.argv", ["dev.py", "service", "status"])
     status_result = await cli.async_main()
 
+    monkeypatch.setattr("sys.argv", ["dev.py", "service", "dashboard", "--interval-seconds", "45"])
+    dashboard_result = await cli.async_main()
+
     monkeypatch.setattr("sys.argv", ["dev.py", "service", "stop"])
     stop_result = await cli.async_main()
 
     assert start_result == 0
     assert status_result == 0
+    assert dashboard_result == 0
     assert stop_result == 0
-    assert called == [("start", 15), ("status", None), ("stop", None)]
+    assert called == [("start", 15), ("status", None), ("dashboard", 45), ("stop", None)]
 
 
 @pytest.mark.asyncio
@@ -719,7 +728,7 @@ async def test_check_shortcuts_bypass_argparse_with_typed_cli(monkeypatch: pytes
     from dev.tasks import doctor as doctor_task
     from dev.tasks import spdx_headers as spdx_task
 
-    check_called: list[tuple[str | None, list[str] | None, bool, list[str]]] = []
+    check_called: list[tuple[str | None, list[str] | None, bool, list[str], bool]] = []
     list_called: list[bool] = []
     show_called: list[tuple[str, bool]] = []
     spdx_called: list[tuple[str | None, bool]] = []
@@ -731,8 +740,9 @@ async def test_check_shortcuts_bypass_argparse_with_typed_cli(monkeypatch: pytes
         fix: bool = False,
         *,
         bundles: list[str] | None = None,
+        json_output: bool = False,
     ) -> int:
-        check_called.append((project_or_dir_or_file, enabled_checks, fix, bundles or []))
+        check_called.append((project_or_dir_or_file, enabled_checks, fix, bundles or [], json_output))
         return 0
 
     def fake_list_checks(*, json_output: bool = False) -> int:
@@ -780,7 +790,7 @@ async def test_check_shortcuts_bypass_argparse_with_typed_cli(monkeypatch: pytes
     assert show_result == 0
     assert spdx_result == 0
     assert secrets_result == 0
-    assert check_called == [(".", ["spdx-header"], True, [])]
+    assert check_called == [(".", ["spdx-header"], True, [], False)]
     assert list_called == [True]
     assert show_called == [("spdx-header", True)]
     assert spdx_called == [(".", True)]

@@ -236,6 +236,10 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         pass
 
     @dataclass(frozen=True)
+    class ServiceDashboardRequest:
+        interval_seconds: int
+
+    @dataclass(frozen=True)
     class CommitRequest:
         targets: list[str]
         dry_run: bool
@@ -261,6 +265,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         selectors: list[str]
         bundles: list[str]
         fix: bool
+        json_output: bool
 
     @dataclass(frozen=True)
     class CheckListRequest:
@@ -403,6 +408,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         | ServiceStartRequest
         | ServiceStopRequest
         | ServiceStatusRequest
+        | ServiceDashboardRequest
         | CommitRequest
         | CommitVerifyRequest
         | PushRequest
@@ -870,6 +876,11 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return ["service", "stop"]
             case ServiceStatusRequest():
                 return ["service", "status"]
+            case ServiceDashboardRequest(interval_seconds=interval_seconds):
+                tokens = ["service", "dashboard"]
+                if interval_seconds != 60:
+                    tokens.extend(["--interval-seconds", str(interval_seconds)])
+                return tokens
             case CommitRequest(targets=targets, dry_run=dry_run):
                 tokens = ["commit"]
                 if dry_run:
@@ -907,10 +918,12 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                     tokens.append("--dry-run")
                 tokens.extend(targets)
                 return tokens
-            case CheckRunRequest(target=target, selectors=selectors, bundles=bundles, fix=fix):
+            case CheckRunRequest(target=target, selectors=selectors, bundles=bundles, fix=fix, json_output=json_output):
                 tokens = ["check"]
                 if fix:
                     tokens.append("--fix")
+                if json_output:
+                    tokens.append("--json")
                 for bundle_name in bundles:
                     tokens.extend(["--bundle", bundle_name])
                 for selector in selectors:
@@ -1233,6 +1246,9 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     def _service_start_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(ServiceStartRequest(interval_seconds=_int_value(values, "--interval-seconds", 60)))
 
+    def _service_dashboard_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        return succeed(ServiceDashboardRequest(interval_seconds=_int_value(values, "--interval-seconds", 60)))
+
     def _commit_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(
             CommitRequest(
@@ -1294,6 +1310,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 selectors=selectors,
                 bundles=_option_string_list(values, "--bundle"),
                 fix=_bool_value(values, "--fix"),
+                json_output=_bool_value(values, "--json"),
             )
         )
 
@@ -1438,6 +1455,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return succeed(ServiceStopRequest())
             case ["service", "status"]:
                 return succeed(ServiceStatusRequest())
+            case ["service", "dashboard"]:
+                return _service_dashboard_decode(values)
             case ["commit"]:
                 return _commit_decode(values)
             case ["commit", "verify"]:
@@ -1989,18 +2008,31 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     )
     service_stop_command = Command(
         name="stop",
-        header="Stop the macOS repo monitor menubar process for this workspace.",
+        header="Stop the workspace monitor and dashboard processes.",
         decode=_unused_decode,
     )
     service_status_command = Command(
         name="status",
-        header="Show the current repo monitor process and its last snapshot.",
+        header="Show the current monitor and dashboard processes for this workspace.",
+        decode=_unused_decode,
+    )
+    service_dashboard_command = Command(
+        name="dashboard",
+        header="Start or open the localhost dashboard for this workspace.",
+        options=(
+            option(
+                Argument.integer(),
+                long="interval-seconds",
+                help="Polling interval for the dashboard repo-status loop.",
+                meta_var="SECONDS",
+            ),
+        ),
         decode=_unused_decode,
     )
     service_command = Command(
         name="service",
-        header="Run the workspace repo monitor service.",
-        subcommands=(service_start_command, service_stop_command, service_status_command),
+        header="Run the workspace monitor and dashboard services.",
+        subcommands=(service_start_command, service_stop_command, service_status_command, service_dashboard_command),
         decode=_unused_decode,
         help_on_empty=True,
     )
@@ -2089,6 +2121,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 meta_var="CHECK",
             ),
             flag(long="fix", help="Apply fixes for issues that provide an automatic fix callback."),
+            flag(long="json", help="Emit a machine-readable check report instead of text."),
         ),
         positionals=(
             positional(
@@ -2313,6 +2346,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             f"  {prog} doctor\n"
             f"  {prog} where\n"
             f"  {prog} service start\n"
+            f"  {prog} service dashboard\n"
             f"  {prog} completion bash\n"
             f"  {prog} setup --local app-datatron\n"
             f"  {prog} build app-datatron\n"
@@ -2593,6 +2627,10 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 from dev.tasks.service import service_status
 
                 return service_status()
+            case ServiceDashboardRequest(interval_seconds=interval_seconds):
+                from dev.tasks.service import service_dashboard
+
+                return service_dashboard(interval_seconds=interval_seconds)
             case CommitRequest(targets=targets, dry_run=dry_run):
                 if not _preflight("commit", targets, dry_run=dry_run):
                     return 2
@@ -2629,12 +2667,24 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 exit_code = push(targets, dry_run=dry_run)
                 _print_next_steps("push", targets=targets, dry_run=dry_run)
                 return exit_code
-            case CheckRunRequest(target=target, selectors=selectors, bundles=bundles, fix=fix):
+            case CheckRunRequest(
+                target=target,
+                selectors=selectors,
+                bundles=bundles,
+                fix=fix,
+                json_output=json_output,
+            ):
                 if not _preflight("check/run"):
                     return 2
                 from dev.tasks.check import check_main
 
-                return check_main(target, selectors if selectors else None, fix, bundles=bundles)
+                return check_main(
+                    target,
+                    selectors if selectors else None,
+                    fix,
+                    bundles=bundles,
+                    json_output=json_output,
+                )
             case CheckListRequest(json_output=json_output):
                 if not _preflight("check/list"):
                     return 2

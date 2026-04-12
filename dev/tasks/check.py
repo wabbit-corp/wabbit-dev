@@ -35,6 +35,7 @@ from dev.checks.root_paths import E_GITIGNORE_WITHOUT_REPO
 from dev.config import Config, Project, find_workspace_root, load_config
 from dev.discoverability import did_you_mean_suffix, unknown_name_message
 from dev.ignore_files import IgnoreMatcher, read_checkignore_issue_directives
+from dev.json_types import JSONObject, JSONValue
 from dev.messages import accent, command_text, error, heading, info, style, warning
 from dev.project_layout import build_check_ignore_matcher
 from dev.repo_resolution import configured_repo_targets, inferred_project_targets, resolve_check_paths
@@ -624,12 +625,21 @@ def check_main(
     fix: bool = False,
     *,
     bundles: Sequence[str] = (),
+    json_output: bool = False,
 ) -> int:
     """
     Main function to run checks on the project.
     """
 
     lookup_target = project_or_dir_or_file or "."
+    payload_issues: list[JSONObject] = []
+    payload: JSONObject = {
+        "target": lookup_target,
+        "checkSelectors": list(enabled_checks or []),
+        "bundles": list(bundles),
+        "fix": fix,
+        "issues": payload_issues,
+    }
     config = _load_optional_config(lookup_target)
     if config is None:
         warning("No config file found. Some checks may not have sufficient context to run.")
@@ -651,6 +661,7 @@ def check_main(
 
     root_paths = [path.resolve() for path in resolve_check_paths(effective_target, config=config)]
 
+    payload["resolvedPaths"] = [str(path.resolve()) for path in root_paths]
     for path in root_paths:
         if not path.exists():
             suggestion = did_you_mean_suffix(effective_target, _config_target_choices(config))
@@ -667,6 +678,7 @@ def check_main(
         if not selected_check_names:
             raise ValueError("No loaded checks matched the selected bundles or check selectors.")
         all_checks = {name: check for name, check in all_checks.items() if name in set(selected_check_names)}
+    payload["selectedChecks"] = sorted(all_checks)
 
     TCheck = TypeVar("TCheck", bound=Check)
 
@@ -901,6 +913,67 @@ def check_main(
 
         _severity_reporter(issue.issue_type.severity)(" ".join(parts))
 
+    def issue_payload(issue: Issue, *, fixed: bool) -> JSONObject:
+        location_payload: JSONObject | None = None
+        if issue.location is not None:
+            lines_payload: list[str] = []
+            if issue.location.lines is not None:
+                for line_range in issue.location.lines.ranges:
+                    start_line, end_line = line_range
+                    if start_line == end_line:
+                        lines_payload.append(str(start_line))
+                    else:
+                        lines_payload.append(f"{start_line}-{end_line}")
+            location_payload = {
+                "path": str(issue.location.path.resolve()),
+                "relativePath": issue_relative_path(issue.location.path),
+                "lines": lines_payload,
+            }
+
+        data_payload: JSONObject = {}
+        if issue.data is not None:
+            for key, value in issue.data.items():
+                if isinstance(value, Path):
+                    data_payload[key] = value.as_posix()
+                elif value is None or isinstance(value, (bool, int, float, str)):
+                    data_payload[key] = value
+                elif isinstance(value, list):
+                    rendered_values: list[JSONValue] = []
+                    for item in value:
+                        if item is None or isinstance(item, (bool, int, float, str)):
+                            rendered_values.append(item)
+                        elif isinstance(item, Path):
+                            rendered_values.append(item.as_posix())
+                        else:
+                            rendered_values.append(str(item))
+                    data_payload[key] = rendered_values
+                elif isinstance(value, dict):
+                    rendered_mapping: JSONObject = {}
+                    for nested_key, nested_value in value.items():
+                        if not isinstance(nested_key, str):
+                            continue
+                        if nested_value is None or isinstance(nested_value, (bool, int, float, str)):
+                            rendered_mapping[nested_key] = nested_value
+                        elif isinstance(nested_value, Path):
+                            rendered_mapping[nested_key] = nested_value.as_posix()
+                        else:
+                            rendered_mapping[nested_key] = str(nested_value)
+                    data_payload[key] = rendered_mapping
+                else:
+                    data_payload[key] = str(value)
+
+        payload_entry: JSONObject = {
+            "id": issue.issue_type.id,
+            "severity": issue.issue_type.severity.value,
+            "message": issue_message(issue, report_format_error=False),
+            "fixable": issue.fix is not None,
+            "fixed": fixed,
+            "data": data_payload,
+        }
+        if location_payload is not None:
+            payload_entry["location"] = location_payload
+        return payload_entry
+
     def handle_issue(issue: Issue | IssueList | list[Issue]) -> None:
         nonlocal has_errors
         if isinstance(issue, IssueList) or isinstance(issue, list):
@@ -918,6 +991,8 @@ def check_main(
             info("Fixing")
             issue.fix()
             was_fixed = True
+
+        payload_issues.append(issue_payload(issue, fixed=was_fixed))
 
         if _is_error_issue(issue) and not was_fixed:
             has_errors = True
@@ -1129,7 +1204,18 @@ def check_main(
         else:
             run_without_recursive_walk(path)
 
-    return 1 if has_errors else 0
+    payload["summary"] = {
+        "total": len(payload_issues),
+        "error": sum(1 for issue in payload_issues if issue.get("severity") in {"error", "critical"}),
+        "warning": sum(1 for issue in payload_issues if issue.get("severity") == "warning"),
+        "info": sum(1 for issue in payload_issues if issue.get("severity") == "info"),
+        "fixed": sum(1 for issue in payload_issues if issue.get("fixed") is True),
+    }
+    payload["status"] = "error" if has_errors else "success"
+    exit_code = 1 if has_errors else 0
+    if json_output:
+        print(json.dumps(payload, indent=2))
+    return exit_code
 
 
 if __name__ == "__main__":

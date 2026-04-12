@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
@@ -28,6 +29,11 @@ class MonitorRepoState:
     untracked_count: int
     error: str | None = None
     dirty_since: datetime | None = None
+    branch_name: str | None = None
+    upstream_name: str | None = None
+    ahead_count: int | None = None
+    behind_count: int | None = None
+    tracking_refreshed_at: datetime | None = None
 
     @property
     def is_dirty(self) -> bool:
@@ -43,6 +49,13 @@ class MonitorRepoState:
             "dirty": self.is_dirty,
             "dirtySince": self.dirty_since.isoformat() if self.dirty_since is not None else None,
             "error": self.error,
+            "branchName": self.branch_name,
+            "upstreamName": self.upstream_name,
+            "aheadCount": self.ahead_count,
+            "behindCount": self.behind_count,
+            "trackingRefreshedAt": (
+                self.tracking_refreshed_at.isoformat() if self.tracking_refreshed_at is not None else None
+            ),
         }
 
 
@@ -77,8 +90,12 @@ class ServicePaths:
     root: Path
     pid_file: Path
     state_file: Path
+    dashboard_state_file: Path
     stdout_log: Path
     stderr_log: Path
+    dashboard_pid_file: Path
+    dashboard_stdout_log: Path
+    dashboard_stderr_log: Path
 
 
 @dataclass(frozen=True)
@@ -97,6 +114,34 @@ class ServicePid:
         }
 
 
+@dataclass(frozen=True)
+class DashboardPid:
+    pid: int
+    workspace_root: Path
+    started_at: datetime
+    interval_seconds: int
+    port: int
+
+    def to_json(self) -> JSONObject:
+        return {
+            "pid": self.pid,
+            "workspaceRoot": str(self.workspace_root),
+            "startedAt": self.started_at.isoformat(),
+            "intervalSeconds": self.interval_seconds,
+            "port": self.port,
+        }
+
+
+@dataclass(frozen=True)
+class DashboardSnapshotSummary:
+    workspace_root: Path
+    workspace_name: str
+    updated_at: datetime
+    dirty_repo_count: int
+    publishable_repo_count: int
+    repo_count: int
+
+
 def _now_utc() -> datetime:
     return datetime.now(UTC)
 
@@ -104,14 +149,22 @@ def _now_utc() -> datetime:
 def _workspace_service_root(workspace_root: Path) -> Path:
     digest = sha1(str(workspace_root.resolve()).encode("utf-8")).hexdigest()[:12]
     workspace_name = workspace_root.resolve().name or "workspace"
-    return (
-        Path.home()
-        / "Library"
-        / "Application Support"
-        / "dev"
-        / "service"
-        / f"{workspace_name}-{digest}"
-    )
+    return _service_storage_root() / f"{workspace_name}-{digest}"
+
+
+def _service_storage_root() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "dev" / "service"
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "dev" / "service"
+        return Path.home() / "AppData" / "Roaming" / "dev" / "service"
+
+    xdg_state_home = os.environ.get("XDG_STATE_HOME")
+    if xdg_state_home:
+        return Path(xdg_state_home) / "dev" / "service"
+    return Path.home() / ".local" / "state" / "dev" / "service"
 
 
 def service_paths_for_workspace(workspace_root: Path) -> ServicePaths:
@@ -120,8 +173,12 @@ def service_paths_for_workspace(workspace_root: Path) -> ServicePaths:
         root=root,
         pid_file=root / "monitor.pid.json",
         state_file=root / "monitor.state.json",
+        dashboard_state_file=root / "dashboard.state.json",
         stdout_log=root / "monitor.stdout.log",
         stderr_log=root / "monitor.stderr.log",
+        dashboard_pid_file=root / "dashboard.pid.json",
+        dashboard_stdout_log=root / "dashboard.stdout.log",
+        dashboard_stderr_log=root / "dashboard.stderr.log",
     )
 
 
@@ -160,6 +217,39 @@ def remove_service_pid(paths: ServicePaths) -> None:
         paths.pid_file.unlink()
 
 
+def write_dashboard_pid(paths: ServicePaths, pid_info: DashboardPid) -> None:
+    ensure_service_dir(paths)
+    paths.dashboard_pid_file.write_text(json.dumps(pid_info.to_json(), indent=2) + "\n", encoding="utf-8")
+
+
+def load_dashboard_pid(paths: ServicePaths) -> DashboardPid | None:
+    if not paths.dashboard_pid_file.is_file():
+        return None
+    raw = json.loads(paths.dashboard_pid_file.read_text(encoding="utf-8"))
+    match raw:
+        case {
+            "pid": int(pid),
+            "workspaceRoot": str(workspace_root),
+            "startedAt": str(started_at),
+            "intervalSeconds": int(interval_seconds),
+            "port": int(port),
+        }:
+            return DashboardPid(
+                pid=pid,
+                workspace_root=Path(workspace_root),
+                started_at=datetime.fromisoformat(started_at),
+                interval_seconds=interval_seconds,
+                port=port,
+            )
+        case _:
+            return None
+
+
+def remove_dashboard_pid(paths: ServicePaths) -> None:
+    if paths.dashboard_pid_file.exists():
+        paths.dashboard_pid_file.unlink()
+
+
 def process_is_alive(pid: int) -> bool:
     if pid <= 0:
         return False
@@ -176,6 +266,14 @@ def cleanup_stale_service_pid(paths: ServicePaths) -> None:
         return
     if not process_is_alive(pid_info.pid):
         remove_service_pid(paths)
+
+
+def cleanup_stale_dashboard_pid(paths: ServicePaths) -> None:
+    pid_info = load_dashboard_pid(paths)
+    if pid_info is None:
+        return
+    if not process_is_alive(pid_info.pid):
+        remove_dashboard_pid(paths)
 
 
 def terminate_process(pid: int) -> None:
@@ -214,7 +312,12 @@ def load_monitor_snapshot(paths: ServicePaths) -> MonitorSnapshot | None:
                         "untrackedCount": int(untracked_count),
                         "dirtySince": dirty_since_raw,
                         "error": error_raw,
-                    }:
+                    } as repo_payload:
+                        branch_name_raw = repo_payload.get("branchName")
+                        upstream_name_raw = repo_payload.get("upstreamName")
+                        ahead_count_raw = repo_payload.get("aheadCount")
+                        behind_count_raw = repo_payload.get("behindCount")
+                        tracking_refreshed_at_raw = repo_payload.get("trackingRefreshedAt")
                         dirty_since: datetime | None
                         match dirty_since_raw:
                             case None:
@@ -233,6 +336,51 @@ def load_monitor_snapshot(paths: ServicePaths) -> MonitorSnapshot | None:
                             case _:
                                 error_text = None
 
+                        branch_name: str | None
+                        match branch_name_raw:
+                            case None:
+                                branch_name = None
+                            case str(branch_name_value):
+                                branch_name = branch_name_value
+                            case _:
+                                branch_name = None
+
+                        upstream_name: str | None
+                        match upstream_name_raw:
+                            case None:
+                                upstream_name = None
+                            case str(upstream_name_value):
+                                upstream_name = upstream_name_value
+                            case _:
+                                upstream_name = None
+
+                        ahead_count: int | None
+                        match ahead_count_raw:
+                            case None:
+                                ahead_count = None
+                            case int(ahead_count_value):
+                                ahead_count = ahead_count_value
+                            case _:
+                                ahead_count = None
+
+                        behind_count: int | None
+                        match behind_count_raw:
+                            case None:
+                                behind_count = None
+                            case int(behind_count_value):
+                                behind_count = behind_count_value
+                            case _:
+                                behind_count = None
+
+                        tracking_refreshed_at: datetime | None
+                        match tracking_refreshed_at_raw:
+                            case None:
+                                tracking_refreshed_at = None
+                            case str(tracking_refreshed_at_text):
+                                tracking_refreshed_at = datetime.fromisoformat(tracking_refreshed_at_text)
+                            case _:
+                                tracking_refreshed_at = None
+
                         repos.append(
                             MonitorRepoState(
                                 name=name,
@@ -242,6 +390,11 @@ def load_monitor_snapshot(paths: ServicePaths) -> MonitorSnapshot | None:
                                 untracked_count=untracked_count,
                                 error=error_text,
                                 dirty_since=dirty_since,
+                                branch_name=branch_name,
+                                upstream_name=upstream_name,
+                                ahead_count=ahead_count,
+                                behind_count=behind_count,
+                                tracking_refreshed_at=tracking_refreshed_at,
                             )
                         )
                     case _:
@@ -260,6 +413,31 @@ def load_monitor_snapshot(paths: ServicePaths) -> MonitorSnapshot | None:
                 error_repo_count=error_repo_count,
                 color=color,
                 repos=tuple(repos),
+            )
+        case _:
+            return None
+
+
+def load_dashboard_snapshot_summary(paths: ServicePaths) -> DashboardSnapshotSummary | None:
+    if not paths.dashboard_state_file.is_file():
+        return None
+    raw = json.loads(paths.dashboard_state_file.read_text(encoding="utf-8"))
+    match raw:
+        case {
+            "workspaceRoot": str(workspace_root),
+            "workspaceName": str(workspace_name),
+            "updatedAt": str(updated_at),
+            "dirtyRepoCount": int(dirty_repo_count),
+            "publishableRepoCount": int(publishable_repo_count),
+            "repos": list(repos_raw),
+        }:
+            return DashboardSnapshotSummary(
+                workspace_root=Path(workspace_root),
+                workspace_name=workspace_name,
+                updated_at=datetime.fromisoformat(updated_at),
+                dirty_repo_count=dirty_repo_count,
+                publishable_repo_count=publishable_repo_count,
+                repo_count=len(repos_raw),
             )
         case _:
             return None
@@ -312,6 +490,11 @@ def build_monitor_snapshot(
                 untracked_count=repo_status.untracked_count,
                 error=repo_status.error,
                 dirty_since=dirty_since,
+                branch_name=repo_status.tracking.branch_name if repo_status.tracking is not None else None,
+                upstream_name=repo_status.tracking.upstream_name if repo_status.tracking is not None else None,
+                ahead_count=repo_status.tracking.ahead_count if repo_status.tracking is not None else None,
+                behind_count=repo_status.tracking.behind_count if repo_status.tracking is not None else None,
+                tracking_refreshed_at=repo_status.tracking_refreshed_at,
             )
         )
 
@@ -351,6 +534,16 @@ def format_local_timestamp(timestamp: datetime, *, timezone: tzinfo | None = Non
     return localized.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
+def format_tracking_status(repo: MonitorRepoState) -> str:
+    branch_name = repo.branch_name or "HEAD"
+    if repo.upstream_name is None:
+        return f"{branch_name} (no upstream)"
+
+    ahead_count = repo.ahead_count if repo.ahead_count is not None else 0
+    behind_count = repo.behind_count if repo.behind_count is not None else 0
+    return f"{branch_name} vs {repo.upstream_name}: ahead {ahead_count}, behind {behind_count}"
+
+
 def repo_check_spacing_seconds(interval_seconds: int, repo_count: int) -> float:
     normalized_interval = max(1, interval_seconds)
     normalized_repo_count = max(1, repo_count)
@@ -372,21 +565,29 @@ __all__ = [
     "MonitorRepoState",
     "MonitorSnapshot",
     "STALE_DIRTY_AFTER",
+    "DashboardPid",
+    "DashboardSnapshotSummary",
     "ServicePaths",
     "ServicePid",
     "build_monitor_snapshot",
+    "cleanup_stale_dashboard_pid",
     "cleanup_stale_service_pid",
     "ensure_service_dir",
     "format_dirty_age",
     "format_local_timestamp",
+    "format_tracking_status",
     "icon_for_snapshot",
+    "load_dashboard_pid",
+    "load_dashboard_snapshot_summary",
     "load_monitor_snapshot",
     "load_service_pid",
     "process_is_alive",
     "repo_check_spacing_seconds",
+    "remove_dashboard_pid",
     "remove_service_pid",
     "service_paths_for_workspace",
     "terminate_process",
+    "write_dashboard_pid",
     "write_monitor_snapshot",
     "write_service_pid",
 ]

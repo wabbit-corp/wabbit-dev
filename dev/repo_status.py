@@ -4,12 +4,22 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+import subprocess
 
 from git import Repo
-from git.exc import InvalidGitRepositoryError, NoSuchPathError
+from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 
 from dev.config import Config
+from dev.git_env import git_subprocess_env
 from dev.repo_resolution import ResolvedRepoTarget, configured_repo_targets, resolve_repo_targets
+
+
+@dataclass(frozen=True)
+class RepoTrackingState:
+    branch_name: str | None = None
+    upstream_name: str | None = None
+    ahead_count: int | None = None
+    behind_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -21,6 +31,8 @@ class RepoStatusRecord:
     untracked_files: tuple[str, ...]
     oldest_dirty_timestamp: datetime | None = None
     error: str | None = None
+    tracking: RepoTrackingState | None = None
+    tracking_refreshed_at: datetime | None = None
 
     @property
     def is_clean(self) -> bool:
@@ -43,14 +55,68 @@ class RepoStatusRecord:
         return len(self.untracked_files)
 
 
-def status_lists(repo: Repo) -> tuple[list[str], list[str], list[str]]:
+@dataclass(frozen=True)
+class _StatusSummary:
+    staged: tuple[str, ...]
+    unstaged: tuple[str, ...]
+    untracked: tuple[str, ...]
+    tracking: RepoTrackingState
+
+
+def _parse_tracking_header(header: str) -> RepoTrackingState:
+    metadata = header.removeprefix("## ").strip()
+    if not metadata:
+        return RepoTrackingState()
+
+    branch_segment, separator, status_segment = metadata.partition(" [")
+    branch_name: str | None = None
+    upstream_name: str | None = None
+
+    if branch_segment != "HEAD (no branch)":
+        branch_text, upstream_separator, upstream_text = branch_segment.partition("...")
+        branch_name = branch_text or None
+        if upstream_separator:
+            upstream_name = upstream_text or None
+
+    ahead_count: int | None = None
+    behind_count: int | None = None
+
+    if separator and status_segment.endswith("]"):
+        for status_part in status_segment[:-1].split(", "):
+            direction, _, count_text = status_part.partition(" ")
+            match direction:
+                case "ahead":
+                    try:
+                        ahead_count = int(count_text)
+                    except ValueError:
+                        ahead_count = None
+                case "behind":
+                    try:
+                        behind_count = int(count_text)
+                    except ValueError:
+                        behind_count = None
+                case _:
+                    continue
+
+    return RepoTrackingState(
+        branch_name=branch_name,
+        upstream_name=upstream_name,
+        ahead_count=ahead_count,
+        behind_count=behind_count,
+    )
+
+
+def _parse_status_summary(porcelain: str) -> _StatusSummary:
     staged: list[str] = []
     unstaged: list[str] = []
-    untracked = sorted(repo.untracked_files)
+    untracked: list[str] = []
+    tracking = RepoTrackingState()
 
-    porcelain = repo.git.status("--porcelain=1", "--untracked-files=all")
     for raw_line in porcelain.splitlines():
         if not raw_line:
+            continue
+        if raw_line.startswith("## "):
+            tracking = _parse_tracking_header(raw_line)
             continue
         status = raw_line[:2]
         path_text = raw_line[3:] if len(raw_line) > 3 else ""
@@ -60,13 +126,67 @@ def status_lists(repo: Repo) -> tuple[list[str], list[str], list[str]]:
         if not path_text:
             continue
         if status == "??":
+            untracked.append(path_text)
             continue
         if status[0] != " ":
             staged.append(path_text)
         if status[1] != " ":
             unstaged.append(path_text)
 
-    return sorted(dict.fromkeys(staged)), sorted(dict.fromkeys(unstaged)), untracked
+    return _StatusSummary(
+        staged=tuple(sorted(dict.fromkeys(staged))),
+        unstaged=tuple(sorted(dict.fromkeys(unstaged))),
+        untracked=tuple(sorted(dict.fromkeys(untracked))),
+        tracking=tracking,
+    )
+
+
+def status_lists(repo: Repo) -> tuple[list[str], list[str], list[str]]:
+    summary = _parse_status_summary(repo.git.status("--branch", "--porcelain=1", "--untracked-files=all"))
+    return list(summary.staged), list(summary.unstaged), list(summary.untracked)
+
+
+def local_tracking_state(repo: Repo) -> RepoTrackingState:
+    try:
+        summary = _parse_status_summary(repo.git.status("--branch", "--porcelain=1", "--untracked-files=no"))
+        return summary.tracking
+    except GitCommandError:
+        return RepoTrackingState()
+
+
+def refresh_remote_tracking(
+    target: ResolvedRepoTarget,
+    *,
+    config: Config,
+    timeout_seconds: int = 20,
+) -> bool:
+    try:
+        repo = Repo(target.path, search_parent_directories=True)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        return False
+
+    try:
+        remote_names = [remote.name for remote in repo.remotes]
+    finally:
+        repo.close()
+
+    remote_name = "origin" if "origin" in remote_names else (remote_names[0] if remote_names else None)
+    if remote_name is None:
+        return False
+
+    try:
+        result = subprocess.run(
+            ["git", "fetch", "--prune", "--quiet", remote_name],
+            cwd=target.path,
+            env=git_subprocess_env(config),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return result.returncode == 0
 
 
 def oldest_dirty_timestamp_for_paths(repo_root: Path, relative_paths: Sequence[str]) -> datetime | None:
@@ -128,17 +248,16 @@ def collect_repo_status_record(target: ResolvedRepoTarget) -> RepoStatusRecord:
             )
 
         repo_root = Path(working_tree_dir).resolve()
-        is_dirty = repo.is_dirty(index=True, working_tree=True, untracked_files=True, submodules=False)
-        if is_dirty:
-            staged_changes, unstaged_changes, untracked_files = status_lists(repo)
+        summary = _parse_status_summary(repo.git.status("--branch", "--porcelain=1", "--untracked-files=all"))
+        staged_changes = list(summary.staged)
+        unstaged_changes = list(summary.unstaged)
+        untracked_files = list(summary.untracked)
+        if staged_changes or unstaged_changes or untracked_files:
             oldest_dirty_timestamp = oldest_dirty_timestamp_for_paths(
                 repo_root,
                 [*staged_changes, *unstaged_changes, *untracked_files],
             )
         else:
-            staged_changes = []
-            unstaged_changes = []
-            untracked_files = []
             oldest_dirty_timestamp = None
         return RepoStatusRecord(
             name=target.name,
@@ -147,6 +266,7 @@ def collect_repo_status_record(target: ResolvedRepoTarget) -> RepoStatusRecord:
             unstaged_changes=tuple(unstaged_changes),
             untracked_files=tuple(untracked_files),
             oldest_dirty_timestamp=oldest_dirty_timestamp,
+            tracking=summary.tracking,
         )
     finally:
         repo.close()
@@ -162,9 +282,12 @@ def collect_repo_status_records(
 
 
 __all__ = [
+    "RepoTrackingState",
     "RepoStatusRecord",
     "collect_repo_status_record",
     "collect_repo_status_records",
+    "local_tracking_state",
     "oldest_dirty_timestamp_for_paths",
+    "refresh_remote_tracking",
     "status_lists",
 ]
