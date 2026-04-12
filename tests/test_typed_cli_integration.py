@@ -201,6 +201,27 @@ async def test_check_config_bypasses_argparse_with_typed_cli(monkeypatch: pytest
 
 
 @pytest.mark.asyncio
+async def test_config_cut_bypasses_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import config_cut as config_cut_task
+
+    called: list[tuple[str, list[str]]] = []
+
+    def fake_config_cut(output_path: str, requested_targets: list[str] | None = None) -> list[str]:
+        called.append((output_path, list(requested_targets or [])))
+        return list(requested_targets or [])
+
+    monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
+    monkeypatch.setattr(config_cut_task, "config_cut", fake_config_cut)
+    monkeypatch.setattr("sys.argv", ["dev.py", "config", "cut", "subset.clj", "app-wabbit-dev"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [("subset.clj", ["app-wabbit-dev"])]
+
+
+@pytest.mark.asyncio
 async def test_install_commands_bypass_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     from pathlib import Path
 

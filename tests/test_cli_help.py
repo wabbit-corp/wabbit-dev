@@ -23,6 +23,8 @@ async def test_root_help_includes_command_summaries(
     assert "Install local developer entrypoints and shell integrations." in output
     assert "doctor" in output
     assert "Diagnose workspace, toolchain, and credential readiness." in output
+    assert "config" in output
+    assert "Validate or extract workspace configuration files." in output
     assert "verify" in output
     assert "Run slower workflow-oriented verification commands." in output
     assert "where" in output
@@ -31,7 +33,6 @@ async def test_root_help_includes_command_summaries(
     assert "Explore the projects defined in root.clj" in output
     assert "check" in output
     assert "Run repository and source checks, or inspect the loaded" in output
-    assert "Validate workspace configuration files." not in output
     assert "Validate project documentation quality." not in output
     assert "Verify release readiness for publishable projects." not in output
     assert "Run opt-in external security tooling." not in output
@@ -56,6 +57,25 @@ async def test_parent_command_without_subcommand_prints_help(
     assert "graph     Render an SVG graph of project dependencies." in output
     assert "updates" in output
     assert "pinned Python deps" in output
+
+
+@pytest.mark.asyncio
+async def test_config_parent_help_lists_check_and_cut(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from dev import cli
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "config"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "check" in output
+    assert "cut" in output
+    assert "Parse and validate root.clj and root.private.clj." in output
+    assert "Write a reduced root.clj subset" in output
 
 
 @pytest.mark.asyncio

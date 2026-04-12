@@ -75,6 +75,11 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         pass
 
     @dataclass(frozen=True)
+    class ConfigCutRequest:
+        output_path: str
+        targets: list[str]
+
+    @dataclass(frozen=True)
     class InstallAppRequest:
         bin_dir: str | None
 
@@ -367,6 +372,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     TypedRequest = (
         WhereRequest
         | ConfigCheckRequest
+        | ConfigCutRequest
         | InstallAppRequest
         | InstallCompletionsRequest
         | InstallToolsRequest
@@ -747,6 +753,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return tokens
             case ConfigCheckRequest():
                 return ["check", "config"]
+            case ConfigCutRequest(output_path=output_path, targets=targets):
+                return ["config", "cut", output_path, *targets]
             case InstallHooksRequest(targets=targets, json_output=json_output):
                 tokens = ["install", "hooks"]
                 if json_output:
@@ -1021,6 +1029,20 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
 
     def _config_check_decode(_values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(ConfigCheckRequest())
+
+    def _config_cut_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        match _optional_string(values.positional("output"), "output"):
+            case Failure(issues=issues):
+                return fail(issues)
+            case Success(value=None):
+                return fail([ValidationFailed("Expected <output> path.")])
+            case Success(value=output_path):
+                return succeed(
+                    ConfigCutRequest(
+                        output_path=output_path,
+                        targets=_string_list(values.positional("target")),
+                    )
+                )
 
     def _completion_query_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         shell = values.positional("shell")
@@ -1352,6 +1374,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _config_check_decode(values)
             case ["config", "check"]:
                 return _config_check_decode(values)
+            case ["config", "cut"]:
+                return _config_cut_decode(values)
             case ["install", "app"]:
                 return _install_app_decode(values)
             case ["install", "completions"]:
@@ -1462,13 +1486,26 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         header="Parse and validate root.clj and root.private.clj.",
         decode=_unused_decode,
     )
+    config_cut_command = Command(
+        name="cut",
+        header="Write a reduced root.clj subset for selected projects and their transitive local dependencies.",
+        positionals=(
+            positional(_path_argument(), "output", help="Destination .clj file."),
+            positional(
+                project_target_argument,
+                "target",
+                help="Project IDs, repo IDs, or paths. Omit only when running from inside a configured project or repo.",
+                repeated=True,
+            ),
+        ),
+        decode=_unused_decode,
+    )
     config_command = Command(
         name="config",
-        header="Validate workspace configuration files.",
-        subcommands=(config_check_command,),
+        header="Validate or extract workspace configuration files.",
+        subcommands=(config_check_command, config_cut_command),
         decode=_unused_decode,
         help_on_empty=True,
-        visibility=Visibility.HIDDEN,
     )
     install_app_command = Command(
         name="app",
@@ -2309,6 +2346,11 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 from dev.tasks.check_config import check_config
 
                 check_config()
+                return 0
+            case ConfigCutRequest(output_path=output_path, targets=targets):
+                from dev.tasks.config_cut import config_cut
+
+                config_cut(output_path, requested_targets=targets)
                 return 0
             case InstallAppRequest(bin_dir=bin_dir):
                 from dev.tasks.install import install_app
