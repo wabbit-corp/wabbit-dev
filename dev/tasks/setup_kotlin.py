@@ -13,6 +13,7 @@ from typing import Protocol, cast
 import jinja2
 
 import dev.io
+import dev.repo_docs
 from dev.config import (
     Config,
     DataProject,
@@ -21,11 +22,13 @@ from dev.config import (
     GradleProject,
     GradleTargetSpec,
     IntellijPlugin,
+    IntellijPlatformLibrary,
     JarFileDependencyTarget,
     KmpAndroidLibrary,
     KmpJvmRuns,
     KotlinCompilerGradlePlugin,
     KotlinCompilerPlugin,
+    KotlinGradlePluginLibrary,
     MavenDependencyTarget,
     NpmDependencyTarget,
     PremakeProject,
@@ -75,6 +78,7 @@ BUILTIN_GRADLE_PLUGIN_IDS_BY_FEATURE: dict[str, tuple[str, ...]] = {
     "kmp-compose": ("org.jetbrains.compose", "org.jetbrains.kotlin.plugin.compose"),
     "shadow-jar": ("com.gradleup.shadow",),
     "intellij-plugin": ("org.jetbrains.intellij", "org.jetbrains.intellij.platform"),
+    "intellij-platform-library": ("org.jetbrains.intellij.platform",),
     "paper-plugin": ("io.papermc.paperweight.userdev", "net.minecrell.plugin-yml.bukkit"),
 }
 
@@ -105,6 +109,40 @@ def _effective_intellij_bundled_plugins(feature: IntellijPlugin) -> list[str]:
         return feature.bundledPlugins
     inferred_plugins = [dep for dep in feature.depends or [] if not dep.startswith("com.intellij.modules.")]
     return inferred_plugins or [DEFAULT_INTELLIJ_BUNDLED_PLUGIN]
+
+
+def _effective_intellij_platform_library_bundled_plugins(
+    feature: IntellijPlatformLibrary,
+) -> list[str]:
+    return feature.bundledPlugins or [DEFAULT_INTELLIJ_BUNDLED_PLUGIN]
+
+
+def _intellij_platform_dependency_context(features: Mapping[str, object]) -> dict[str, object]:
+    intellij_plugin_feature = features.get("intellij-plugin")
+    if isinstance(intellij_plugin_feature, IntellijPlugin) and _uses_intellij_platform_gradle_plugin_v2(
+        intellij_plugin_feature
+    ):
+        return {
+            "uses_intellij_platform_dependencies": True,
+            "intellij_platform_idea_version": intellij_plugin_feature.ideaVersion or "2025.3",
+            "intellij_platform_bundled_plugins": _effective_intellij_bundled_plugins(intellij_plugin_feature),
+        }
+
+    intellij_platform_library_feature = features.get("intellij-platform-library")
+    if isinstance(intellij_platform_library_feature, IntellijPlatformLibrary):
+        return {
+            "uses_intellij_platform_dependencies": True,
+            "intellij_platform_idea_version": intellij_platform_library_feature.ideaVersion or "2025.3",
+            "intellij_platform_bundled_plugins": _effective_intellij_platform_library_bundled_plugins(
+                intellij_platform_library_feature
+            ),
+        }
+
+    return {
+        "uses_intellij_platform_dependencies": False,
+        "intellij_platform_idea_version": "2025.3",
+        "intellij_platform_bundled_plugins": [DEFAULT_INTELLIJ_BUNDLED_PLUGIN],
+    }
 
 
 def _renderable_gradle_features(features: Mapping[str, object]) -> dict[str, object]:
@@ -1321,7 +1359,7 @@ def _compiler_plugin_repo_workflow_context(
     publish_projects = [project for project in projects if _is_maven_central_publishable_project(project)]
     compiler_plugin_projects = [
         project
-        for project in maven_central_publish_projects
+        for project in publish_projects
         if isinstance(project.resolved_features.get("kotlin-compiler-plugin"), KotlinCompilerPlugin)
     ]
     if not compiler_plugin_projects:
@@ -1439,7 +1477,8 @@ def _write_gradle_workflows(ctx: GradleSetupContext, project: GradleProject, *, 
         dev.io.delete_if_exists(release_publish_path)
         dev.io.delete_if_exists(snapshot_publish_path)
 
-    if _supports_gradle_dokka_docs(project):
+    docs_workflows_owned_by_repo = dev.repo_docs.repo_docs_workflows_owned_by_repo(ctx.config, project)
+    if _supports_gradle_dokka_docs(project) and not docs_workflows_owned_by_repo:
         workflow_context = _gradle_workflow_context_for_projects(
             root_path=project.path,
             projects=[project],
@@ -1454,7 +1493,7 @@ def _write_gradle_workflows(ctx: GradleSetupContext, project: GradleProject, *, 
             docs_deploy_path,
             clean_text(render_template(ctx.gradle_docs_deploy_workflow_template, **workflow_context)),
         )
-    else:
+    elif not docs_workflows_owned_by_repo:
         dev.io.delete_if_exists(docs_quality_path)
         dev.io.delete_if_exists(docs_deploy_path)
 
@@ -1526,7 +1565,7 @@ def write_gradle_repo_root_workflows(
                 render_template(ctx.gradle_compiler_plugin_release_publish_workflow_template, **workflow_context)
             ),
         )
-        if any(project.publish_snapshots for project in maven_central_publish_projects):
+        if any(project.publish_snapshots for project in publish_projects):
             dev.io.write_text_file(
                 snapshot_publish_path,
                 clean_text(
@@ -1583,7 +1622,15 @@ def write_gradle_repo_root_workflows(
         dev.io.delete_if_exists(release_publish_path)
         dev.io.delete_if_exists(snapshot_publish_path)
 
-    if repo_github_repo is not None and docs_project is not None and _is_dokka_docs_project(docs_project):
+    docs_workflows_owned_by_repo = (
+        docs_project is not None and dev.repo_docs.repo_docs_workflows_owned_by_repo(ctx.config, docs_project)
+    )
+    if (
+        repo_github_repo is not None
+        and docs_project is not None
+        and _is_dokka_docs_project(docs_project)
+        and not docs_workflows_owned_by_repo
+    ):
         workflow_context = _gradle_workflow_context_for_projects(
             root_path=root_path,
             projects=release_workflow_projects or [docs_project],
@@ -1598,7 +1645,7 @@ def write_gradle_repo_root_workflows(
             docs_deploy_path,
             clean_text(render_template(ctx.gradle_docs_deploy_workflow_template, **workflow_context)),
         )
-    else:
+    elif not docs_workflows_owned_by_repo:
         dev.io.delete_if_exists(docs_quality_path)
         dev.io.delete_if_exists(docs_deploy_path)
 
@@ -1704,7 +1751,7 @@ def read_optional_inline_gradle_build_script(
 
 def java_version_for_features(default_java_version: int, features: Mapping[str, object]) -> int:
     # IntelliJ 2023.2 platform runtime is Java 17; targeting higher bytecode is invalid.
-    if "intellij-plugin" in features:
+    if "intellij-plugin" in features or "intellij-platform-library" in features:
         return 17
     return default_java_version
 
@@ -1861,6 +1908,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
     use_intellij_platform_gradle_plugin_v2 = isinstance(
         intellij_feature, IntellijPlugin
     ) and _uses_intellij_platform_gradle_plugin_v2(intellij_feature)
+    intellij_platform_dependency_context = _intellij_platform_dependency_context(template_features)
     _materialize_gradle_plugin_version_resources(project)
 
     if project.is_kmp:
@@ -1923,6 +1971,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             inline_extra_build_imports=inline_extra_build.imports,
             inline_extra_build_script=inline_extra_build.body,
             use_intellij_platform_gradle_plugin_v2=use_intellij_platform_gradle_plugin_v2,
+            **intellij_platform_dependency_context,
             **version_property_context,
             **kotlin_compiler_plugin_context,
             **maven_central_context,
@@ -1963,9 +2012,14 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
             company_legal_name=company_legal_name,
             publish_to_maven_central=publish_to_maven_central,
             is_gradle_plugin_project=project.gradle_plugin_id is not None,
+            is_kotlin_gradle_plugin_library_project=isinstance(
+                project.resolved_features.get("kotlin-gradle-plugin-library"),
+                KotlinGradlePluginLibrary,
+            ),
             inline_extra_build_imports=inline_extra_build.imports,
             inline_extra_build_script=inline_extra_build.body,
             use_intellij_platform_gradle_plugin_v2=use_intellij_platform_gradle_plugin_v2,
+            **intellij_platform_dependency_context,
             **version_property_context,
             **kotlin_compiler_plugin_context,
             **kotlin_compiler_gradle_plugin_context,

@@ -1,6 +1,23 @@
 .DS_Store
 Thumbs.db
 
+# Temporary scratch space
+/tmp/
+/.tmp/
+/tmp-*/
+/tmp_*/
+/tmp.*/
+/.tmp-*/
+/.tmp_*/
+/.tmp.*/
+tmp-*
+tmp_*
+tmp.*
+.tmp-*
+.tmp_*
+.tmp.*
+*.bak
+
 # Python .gitignore
 __pycache__/
 .mypy_cache/
@@ -43,7 +60,3 @@ site/
 /tmp/
 /tmp-*/
 *.bak
-
-/.is-dev-mode
-/.is-local-mode
-/.is-ij-mode

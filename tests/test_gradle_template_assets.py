@@ -289,8 +289,24 @@ def test_gradle_jvm_subproject_template_supports_intellij_platform_gradle_plugin
     content = template_path.read_text(encoding="utf-8")
 
     assert "use_intellij_platform_gradle_plugin_v2" in content
+    assert "intellij-platform-library" in content
+    assert "uses_intellij_platform_dependencies" in content
     assert 'id("org.jetbrains.intellij.platform")' in content
     assert "intellijPlatform {" in content
-    assert "intellijIdea(\"{{ features['intellij-plugin'].ideaVersion or '2025.3' }}\")" in content
+    assert 'intellijIdea("{{ intellij_platform_idea_version }}")' in content
     assert "testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)" in content
     assert "untilBuild = provider { null }" in content
+
+
+def test_gradle_jvm_subproject_template_supports_kotlin_gradle_plugin_libraries() -> None:
+    template_path = (
+        Path(__file__).resolve().parents[2]
+        / "data-repo-template"
+        / "gradle-files"
+        / "subproject-build.gradle.kts.jinja2"
+    )
+    content = template_path.read_text(encoding="utf-8")
+
+    assert "is_kotlin_gradle_plugin_library_project" in content
+    assert 'compileOnly(gradleApi())' in content
+    assert 'compileOnly("org.jetbrains.kotlin:kotlin-gradle-plugin:' in content

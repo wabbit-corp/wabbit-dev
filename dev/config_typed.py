@@ -542,6 +542,12 @@ class JvmKotlinLibraryCommand:
     pass
 
 
+@tag("kotlin-gradle-plugin-library")
+@dataclass(frozen=True)
+class KotlinGradlePluginLibraryCommand:
+    pass
+
+
 @tag("jvm-scala-library")
 @dataclass(frozen=True)
 class JvmScalaLibraryCommand:
@@ -594,6 +600,13 @@ class IntellijPluginCommand:
     bundledPlugins: list[str] | None = None
     publishChannel: str | None = None
     marketplaceTokenEnv: str | None = None
+
+
+@tag("intellij-platform-library")
+@dataclass(frozen=True)
+class IntellijPlatformLibraryCommand:
+    ideaVersion: str | None = None
+    bundledPlugins: list[str] | None = None
 
 
 @tag("kotlin-serialization")
@@ -712,12 +725,14 @@ PythonFeatureCommand = PythonApplicationCommand
 
 FeatureCommand = (
     JvmKotlinLibraryCommand
+    | KotlinGradlePluginLibraryCommand
     | JvmScalaLibraryCommand
     | JvmKotlinApplicationCommand
     | ShadowJarCommand
     | PaperPluginCommand
     | JvmKotlinAgentCommand
     | IntellijPluginCommand
+    | IntellijPlatformLibraryCommand
     | KotlinSerializationCommand
     | KotlinComposePluginCommand
     | GradlePluginCommand

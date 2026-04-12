@@ -163,6 +163,14 @@ class JvmKotlinLibrary(Feature):
 
 
 @dataclass
+class KotlinGradlePluginLibrary(Feature):
+    __feature_name__ = "kotlin-gradle-plugin-library"
+
+    def implied(self) -> list[Feature]:
+        return [Kotlin(), Jvm()]
+
+
+@dataclass
 class JvmScalaLibrary(Feature):
     __feature_name__ = "jvm-scala-library"
 
@@ -281,6 +289,16 @@ class IntellijPlugin(Feature):
     bundledPlugins: list[str] | None = None
     publishChannel: str | None = None
     marketplaceTokenEnv: str | None = None
+
+    def implied(self) -> list[Feature]:
+        return [Kotlin(), Jvm()]
+
+
+@dataclass
+class IntellijPlatformLibrary(Feature):
+    __feature_name__ = "intellij-platform-library"
+    ideaVersion: str | None = None
+    bundledPlugins: list[str] | None = None
 
     def implied(self) -> list[Feature]:
         return [Kotlin(), Jvm()]
@@ -1328,6 +1346,18 @@ def _validate_intellij_feature(feature: IntellijPlugin, *, project_name: str) ->
         )
 
 
+def _validate_intellij_platform_library_feature(
+    feature: IntellijPlatformLibrary,
+    *,
+    project_name: str,
+) -> None:
+    if feature.ideaVersion is not None:
+        _parse_intellij_idea_version(
+            feature.ideaVersion,
+            f"{project_name}.intellij-platform-library.ideaVersion",
+        )
+
+
 SUPPORTED_GRADLE_BUILD_MODELS: tuple[str, ...] = (
     "jvm",
     "kmp",
@@ -1877,6 +1907,8 @@ def load_config(start: Path | None = None) -> Config:
     def _feature_from_command(command: config_typed.FeatureCommand) -> Feature:
         if isinstance(command, config_typed.JvmKotlinLibraryCommand):
             return JvmKotlinLibrary()
+        if isinstance(command, config_typed.KotlinGradlePluginLibraryCommand):
+            return KotlinGradlePluginLibrary()
         if isinstance(command, config_typed.JvmScalaLibraryCommand):
             return JvmScalaLibrary()
         if isinstance(command, config_typed.JvmKotlinApplicationCommand):
@@ -1908,6 +1940,11 @@ def load_config(start: Path | None = None) -> Config:
                 bundledPlugins=command.bundledPlugins,
                 publishChannel=command.publishChannel,
                 marketplaceTokenEnv=command.marketplaceTokenEnv,
+            )
+        if isinstance(command, config_typed.IntellijPlatformLibraryCommand):
+            return IntellijPlatformLibrary(
+                ideaVersion=command.ideaVersion,
+                bundledPlugins=command.bundledPlugins,
             )
         if isinstance(command, config_typed.KotlinSerializationCommand):
             return KotlinSerialization()
@@ -2319,6 +2356,12 @@ def load_config(start: Path | None = None) -> Config:
                 intellij_feature = project.resolved_features.get("intellij-plugin")
                 if isinstance(intellij_feature, IntellijPlugin):
                     _validate_intellij_feature(intellij_feature, project_name=project.name)
+                intellij_platform_library_feature = project.resolved_features.get("intellij-platform-library")
+                if isinstance(intellij_platform_library_feature, IntellijPlatformLibrary):
+                    _validate_intellij_platform_library_feature(
+                        intellij_platform_library_feature,
+                        project_name=project.name,
+                    )
                 _validate_kmp_project_dependencies(project)
                 if project.docs_enabled and project.docs_system not in (None, "dokka"):
                     raise ValueError(f"{project.name} is a Gradle project and must use docsSystem 'dokka'")

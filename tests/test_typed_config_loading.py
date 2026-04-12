@@ -1197,6 +1197,35 @@ def test_intellij_plugin_rejects_nonexistent_until_build_branch(tmp_path: Path) 
         )
 
 
+def test_support_library_features_are_loaded(tmp_path: Path) -> None:
+    from dev.config import GradleProject, IntellijPlatformLibrary, KotlinGradlePluginLibrary
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                '(default-maven-project-group "one.wabbit")',
+                "("
+                'gradle "shared-support" '
+                ':version "0.0.1" '
+                ':features ['
+                '(kotlin-gradle-plugin-library) '
+                '(intellij-platform-library :ideaVersion "2025.3" :bundledPlugins ["org.jetbrains.kotlin"])]'
+                ")",
+                "",
+            ]
+        ),
+    )
+
+    project = config.defined_projects["shared-support"]
+    assert isinstance(project, GradleProject)
+    assert isinstance(project.resolved_features["kotlin-gradle-plugin-library"], KotlinGradlePluginLibrary)
+    intellij_feature = project.resolved_features["intellij-platform-library"]
+    assert isinstance(intellij_feature, IntellijPlatformLibrary)
+    assert intellij_feature.ideaVersion == "2025.3"
+    assert intellij_feature.bundledPlugins == ["org.jetbrains.kotlin"]
+
+
 def test_publish_target_routing(tmp_path: Path) -> None:
     from dev.tasks.publish import determine_publish_target
 
