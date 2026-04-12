@@ -530,6 +530,45 @@ async def test_build_status_and_push_bypass_argparse_with_typed_cli(monkeypatch:
 
 
 @pytest.mark.asyncio
+async def test_service_commands_bypass_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import service as service_task
+
+    called: list[tuple[str, int | None]] = []
+
+    def fake_service_start(*, interval_seconds: int = 60) -> int:
+        called.append(("start", interval_seconds))
+        return 0
+
+    def fake_service_stop() -> int:
+        called.append(("stop", None))
+        return 0
+
+    def fake_service_status() -> int:
+        called.append(("status", None))
+        return 0
+
+    monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
+    monkeypatch.setattr(service_task, "service_start", fake_service_start)
+    monkeypatch.setattr(service_task, "service_stop", fake_service_stop)
+    monkeypatch.setattr(service_task, "service_status", fake_service_status)
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "service", "start", "--interval-seconds", "15"])
+    start_result = await cli.async_main()
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "service", "status"])
+    status_result = await cli.async_main()
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "service", "stop"])
+    stop_result = await cli.async_main()
+
+    assert start_result == 0
+    assert status_result == 0
+    assert stop_result == 0
+    assert called == [("start", 15), ("status", None), ("stop", None)]
+
+
+@pytest.mark.asyncio
 async def test_llmcopy_duplicates_and_contributors_bypass_argparse_with_typed_cli(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

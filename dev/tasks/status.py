@@ -3,38 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from git import Repo
-
 from dev.config import find_workspace_root, load_config
 from dev.failure_context import contextualize_failure
 from dev.messages import accent, error, heading, info, muted, success
 from dev.repo_resolution import configured_repo_targets, inferred_repo_targets, resolve_repo_targets
-
-
-def _status_lists(repo: Repo) -> tuple[list[str], list[str], list[str]]:
-    staged: list[str] = []
-    unstaged: list[str] = []
-    untracked = sorted(repo.untracked_files)
-
-    porcelain = repo.git.status("--porcelain=1", "--untracked-files=all")
-    for raw_line in porcelain.splitlines():
-        if not raw_line:
-            continue
-        status = raw_line[:2]
-        path_text = raw_line[3:] if len(raw_line) > 3 else ""
-        if " -> " in path_text:
-            path_text = path_text.split(" -> ", 1)[1]
-        path_text = path_text.strip()
-        if not path_text:
-            continue
-        if status == "??":
-            continue
-        if status[0] != " ":
-            staged.append(path_text)
-        if status[1] != " ":
-            unstaged.append(path_text)
-
-    return sorted(dict.fromkeys(staged)), sorted(dict.fromkeys(unstaged)), untracked
+from dev.repo_status import collect_repo_status_record
 
 
 def status(targets: str | list[str] | None, *, json_output: bool = False) -> int:
@@ -91,8 +64,18 @@ def status(targets: str | list[str] | None, *, json_output: bool = False) -> int
             if not json_output:
                 error(f"Project {resolved_target.name} does not exist")
             continue
-        repo = Repo(path, search_parent_directories=True)
-        staged_changes, unstaged_changes, untracked_files = _status_lists(repo)
+        status_record = collect_repo_status_record(resolved_target)
+        staged_changes = list(status_record.staged_changes)
+        unstaged_changes = list(status_record.unstaged_changes)
+        untracked_files = list(status_record.untracked_files)
+        if status_record.error is not None:
+            repo_payload["error"] = status_record.error
+            repo_payload["isClean"] = False
+            repos_payload.append(repo_payload)
+            exit_code = 1
+            if not json_output:
+                error(f"{resolved_target.name}: {status_record.error}")
+            continue
         repo_payload["stagedChanges"] = staged_changes
         repo_payload["unstagedChanges"] = unstaged_changes
         repo_payload["trackedChanges"] = unstaged_changes
@@ -101,7 +84,6 @@ def status(targets: str | list[str] | None, *, json_output: bool = False) -> int
         repos_payload.append(repo_payload)
 
         if json_output:
-            repo.close()
             continue
 
         if index:
@@ -125,7 +107,6 @@ def status(targets: str | list[str] | None, *, json_output: bool = False) -> int
         else:
             success(f"{repo_header} ({repo_path})")
             print(f"  {muted('Working tree clean.')}")
-        repo.close()
 
     if json_output:
         print(json.dumps(payload, indent=2))

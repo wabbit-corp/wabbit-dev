@@ -219,6 +219,18 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         json_output: bool
 
     @dataclass(frozen=True)
+    class ServiceStartRequest:
+        interval_seconds: int
+
+    @dataclass(frozen=True)
+    class ServiceStopRequest:
+        pass
+
+    @dataclass(frozen=True)
+    class ServiceStatusRequest:
+        pass
+
+    @dataclass(frozen=True)
     class CommitRequest:
         targets: list[str]
         dry_run: bool
@@ -382,6 +394,9 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         | CleanRequest
         | ClocRequest
         | StatusRequest
+        | ServiceStartRequest
+        | ServiceStopRequest
+        | ServiceStatusRequest
         | CommitRequest
         | CommitVerifyRequest
         | PushRequest
@@ -838,6 +853,15 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                     tokens.append("--json")
                 tokens.extend(targets)
                 return tokens
+            case ServiceStartRequest(interval_seconds=interval_seconds):
+                tokens = ["service", "start"]
+                if interval_seconds != 60:
+                    tokens.extend(["--interval-seconds", str(interval_seconds)])
+                return tokens
+            case ServiceStopRequest():
+                return ["service", "stop"]
+            case ServiceStatusRequest():
+                return ["service", "status"]
             case CommitRequest(targets=targets, dry_run=dry_run):
                 tokens = ["commit"]
                 if dry_run:
@@ -1184,6 +1208,9 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             )
         )
 
+    def _service_start_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        return succeed(ServiceStartRequest(interval_seconds=_int_value(values, "--interval-seconds", 60)))
+
     def _commit_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(
             CommitRequest(
@@ -1381,6 +1408,12 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _cloc_decode(values)
             case ["status"]:
                 return _status_decode(values)
+            case ["service", "start"]:
+                return _service_start_decode(values)
+            case ["service", "stop"]:
+                return succeed(ServiceStopRequest())
+            case ["service", "status"]:
+                return succeed(ServiceStatusRequest())
             case ["commit"]:
                 return _commit_decode(values)
             case ["commit", "verify"]:
@@ -1904,6 +1937,36 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         ),
         decode=_unused_decode,
     )
+    service_start_command = Command(
+        name="start",
+        header="Start the macOS repo monitor menubar process for this workspace.",
+        options=(
+            option(
+                Argument.integer(),
+                long="interval-seconds",
+                help="Polling interval for repo status refresh.",
+                meta_var="SECONDS",
+            ),
+        ),
+        decode=_unused_decode,
+    )
+    service_stop_command = Command(
+        name="stop",
+        header="Stop the macOS repo monitor menubar process for this workspace.",
+        decode=_unused_decode,
+    )
+    service_status_command = Command(
+        name="status",
+        header="Show the current repo monitor process and its last snapshot.",
+        decode=_unused_decode,
+    )
+    service_command = Command(
+        name="service",
+        header="Run the workspace repo monitor service.",
+        subcommands=(service_start_command, service_stop_command, service_status_command),
+        decode=_unused_decode,
+        help_on_empty=True,
+    )
     commit_verify_command = Command(
         name="verify",
         header="Verify commit message policy for a message file or commit range.",
@@ -2197,6 +2260,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             clean_command,
             cloc_command,
             status_command,
+            service_command,
             commit_command,
             push_command,
             check_command,
@@ -2211,6 +2275,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             "Examples:\n"
             f"  {prog} doctor\n"
             f"  {prog} where\n"
+            f"  {prog} service start\n"
             f"  {prog} completion bash\n"
             f"  {prog} setup --local app-datatron\n"
             f"  {prog} build app-datatron\n"
@@ -2474,6 +2539,18 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 from dev.tasks.status import status
 
                 return status(targets, json_output=json_output)
+            case ServiceStartRequest(interval_seconds=interval_seconds):
+                from dev.tasks.service import service_start
+
+                return service_start(interval_seconds=interval_seconds)
+            case ServiceStopRequest():
+                from dev.tasks.service import service_stop
+
+                return service_stop()
+            case ServiceStatusRequest():
+                from dev.tasks.service import service_status
+
+                return service_status()
             case CommitRequest(targets=targets, dry_run=dry_run):
                 if not _preflight("commit", targets, dry_run=dry_run):
                     return 2
