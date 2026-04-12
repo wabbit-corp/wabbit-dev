@@ -79,3 +79,41 @@ def test_commit_verify_range_checks_each_commit(tmp_path: Path) -> None:
     exit_code = commit_verify(target=str(repo), revision_range="HEAD~1..HEAD", quiet=True)
 
     assert exit_code == 1
+
+
+def test_commit_verify_staged_ignores_embedded_repo_template_version_lines(tmp_path: Path) -> None:
+    from dev.tasks.commit_verify import commit_verify
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "README.md").write_text("# Demo\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "Initial commit\n\nSemver Impact: NONE")
+    _git(repo, "tag", "1.0.0")
+
+    template_path = repo / "dev" / "assets" / "repo-template" / "gradle-files" / "subproject-build-kmp.gradle.kts.jinja2"
+    template_path.parent.mkdir(parents=True, exist_ok=True)
+    template_path.write_text(
+        "\n".join(
+            [
+                "android {",
+                "    defaultConfig {",
+                "        versionCode = 1",
+                '        versionName = "{{ project_version }}"',
+                "    }",
+                "}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _git(repo, "add", "dev/assets/repo-template/gradle-files/subproject-build-kmp.gradle.kts.jinja2")
+
+    exit_code = commit_verify(
+        target=str(repo),
+        message="Import embedded repo templates\n\nSemver Impact: NONE",
+        staged=True,
+        quiet=True,
+    )
+
+    assert exit_code == 0

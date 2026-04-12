@@ -11,6 +11,8 @@ import jinja2
 import pytest
 from git import Repo
 
+from dev.template_assets import repo_template_path, repo_template_root
+
 if TYPE_CHECKING:
     from dev.config import Config, DataProject, PremakeProject, PurescriptProject, PythonApplication, PythonProject
     from dev.tasks.setup import RepoSetupContext
@@ -129,7 +131,7 @@ def _make_setup_context(pyproject_template: str, codespell_words: str = "wabbit\
         known_repo_names=[],
         known_github_repos={},
         is_github_api_available=True,
-        repo_template=repo_root / "data-repo-template",
+        repo_template=repo_template_root(),
         licenses={},
         coc=jinja2.Template(""),
         editorconfig_template=jinja2.Template("root = true\n"),
@@ -571,6 +573,123 @@ def test_setup_python_project_recovers_tracked_gitignore_rules(tmp_path: Path, m
     assert "/custom-data/" in gitignore_content
     assert "# base" in gitignore_content
     assert "# python" in gitignore_content
+
+
+def test_standalone_python_setup_does_not_rewrite_gitignore_in_repo_metadata_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mu.parser import parse
+
+    import dev.io as dev_io
+    import dev.tasks.setup as setup_module
+    from dev.config import CodeOwner, Config
+
+    project = _make_python_project(tmp_path / "pkg", github_repo="org/pkg")
+    project.project_id = "pkg"
+    project.path.mkdir(parents=True, exist_ok=True)
+    (project.path / "README.md").write_text("# pkg\n", encoding="utf-8")
+    (project.path / ".gitignore").write_text(
+        "# tracked\n/.private.yml\n/custom-data/\n/.is-dev-mode\n/.is-local-mode\n/.is-ij-mode\n",
+        encoding="utf-8",
+    )
+
+    repo = Repo.init(project.path)
+    repo.index.add([".gitignore", "README.md"])
+    repo.index.commit("Initial commit\n\nSemver Impact: NONE")
+    repo.close()
+
+    monkeypatch.setattr(setup_module, "_write_wabbit_legal_files", _noop_write_callback)
+    monkeypatch.setattr(setup_module, "_write_banner", _noop_write_callback)
+
+    messages: list[str] = []
+    monkeypatch.setattr(dev_io, "info", lambda message: messages.append(message))
+
+    config = Config(raw=parse("()"))
+    config.default_company_email = "security@wabbit.one"
+    config.default_code_owners = [CodeOwner(name="Sir Wabbit", email="wabbit@wabbit.one")]
+    config.default_git_user_email = "test@example.com"
+    config.default_git_user_name = "Test User"
+    config.defined_projects["pkg"] = project
+
+    ctx = setup_module.RepoSetupContext(
+        config=config,
+        known_repo_names=[],
+        known_github_repos={},
+        is_github_api_available=False,
+        repo_template=tmp_path,
+        licenses={},
+        coc=jinja2.Template(""),
+        editorconfig_template=jinja2.Template("root = true\n"),
+        gitignore_template=jinja2.Template("# base\n"),
+        cla=jinja2.Template(""),
+        cla_explanations=jinja2.Template(""),
+        contributor_privacy_policy=jinja2.Template(""),
+        github_codeowners_template=jinja2.Template("* owner@example.com\n"),
+        github_security_template=jinja2.Template("# Security Policy\n"),
+        github_pull_request_template=jinja2.Template("## Summary\n"),
+        github_issue_bug_template=jinja2.Template("name: Bug report\n"),
+        github_issue_feature_template=jinja2.Template("name: Feature request\n"),
+        settings_template=jinja2.Template(""),
+        settings_local_template=jinja2.Template(""),
+        subproject_settings_template=jinja2.Template(""),
+        build_template=jinja2.Template(""),
+        subproject_build_template=jinja2.Template(""),
+        subproject_build_kmp_template=jinja2.Template(""),
+        gradle_gitignore_template=jinja2.Template(""),
+        gradle_properties_template=jinja2.Template(""),
+        python_gitignore_template=jinja2.Template("# python\n"),
+        dotnet_gitignore_template=jinja2.Template(""),
+        dotnet_global_json_template=jinja2.Template("{}\n"),
+        dotnet_nuget_config_template=jinja2.Template("<configuration />\n"),
+        dotnet_directory_build_props_template=jinja2.Template("<Project />\n"),
+        purescript_gitignore_template=jinja2.Template(""),
+        python_pyproject_template=jinja2.Template(
+            '[tool.poetry]\nname = "{{ name }}"\nversion = "{{ version }}"\n\n'
+            '[tool.poetry.dependencies]\npython = "{{ python_version }}"\n'
+        ),
+        python_pyrightconfig_template=jinja2.Template(
+            '{\n  "include": {{ include_json }},\n  "exclude": {{ exclude_json }},\n  "pythonVersion": "{{ python_version }}"\n}\n'
+        ),
+        python_mkdocs_template=jinja2.Template("site_name: {{ site_name }}\n"),
+        python_docs_index_template=jinja2.Template("# {{ project_name }}\n"),
+        python_docs_installation_template=jinja2.Template("# Install {{ package_name }}\n"),
+        python_docs_development_template=jinja2.Template("# Dev {{ project_name }}\n"),
+        python_contributing_template=jinja2.Template("# Contributing {{ project_name }}\n"),
+        python_docs_quality_workflow_template=jinja2.Template("name: Docs Quality\n"),
+        python_docs_deploy_workflow_template=jinja2.Template("name: Docs Deploy\n"),
+        python_release_publish_workflow_template=jinja2.Template("name: Release Publish\n"),
+        repo_docs_quality_workflow_template=jinja2.Template("name: Repo Docs Quality\n"),
+        repo_docs_deploy_workflow_template=jinja2.Template("name: Repo Docs Deploy\n"),
+        repo_docs_builder_script_template=jinja2.Template(
+            "# Generated by app-wabbit-dev setup. Do not edit by hand.\nprint('repo docs')\n"
+        ),
+        gradle_release_publish_workflow_template=jinja2.Template(""),
+        gradle_snapshot_publish_workflow_template=jinja2.Template(""),
+        gradle_compiler_plugin_release_publish_workflow_template=jinja2.Template(""),
+        gradle_compiler_plugin_snapshot_publish_workflow_template=jinja2.Template(""),
+        gradle_docs_quality_workflow_template=jinja2.Template(""),
+        gradle_docs_deploy_workflow_template=jinja2.Template(""),
+        dotnet_docs_quality_workflow_template=jinja2.Template(""),
+        dotnet_docs_deploy_workflow_template=jinja2.Template(""),
+        dotnet_release_publish_workflow_template=jinja2.Template(""),
+        python_codespell_ignore_words_template=jinja2.Template("wabbit\n"),
+        python_build_executable_template=jinja2.Template(""),
+        mode=setup_module.RepoSetupMode.LOCAL,
+    )
+
+    setup_module.setup_python_project(ctx, project, interactive=False)
+    messages.clear()
+    setup_module._write_repo_metadata_files(ctx, [project])
+
+    gitignore_content = (project.path / ".gitignore").read_text(encoding="utf-8")
+    assert "# tracked" in gitignore_content
+    assert "/.private.yml" in gitignore_content
+    assert "/custom-data/" in gitignore_content
+    assert "/.is-dev-mode" not in gitignore_content
+    assert "/.is-local-mode" not in gitignore_content
+    assert "/.is-ij-mode" not in gitignore_content
+    assert not any(str(project.path / ".gitignore") in message for message in messages)
 
 
 def test_setup_python_project_preserves_existing_docs_and_refreshes_workflows(
@@ -1354,7 +1473,7 @@ def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
     monkeypatch.setattr(
         setup_common_module,
         "write_wabbit_legal_files",
-        lambda _ctx, project: written_license_paths.append(project.path),
+        lambda _ctx, project, **_kwargs: written_license_paths.append(project.path),
     )
     monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
 
@@ -1450,12 +1569,12 @@ def test_setup_writes_repo_root_license_when_repo_managed_gradle_project_license
     monkeypatch.setattr(
         setup_common_module,
         "write_wabbit_legal_files",
-        lambda _ctx, project: written_license_paths.append(project.path),
+        lambda _ctx, project, **_kwargs: written_license_paths.append(project.path),
     )
     monkeypatch.setattr(
         setup_common_module,
         "write_wabbit_legal_documents",
-        lambda _ctx, project: written_document_paths.append(project.path),
+        lambda _ctx, project, **_kwargs: written_document_paths.append(project.path),
     )
     monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
 
@@ -1552,7 +1671,7 @@ def test_setup_repo_root_license_keeps_shared_test_license_when_some_repo_projec
     monkeypatch.setattr(
         setup_common_module,
         "write_wabbit_legal_files",
-        lambda _ctx, project: written_projects.append(project),
+        lambda _ctx, project, **_kwargs: written_projects.append(project),
     )
     monkeypatch.setattr(
         setup_common_module,
@@ -2694,14 +2813,7 @@ def test_setup_wires_repo_root_gradle_workflow_generation_to_repo_docs_project(
 
 
 def test_gradle_release_publish_workflow_template_checks_tag_version_match() -> None:
-    template_path = (
-        Path(__file__).resolve().parents[2]
-        / "data-repo-template"
-        / "gradle-files"
-        / ".github"
-        / "workflows"
-        / "release-publish.yml.jinja2"
-    )
+    template_path = repo_template_path("gradle-files", ".github", "workflows", "release-publish.yml.jinja2")
     template_text = template_path.read_text(encoding="utf-8")
 
     assert "Match tag to published version" in template_text

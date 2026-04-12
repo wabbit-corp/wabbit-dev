@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+{% if company_name %}
+    <Company>{{ company_name }}</Company>
+{% endif %}
+{% if authors %}
+    <Authors>{{ authors }}</Authors>
+{% endif %}
+{% if repository_url %}
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>{{ repository_url }}</RepositoryUrl>
+{% endif %}
+  </PropertyGroup>
+</Project>

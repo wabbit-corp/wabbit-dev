@@ -1,0 +1,99 @@
+[tool.poetry]
+name = "{{ name }}"
+version = "{{ version }}"
+description = "{{ description }}"
+{% if authors_toml %}authors = {{ authors_toml }}{% endif %}
+{% if license %}license = "{{ license }}"{% endif %}
+{% if readme %}readme = "{{ readme }}"{% endif %}
+{% if homepage %}homepage = "{{ homepage }}"{% endif %}
+{% if repository %}repository = "{{ repository }}"{% endif %}
+{% if keywords_toml %}keywords = {{ keywords_toml }}{% endif %}
+{% if classifiers_toml %}classifiers = {{ classifiers_toml }}{% endif %}
+{% if packages_toml %}packages = {{ packages_toml }}{% endif %}
+include = {{ include_toml }}
+exclude = {{ exclude_toml }}
+
+[tool.check-manifest]
+ignore = {{ check_manifest_ignore_toml }}
+
+{% if issue_tracker -%}
+[tool.poetry.urls]
+"Issue Tracker" = "{{ issue_tracker }}"
+
+{% endif -%}
+[tool.poetry.dependencies]
+python = "{{ python_version }}"
+{% if dependencies_block %}{{ dependencies_block }}{% endif %}
+
+{% if has_dev_dependencies -%}
+[tool.poetry.group.dev.dependencies]
+{{ dev_dependencies_block }}
+
+{% endif -%}
+{% if has_docs_dependencies -%}
+[tool.poetry.group.docs.dependencies]
+{{ docs_dependencies_block }}
+
+{% endif -%}
+{% if has_scripts -%}
+[tool.poetry.scripts]
+{{ scripts_block }}
+
+{% endif -%}
+[tool.black]
+line-length = {{ line_length }}
+target-version = ["{{ target_version }}"]
+
+[tool.ruff]
+line-length = {{ line_length }}
+target-version = "{{ target_version }}"
+
+[tool.ruff.lint]
+select = {{ ruff_select_toml }}
+ignore = {{ ruff_ignore_toml }}
+
+[tool.mypy]
+python_version = "{{ mypy_python_version }}"
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+pretty = true
+
+{% if has_ruff_per_file_ignores -%}
+[tool.ruff.lint.per-file-ignores]
+{{ ruff_per_file_ignores_block }}
+
+{% endif -%}
+{% if has_testpaths -%}
+[tool.pytest.ini_options]
+testpaths = {{ testpaths_toml }}
+
+{% endif -%}
+{% if has_deptry_package_map -%}
+[tool.deptry.package_module_name_map]
+{{ deptry_package_map_block }}
+
+{% endif -%}
+{% if has_deptry_rule_ignores -%}
+[tool.deptry]
+per_rule_ignores = {{ deptry_per_rule_ignores_inline }}
+
+{% endif -%}
+[tool.coverage.run]
+branch = {{ "true" if coverage_branch else "false" }}
+source = {{ coverage_source_toml }}
+omit = {{ coverage_omit_toml }}
+
+[tool.coverage.report]
+show_missing = {{ "true" if coverage_show_missing else "false" }}
+skip_empty = {{ "true" if coverage_skip_empty else "false" }}
+fail_under = {{ coverage_fail_under }}
+precision = {{ coverage_precision }}
+
+[tool.coverage.xml]
+output = "{{ coverage_xml_output }}"
+
+[build-system]
+requires = ["poetry-core>=1.7.0"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest a concrete improvement for this repository.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: What user or developer need is not being met today?
+      placeholder: Describe the job to be done or friction to remove.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What should happen?
+      placeholder: Describe the behavior or workflow you want.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What approaches did you already consider?
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, examples, constraints, or related repos/issues.

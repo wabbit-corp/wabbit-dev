@@ -13,6 +13,7 @@ import pytest
 
 from dev.config import load_config
 from dev.json_utils import as_dict
+from dev.template_assets import repo_template_root
 
 if TYPE_CHECKING:
     from dev.config import Config, PythonApplication, PythonProject
@@ -102,7 +103,7 @@ def _make_render_context(pyproject_template: str | None = None) -> RepoSetupCont
         known_repo_names=[],
         known_github_repos={},
         is_github_api_available=False,
-        repo_template=repo_root / "data-repo-template",
+        repo_template=repo_template_root(),
         licenses={},
         coc=jinja2.Template(""),
         editorconfig_template=jinja2.Template("root = true\n"),
@@ -455,8 +456,6 @@ def test_setup_generates_python_docs_and_quality_defaults(tmp_path: Path, monkey
     temp_root = tmp_path
     shutil.copy(test_root, temp_root / "root.clj")
     shutil.copy(test_private, temp_root / "root.private.clj")
-    _copy_tree(workspace_root / "data-repo-template", temp_root / "data-repo-template")
-
     projects = [repo_root] + sorted(workspace_root.glob("python-*"))
     for src in projects:
         dest = temp_root / src.name

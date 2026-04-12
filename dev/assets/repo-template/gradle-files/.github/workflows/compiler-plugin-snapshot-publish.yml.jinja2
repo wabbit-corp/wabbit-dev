@@ -1,0 +1,159 @@
+name: Snapshot Publish
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  determine-kotlin-matrix:
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    outputs:
+      kotlin_versions: {% raw %}${{ steps.kotlin_matrix.outputs.kotlin_versions }}{% endraw %}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Read supported Kotlin matrix
+        id: kotlin_matrix
+        run: |
+          KOTLIN_VERSIONS="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          properties = {}
+          for raw_line in Path("gradle.properties").read_text().splitlines():
+              line = raw_line.strip()
+              if not line or line.startswith("#") or "=" not in line:
+                  continue
+              key, value = line.split("=", 1)
+              properties[key.strip()] = value.strip()
+
+          versions = [value.strip() for value in properties.get("supportedKotlinVersions", "").split(",") if value.strip()]
+          if not versions:
+              raise SystemExit("supportedKotlinVersions is empty")
+
+          print(json.dumps(versions))
+          PY
+          )"
+          printf 'kotlin_versions=%s\n' "${KOTLIN_VERSIONS}" >> "$GITHUB_OUTPUT"
+
+  publish-core:
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: corretto
+          java-version: "{{ java_version }}"
+          cache: gradle
+
+{% if needs_android %}
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+{% endif %}
+      - name: Ensure Gradle wrapper is executable
+        run: chmod +x ./gradlew
+
+      - name: Detect snapshot version
+        id: snapshot_version
+        run: |
+          VERSIONS="$({{ repo_base_version_print_command }})"
+          VERSIONS="$(printf '%s\n' "${VERSIONS}" | sed '/^[[:space:]]*$/d' | sort -u)"
+          test -n "${VERSIONS}"
+          printf 'versions<<EOF\n%s\nEOF\n' "${VERSIONS}" >> "$GITHUB_OUTPUT"
+
+          IS_SNAPSHOT=true
+          while IFS= read -r version; do
+            if [ -n "${version}" ] && ! printf '%s' "${version}" | grep -qE '\+dev-SNAPSHOT$'; then
+              IS_SNAPSHOT=false
+              break
+            fi
+          done <<EOF
+          ${VERSIONS}
+          EOF
+
+          echo "is_snapshot=${IS_SNAPSHOT}" >> "$GITHUB_OUTPUT"
+
+      - name: Skip snapshot publish for release version
+        if: github.event_name == 'push' && steps.snapshot_version.outputs.is_snapshot != 'true'
+        run: |
+          echo "Skipping snapshot publish for non-snapshot version(s):"
+          printf '%s\n' "{% raw %}${{ steps.snapshot_version.outputs.versions }}{% endraw %}"
+
+      - name: Publish snapshot to Maven Central
+        if: github.event_name == 'workflow_dispatch' || steps.snapshot_version.outputs.is_snapshot == 'true'
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: {% raw %}${{ secrets.MAVEN_USERNAME }}{% endraw %}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: {% raw %}${{ secrets.MAVEN_PASSWORD }}{% endraw %}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: {% raw %}${{ secrets.MAVEN_GPG_PRIVATE_KEY }}{% endraw %}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: {% raw %}${{ secrets.MAVEN_GPG_PASSPHRASE }}{% endraw %}
+        run: {{ core_snapshot_publish_command }}
+
+  publish-compiler-plugin:
+    if: github.ref_type != 'tag'
+    needs:
+      - determine-kotlin-matrix
+      - publish-core
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        kotlin-version: {% raw %}${{ fromJson(needs.determine-kotlin-matrix.outputs.kotlin_versions) }}{% endraw %}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: corretto
+          java-version: "{{ java_version }}"
+          cache: gradle
+
+{% if needs_android %}
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+{% endif %}
+      - name: Ensure Gradle wrapper is executable
+        run: chmod +x ./gradlew
+
+      - name: Detect snapshot version
+        id: snapshot_version
+        run: |
+          BASE_VERSION="$({{ compiler_base_version_print_command }} | sed '/^[[:space:]]*$/d')"
+          test -n "${BASE_VERSION}"
+          printf 'version=%s\n' "${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+          if printf '%s' "${BASE_VERSION}" | grep -qE '\+dev-SNAPSHOT$'; then
+            echo "is_snapshot=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_snapshot=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip snapshot publish for release version
+        if: github.event_name == 'push' && steps.snapshot_version.outputs.is_snapshot != 'true'
+        run: |
+          echo "Skipping compiler-plugin snapshot publish for non-snapshot version:"
+          printf '%s\n' "{% raw %}${{ steps.snapshot_version.outputs.version }}{% endraw %}"
+
+      - name: Publish compiler plugin snapshot to Maven Central
+        if: github.event_name == 'workflow_dispatch' || steps.snapshot_version.outputs.is_snapshot == 'true'
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: {% raw %}${{ secrets.MAVEN_USERNAME }}{% endraw %}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: {% raw %}${{ secrets.MAVEN_PASSWORD }}{% endraw %}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: {% raw %}${{ secrets.MAVEN_GPG_PRIVATE_KEY }}{% endraw %}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: {% raw %}${{ secrets.MAVEN_GPG_PASSPHRASE }}{% endraw %}
+        run: {{ compiler_snapshot_publish_command }}

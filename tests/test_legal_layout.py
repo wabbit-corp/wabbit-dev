@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from dev.config import GradleProject, OwnershipType, Version
+from dev.config import DataProject, GradleProject, OwnershipType, Version
 from dev.project_layout import (
+    InternalToolAssetPathMatcher,
     SetupOwnedPathMatcher,
     TransientPathMatcher,
     cleanup_misplaced_legal_files,
@@ -163,6 +164,91 @@ def test_find_misplaced_legal_files_allows_repo_root_legal_files_without_root_pr
     misplaced = find_misplaced_legal_files(repo_root, [child_project])
 
     assert misplaced == []
+
+
+def test_find_misplaced_legal_files_flags_repo_root_legal_docs_for_data_projects(tmp_path: Path) -> None:
+    repo_root = tmp_path / "data-demo"
+    repo_root.mkdir(parents=True)
+    (repo_root / "LICENSE.md").write_text("license\n", encoding="utf-8")
+    (repo_root / "legal" / "cla" / "v1.0.0").mkdir(parents=True)
+    cla_path = repo_root / "legal" / "cla" / "v1.0.0" / "CLA.md"
+    cla_path.write_text("cla\n", encoding="utf-8")
+
+    project = DataProject(
+        path=repo_root,
+        name="data-demo",
+        description="Data repository",
+        authors=[],
+        quarantine=False,
+        publish=False,
+        license="AGPL",
+        github_repo=None,
+        ownership=OwnershipType.WABBIT,
+        version=None,
+        resolved_dependencies=[],
+    )
+
+    misplaced = find_misplaced_legal_files(repo_root, [project])
+
+    assert [path.relative_to(repo_root).as_posix() for path in misplaced] == [
+        "LICENSE.md",
+        "legal/cla/v1.0.0/CLA.md",
+    ]
+
+
+def test_find_misplaced_legal_files_keeps_repo_root_legal_docs_for_managed_data_projects(tmp_path: Path) -> None:
+    repo_root = tmp_path / "data-template"
+    repo_root.mkdir(parents=True)
+    (repo_root / "LICENSE.md").write_text("license\n", encoding="utf-8")
+    (repo_root / "legal" / "cla" / "v1.0.0").mkdir(parents=True)
+    cla_path = repo_root / "legal" / "cla" / "v1.0.0" / "CLA.md"
+    cla_path.write_text("cla\n", encoding="utf-8")
+
+    project = DataProject(
+        path=repo_root,
+        name="data-template",
+        description="Template repository",
+        authors=[],
+        quarantine=False,
+        publish=False,
+        license="AGPL",
+        github_repo=None,
+        ownership=OwnershipType.WABBIT,
+        version=None,
+        resolved_dependencies=[],
+        preserve_legal_files=True,
+    )
+
+    misplaced = find_misplaced_legal_files(repo_root, [project])
+
+    assert misplaced == []
+
+
+def test_find_misplaced_legal_files_ignores_embedded_repo_template_assets(tmp_path: Path) -> None:
+    repo_root = tmp_path / "app-wabbit-dev"
+    repo_root.mkdir(parents=True)
+    template_root = repo_root / "dev" / "assets" / "repo-template"
+    (template_root / "legal" / "cla" / "v1.0.0").mkdir(parents=True)
+    (template_root / "legal" / "cla" / "v1.0.0" / "CLA.md").write_text("cla\n", encoding="utf-8")
+    (template_root / "LICENSE.md").write_text("license\n", encoding="utf-8")
+
+    project = _make_gradle_project(repo_root)
+
+    misplaced = find_misplaced_legal_files(repo_root, [project])
+
+    assert misplaced == []
+
+
+def test_internal_tool_asset_path_matcher_matches_embedded_repo_template_subtree(tmp_path: Path) -> None:
+    repo_root = tmp_path / "app-wabbit-dev"
+    repo_root.mkdir(parents=True)
+    template_file = repo_root / "dev" / "assets" / "repo-template" / "legal" / "cla" / "v1.0.0" / "CLA.md"
+    template_file.parent.mkdir(parents=True)
+    template_file.write_text("cla\n", encoding="utf-8")
+
+    matcher = InternalToolAssetPathMatcher(repo_root)
+
+    assert matcher.matches(template_file, is_dir=False) is True
 
 
 def test_transient_path_matcher_skips_tmp_and_backup_paths(tmp_path: Path) -> None:

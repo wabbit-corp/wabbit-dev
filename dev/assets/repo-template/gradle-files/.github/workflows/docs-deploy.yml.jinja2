@@ -1,0 +1,76 @@
+name: Docs Deploy
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: corretto
+          java-version: "{{ java_version }}"
+          cache: gradle
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+{% if needs_android %}
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+{% endif %}
+      - name: Ensure Gradle wrapper is executable
+        run: chmod +x ./gradlew
+
+      - name: Install markdown docs tooling
+        run: python3 -m pip install --disable-pip-version-check mkdocs==1.6.1
+
+      - name: Build Dokka docs
+        run: {{ docs_build_command }}
+
+      - name: Assemble Pages site
+        run: |
+          SITE_DIR="$RUNNER_TEMP/pages-site"
+          rm -rf "$SITE_DIR"
+          mkdir -p "$SITE_DIR"
+          cp -R "{{ docs_output_dir }}/." "$SITE_DIR/"
+          python3 scripts/build_pages_markdown_site.py --output-dir "$SITE_DIR/docs"
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: {% raw %}${{ runner.temp }}{% endraw %}/pages-site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: {% raw %}${{ steps.deployment.outputs.page_url }}{% endraw %}
+    steps:
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

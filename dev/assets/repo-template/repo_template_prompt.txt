@@ -1,0 +1,45 @@
+<notes>
+<<notes>>
+</notes>
+
+<readme-template>
+# {{project-name}}
+
+{{brief description}}
+
+## Overview
+
+{{detailed description}}
+
+## Installation
+
+Add the following dependency to your project:
+
+```kotlin
+repositories {
+    maven("https://jitpack.io")
+}
+
+dependencies {
+    implementation("com.github.wabbit-corp:<<project_id>>:1.0.0")
+}
+```
+
+## Usage
+
+{{usage}}
+
+## Licensing
+
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0) for open source use.
+
+For commercial use, please contact <<company_legal_name>> (at <<legal_contact_email>>) for licensing terms.
+
+## Contributing
+
+Before we can accept your contributions, we kindly ask you to agree to our Contributor License Agreement (CLA).
+</readme-template>
+
+Given all of the notes above and the template, generate a README.md file for the project. Respond with the generated README.md file.
+
+Generated README.md:

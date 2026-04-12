@@ -8,7 +8,7 @@ from pathlib import Path
 
 import dev.io
 from dev.checks.base import CoarseFileScope
-from dev.config import Config, GradleProject, OwnershipType, Project, find_workspace_root, load_config
+from dev.config import Config, DataProject, GradleProject, OwnershipType, Project, find_workspace_root, load_config
 from dev.generated_files import is_setup_managed_file
 from dev.ignore_files import IgnoreMatcher
 from dev.licenses import canonicalize_license_key
@@ -25,6 +25,7 @@ MONITORED_LEGAL_FILENAMES = frozenset(
 )
 
 _TMP_NAME_RE = re.compile(r"^\.?tmp(?:$|[._-].+)$")
+_INTERNAL_REPO_TEMPLATE_PARTS = ("dev", "assets", "repo-template")
 
 
 @dataclass(frozen=True)
@@ -72,13 +73,33 @@ def discover_test_license_roots(project: Project) -> list[Path]:
     return roots
 
 
+def project_uses_managed_legal_files(project: Project) -> bool:
+    match project:
+        case DataProject():
+            return False
+        case _:
+            return True
+
+
+def project_preserves_root_legal_files(project: Project) -> bool:
+    match project:
+        case DataProject(preserve_legal_files=preserve_legal_files):
+            return preserve_legal_files
+        case _:
+            return project_uses_managed_legal_files(project)
+
+
 def expected_test_license_copy_paths(project: Project) -> list[Path]:
+    if not project_uses_managed_legal_files(project):
+        return []
     if project.test_license is None:
         return []
     return [root / "LICENSE.md" for root in discover_test_license_roots(project)]
 
 
 def expected_extra_license_paths(project: Project) -> list[Path]:
+    if not project_uses_managed_legal_files(project):
+        return []
     if project.test_license is None:
         return []
     if project.path.resolve() != project.effective_repo_root.resolve():
@@ -93,17 +114,18 @@ def build_project_layout(project: Project) -> ProjectLayout:
     test_roots = tuple(discover_test_license_roots(project))
     expected_legal_paths = set(expected_test_license_copy_paths(project))
     expected_legal_paths.update(expected_extra_license_paths(project))
-    if project.path.resolve() == repo_root:
+    if project_preserves_root_legal_files(project) and project.path.resolve() == repo_root:
         expected_legal_paths.update(
             {
                 project.path / "LICENSE.md",
-                project.path / "NOTICE.md",
                 project.path / "legal" / "cla" / "v1.0.0" / "CLA.md",
                 project.path / "legal" / "cla" / "v1.0.0" / "CLA_EXPLANATIONS.md",
                 project.path / "legal" / "contributor-privacy" / "v1.0.0" / "CONTRIBUTOR_PRIVACY.md",
                 project.path / "legal" / "code-of-conduct" / "v1.0.0" / "CODE_OF_CONDUCT.md",
             }
         )
+        if project_uses_managed_legal_files(project) and project.test_license is not None:
+            expected_legal_paths.add(project.path / "NOTICE.md")
     return ProjectLayout(
         project=project,
         repo_root=repo_root,
@@ -113,6 +135,9 @@ def build_project_layout(project: Project) -> ProjectLayout:
 
 
 def expected_repo_root_legal_paths(repo_root: Path, projects: Sequence[Project]) -> set[Path]:
+    root_legal_projects = [project for project in projects if project_preserves_root_legal_files(project)]
+    if not root_legal_projects:
+        return set()
     expected_paths = {
         repo_root / "LICENSE.md",
         repo_root / "legal" / "cla" / "v1.0.0" / "CLA.md",
@@ -120,7 +145,8 @@ def expected_repo_root_legal_paths(repo_root: Path, projects: Sequence[Project])
         repo_root / "legal" / "contributor-privacy" / "v1.0.0" / "CONTRIBUTOR_PRIVACY.md",
         repo_root / "legal" / "code-of-conduct" / "v1.0.0" / "CODE_OF_CONDUCT.md",
     }
-    for project in projects:
+    managed_projects = [project for project in projects if project_uses_managed_legal_files(project)]
+    for project in managed_projects:
         expected_paths.update(expected_extra_license_paths(project))
         if project.test_license is not None:
             expected_paths.add(repo_root / "NOTICE.md")
@@ -204,6 +230,32 @@ class SetupOwnedPathMatcher:
         return self.matches(path, is_dir=is_dir)
 
 
+class InternalToolAssetPathMatcher:
+    def __init__(self, repo_root: Path) -> None:
+        self.repo_root = repo_root.resolve()
+        self._protected_roots = (self.repo_root.joinpath(*_INTERNAL_REPO_TEMPLATE_PARTS).resolve(),)
+
+    def _normalize_path(self, path: Path | str) -> Path:
+        absolute_path = Path(path)
+        if not absolute_path.is_absolute():
+            absolute_path = absolute_path.absolute()
+        return absolute_path.resolve()
+
+    def matches(self, path: Path | str, *, is_dir: bool) -> bool:
+        del is_dir
+        absolute_path = self._normalize_path(path)
+        for protected_root in self._protected_roots:
+            try:
+                absolute_path.relative_to(protected_root)
+            except ValueError:
+                continue
+            return True
+        return False
+
+    def __call__(self, path: Path | str, is_dir: bool) -> bool:
+        return self.matches(path, is_dir=is_dir)
+
+
 def build_content_ignore_matcher(
     root: Path,
     *,
@@ -217,6 +269,7 @@ def build_content_ignore_matcher(
     return IgnoreMatcher(
         root,
         extra_predicates=(
+            InternalToolAssetPathMatcher(repo_root),
             TransientPathMatcher(repo_root, projects=projects),
             SetupOwnedPathMatcher(repo_root, projects=projects),
         ),
@@ -282,7 +335,10 @@ def build_check_ignore_matcher(
     repo_root = project.effective_repo_root if project is not None else root
     return IgnoreMatcher(
         root,
-        extra_predicates=(TransientPathMatcher(repo_root, projects=projects),),
+        extra_predicates=(
+            InternalToolAssetPathMatcher(repo_root),
+            TransientPathMatcher(repo_root, projects=projects),
+        ),
     )
 
 
@@ -320,7 +376,10 @@ def find_misplaced_legal_files(repo_root: Path, projects: Sequence[Project]) -> 
     if not projects:
         return []
     repo_layout = build_repo_layout(repo_root, projects)
-    matcher = IgnoreMatcher(repo_layout.repo_root)
+    matcher = IgnoreMatcher(
+        repo_layout.repo_root,
+        extra_predicates=(InternalToolAssetPathMatcher(repo_layout.repo_root),),
+    )
     misplaced: list[Path] = []
 
     for current_root, dirnames, filenames in os.walk(repo_layout.repo_root):

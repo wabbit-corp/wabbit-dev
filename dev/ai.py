@@ -34,6 +34,7 @@ from dev.file_properties import get_expected_file_properties
 from dev.io import read_ignore_file, read_text_file, walk_files
 from dev.json_types import JSONValue
 from dev.json_utils import as_dict, as_list, as_string_list
+from dev.template_assets import repo_template_path
 
 # Keep this prompt aligned with AGENTS.md > Commit Message Policy.
 SUGGEST_COMMIT_PROMPT = textwrap.dedent("""
@@ -939,7 +940,7 @@ def create_readme(project_name: str, root: Path, /, api_key: str) -> str:
      """).strip().replace("{overview}", overview).replace("{usage}", usage)
 
     prompt_template = _render_readme_prompt_template(
-        read_text_file(Path("data-repo-template/repo_template_prompt.txt")),
+        read_text_file(repo_template_path("repo_template_prompt.txt")),
         project_id=project_name,
         notes=notes,
     )

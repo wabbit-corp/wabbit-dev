@@ -10,6 +10,7 @@ import dev.io
 from dev.config import OwnershipType
 from dev.licenses import load_license_texts
 from dev.tasks.setup_common import write_wabbit_legal_files
+from dev.template_assets import repo_template_root
 
 
 @dataclass
@@ -41,8 +42,7 @@ class _FakeContext:
 
 
 def _workspace_template_root() -> Path:
-    repo_root = Path(__file__).resolve().parents[1]
-    return repo_root.parent / "data-repo-template"
+    return repo_template_root()
 
 
 def test_workspace_legal_templates_do_not_contain_manual_placeholders() -> None:

@@ -1,0 +1,60 @@
+name: Docs Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  docs-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "{{ dotnet_version }}"
+
+      - name: Install docs tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "mkdocs>=1.6,<2.0" "mkdocs-material>=9.6,<9.7" pytest codespell
+
+      - name: Build project
+        run: dotnet build "{{ project_file }}" -c Release --nologo
+
+{% if has_docs_links_script %}
+      - name: Check docs links
+        run: python scripts/check_docs_links.py
+{% endif %}
+{% if has_docs_snippets_test %}
+      - name: Verify docs snippets
+        run: python -m pytest -q tests/test_docs_snippets.py
+{% endif %}
+      - name: Run codespell on docs
+        run: |
+          CANDIDATES=()
+          for path in README.md CHANGELOG.md CONTRIBUTING.md docs; do
+            if [ -e "$path" ]; then
+              CANDIDATES+=("$path")
+            fi
+          done
+          if [ "${CANDIDATES[0]+set}" = "set" ]; then
+            python -m codespell "${CANDIDATES[@]}"
+          fi
+
+      - name: Build docs
+        run: python -m mkdocs build --strict --site-dir site

@@ -8,6 +8,7 @@ from mu.types import Document
 
 from dev.config import Config, GradleProject, OwnershipType, Version
 from dev.tasks.setup import RepoSetupContext, RepoSetupMode
+from dev.template_assets import repo_template_root
 
 
 def _make_repo_setup_context() -> RepoSetupContext:
@@ -17,7 +18,7 @@ def _make_repo_setup_context() -> RepoSetupContext:
         known_repo_names=[],
         known_github_repos={},
         is_github_api_available=False,
-        repo_template=Path(__file__).resolve().parents[1] / "data-repo-template",
+        repo_template=repo_template_root(),
         licenses={},
         coc=jinja2.Template(""),
         editorconfig_template=jinja2.Template("root = true\n"),

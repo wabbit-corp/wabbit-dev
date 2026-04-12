@@ -7,6 +7,8 @@ import jinja2
 import pytest
 from mu.parser import parse
 
+from dev.template_assets import repo_template_root
+
 if TYPE_CHECKING:
     from dev.config import Config
     from dev.tasks.setup import RepoSetupContext, RepoSetupMode
@@ -52,7 +54,7 @@ def _make_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupContext
         known_repo_names=[],
         known_github_repos={},
         is_github_api_available=False,
-        repo_template=Path(__file__).resolve().parents[1] / "data-repo-template",
+        repo_template=repo_template_root(),
         licenses={},
         coc=jinja2.Template(""),
         editorconfig_template=jinja2.Template("root = true\n"),

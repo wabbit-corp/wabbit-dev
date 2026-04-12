@@ -24,8 +24,8 @@ from dev.config import (
     KmpJvmRuns,
     Kotlin,
     KotlinCompilerPlugin,
-    KotlinGradlePluginLibrary,
     KotlinComposePlugin,
+    KotlinGradlePluginLibrary,
     KotlinPluginDefinition,
     MavenDependencyTarget,
     MavenLibraryDefinition,
@@ -41,6 +41,7 @@ from dev.config import (
 from dev.maven import MavenCoordinate
 from dev.tasks.setup_common import RepoSetupMode
 from dev.tasks.setup_kotlin import _render_dependency_for_mode, setup_gradle_project, write_gradle_repo_root_workflows
+from dev.template_assets import repo_template_path
 
 
 def _managed_gradle_template(body: str) -> str:
@@ -65,6 +66,10 @@ def _strip_managed_banner(text: str) -> str:
     while index < len(lines) and lines[index].startswith(comment_prefix):
         index += 1
     return "\n".join(lines[index:]).strip()
+
+
+def _gradle_template_text(name: str) -> str:
+    return repo_template_path("gradle-files", name).read_text(encoding="utf-8")
 
 
 @dataclass
@@ -604,10 +609,7 @@ def test_setup_gradle_project_renders_js_wasm_targets_and_custom_source_dirs(
         "wasmJsMain": [Dependency(scope=None, target=NpmDependencyTarget(package="onnxruntime-web", version="1.24.3"))],
     }
 
-    repo_root = Path(__file__).resolve().parents[2]
-    kmp_template = (
-        repo_root / "data-repo-template" / "gradle-files" / "subproject-build-kmp.gradle.kts.jinja2"
-    ).read_text(encoding="utf-8")
+    kmp_template = _gradle_template_text("subproject-build-kmp.gradle.kts.jinja2")
     ctx = _make_context(tmp_path, jvm_template="JVM_TEMPLATE", kmp_template=kmp_template)
 
     setup_gradle_project(ctx, project, interactive=False)
@@ -644,10 +646,7 @@ def test_setup_gradle_project_renders_google_repository_for_js_compose_projects(
         )
     ]
 
-    repo_root = Path(__file__).resolve().parents[2]
-    kmp_template = (
-        repo_root / "data-repo-template" / "gradle-files" / "subproject-build-kmp.gradle.kts.jinja2"
-    ).read_text(encoding="utf-8")
+    kmp_template = _gradle_template_text("subproject-build-kmp.gradle.kts.jinja2")
     ctx = _make_context(tmp_path, jvm_template="JVM_TEMPLATE", kmp_template=kmp_template)
 
     setup_gradle_project(ctx, project, interactive=False)
@@ -674,10 +673,7 @@ def test_setup_gradle_project_renders_depends_on_parents_via_source_set_provider
         "linuxX64Main": GradleSourceSet(name="linuxX64Main", depends_on=["ortNativeMain"]),
     }
 
-    repo_root = Path(__file__).resolve().parents[2]
-    kmp_template = (
-        repo_root / "data-repo-template" / "gradle-files" / "subproject-build-kmp.gradle.kts.jinja2"
-    ).read_text(encoding="utf-8")
+    kmp_template = _gradle_template_text("subproject-build-kmp.gradle.kts.jinja2")
     ctx = _make_context(tmp_path, jvm_template="JVM_TEMPLATE", kmp_template=kmp_template)
 
     setup_gradle_project(ctx, project, interactive=False)
@@ -702,10 +698,7 @@ def test_setup_gradle_project_remaps_kmp_publication_artifact_ids(
     project.gradle_project_name = "library"
     project.artifact_id = "kotlin-example"
 
-    repo_root = Path(__file__).resolve().parents[2]
-    kmp_template = (
-        repo_root / "data-repo-template" / "gradle-files" / "subproject-build-kmp.gradle.kts.jinja2"
-    ).read_text(encoding="utf-8")
+    kmp_template = _gradle_template_text("subproject-build-kmp.gradle.kts.jinja2")
     ctx = _make_context(tmp_path, jvm_template="JVM_TEMPLATE", kmp_template=kmp_template)
 
     setup_gradle_project(ctx, project, interactive=False)
@@ -1303,8 +1296,17 @@ def test_write_gradle_repo_root_workflows_skips_docs_when_repo_docs_own_them(
         jvm_template="JVM_TEMPLATE",
         kmp_template="KMP_TEMPLATE",
     )
+    ctx.config.defined_repos["demo-repo"] = RepoDefinition(
+        repo_id="demo-repo",
+        path=repo_root,
+        github_repo="wabbit-corp/demo-repo",
+        gradle_root_project_name="demo-repo",
+        jvm_policy=None,
+        supported_kotlin_versions=["2.2.20"],
+        project_ids=["demo-repo/library"],
+    )
 
-    monkeypatch.setattr(repo_docs_module, "repo_docs_workflows_owned_by_repo", lambda _config, _project: True)
+    monkeypatch.setattr(repo_docs_module, "repo_definition_docs_workflows_owned_by_repo", lambda _config, _repo: True)
 
     write_gradle_repo_root_workflows(
         ctx,
@@ -1312,6 +1314,55 @@ def test_write_gradle_repo_root_workflows_skips_docs_when_repo_docs_own_them(
         repo_github_repo="wabbit-corp/demo-repo",
         projects=[docs_project],
         docs_project=docs_project,
+        java_version=21,
+    )
+
+    assert (workflows_dir / "docs-quality.yml").read_text(encoding="utf-8") == "repo docs quality\n"
+    assert (workflows_dir / "docs-deploy.yml").read_text(encoding="utf-8") == "repo docs deploy\n"
+
+
+def test_write_gradle_repo_root_workflows_preserves_repo_docs_when_docs_project_is_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dev.repo_docs as repo_docs_module
+
+    repo_root = tmp_path / "demo-repo"
+    library_project = _make_repo_gradle_project(
+        repo_root / "library",
+        project_id="demo-repo/library",
+        repo_root=repo_root,
+        gradle_project_name="demo-library",
+        github_repo="wabbit-corp/demo-repo",
+    )
+    library_project.path.mkdir(parents=True, exist_ok=True)
+    workflows_dir = repo_root / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "docs-quality.yml").write_text("repo docs quality\n", encoding="utf-8")
+    (workflows_dir / "docs-deploy.yml").write_text("repo docs deploy\n", encoding="utf-8")
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template="KMP_TEMPLATE",
+    )
+    ctx.config.defined_repos["demo-repo"] = RepoDefinition(
+        repo_id="demo-repo",
+        path=repo_root,
+        github_repo="wabbit-corp/demo-repo",
+        gradle_root_project_name="demo-repo",
+        jvm_policy=None,
+        supported_kotlin_versions=["2.2.20"],
+        project_ids=["demo-repo/library"],
+    )
+
+    monkeypatch.setattr(repo_docs_module, "repo_definition_docs_workflows_owned_by_repo", lambda _config, _repo: True)
+
+    write_gradle_repo_root_workflows(
+        ctx,
+        root_path=repo_root,
+        repo_github_repo="wabbit-corp/demo-repo",
+        projects=[library_project],
+        docs_project=None,
         java_version=21,
     )
 
@@ -1481,10 +1532,7 @@ def test_setup_gradle_project_renders_gradle_plugin_project_defaults(
     version_resource.parent.mkdir(parents=True, exist_ok=True)
     version_resource.write_text("version=${projectVersion}\n", encoding="utf-8")
 
-    repo_root = Path(__file__).resolve().parents[2]
-    jvm_template = (repo_root / "data-repo-template" / "gradle-files" / "subproject-build.gradle.kts.jinja2").read_text(
-        encoding="utf-8"
-    )
+    jvm_template = _gradle_template_text("subproject-build.gradle.kts.jinja2")
     ctx = _make_context(
         tmp_path,
         jvm_template=jvm_template,
@@ -1520,10 +1568,7 @@ def test_setup_gradle_project_renders_kotlin_gradle_plugin_library_defaults(
         "jvm": Jvm(),
     }
 
-    repo_root = Path(__file__).resolve().parents[2]
-    jvm_template = (repo_root / "data-repo-template" / "gradle-files" / "subproject-build.gradle.kts.jinja2").read_text(
-        encoding="utf-8"
-    )
+    jvm_template = _gradle_template_text("subproject-build.gradle.kts.jinja2")
     ctx = _make_context(
         tmp_path,
         jvm_template=jvm_template,
@@ -1555,10 +1600,7 @@ def test_setup_gradle_project_renders_intellij_platform_library_defaults(
         "jvm": Jvm(),
     }
 
-    repo_root = Path(__file__).resolve().parents[2]
-    jvm_template = (repo_root / "data-repo-template" / "gradle-files" / "subproject-build.gradle.kts.jinja2").read_text(
-        encoding="utf-8"
-    )
+    jvm_template = _gradle_template_text("subproject-build.gradle.kts.jinja2")
     ctx = _make_context(
         tmp_path,
         jvm_template=jvm_template,

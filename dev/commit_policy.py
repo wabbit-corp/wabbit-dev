@@ -33,6 +33,8 @@ CHANGELOG_NAMES: tuple[str, ...] = (
 POLICY_EXCEPTION_PATTERN = re.compile(r"^Policy Exception: (merge|revert|version-tag|vendored-import)$")
 RELEASE_AUTOMATION_PATTERN = re.compile(r"^Release Automation: true$")
 SUBJECT_MAX_LENGTH = 72
+IGNORED_VERSION_CHANGE_PATH_PREFIXES: tuple[str, ...] = ("dev/assets/repo-template/",)
+IGNORED_VERSION_CHANGE_PATH_PARTS: frozenset[str] = frozenset({"test", "tests"})
 
 
 @dataclass(frozen=True)
@@ -378,14 +380,39 @@ def _has_release_automation_marker(lines: list[str]) -> bool:
 
 
 def _version_changed(diff_text: str) -> bool:
+    current_path: str | None = None
     for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            current_path = _diff_target_path(line)
+            continue
         if not line or line.startswith("+++") or line.startswith("---"):
             continue
         if not (line.startswith("+") or line.startswith("-")):
             continue
+        if _ignored_version_change_path(current_path):
+            continue
         if any(pattern.match(line) is not None for pattern in VERSION_LINE_PATTERNS):
             return True
     return False
+
+
+def _diff_target_path(line: str) -> str | None:
+    parts = line.split()
+    if len(parts) < 4:
+        return None
+    target = parts[3]
+    if target.startswith("b/"):
+        return target[2:]
+    return target
+
+
+def _ignored_version_change_path(path: str | None) -> bool:
+    if path is None:
+        return False
+    normalized = path.replace("\\", "/")
+    if any(normalized.startswith(prefix) for prefix in IGNORED_VERSION_CHANGE_PATH_PREFIXES):
+        return True
+    return any(part in IGNORED_VERSION_CHANGE_PATH_PARTS for part in Path(normalized).parts)
 
 
 def _changelog_changed(paths: list[str]) -> bool:

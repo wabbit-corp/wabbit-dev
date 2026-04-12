@@ -1,0 +1,25 @@
+site_name: {{ site_name }}
+site_description: {{ site_description }}
+{% if site_url %}site_url: {{ site_url }}{% endif %}
+{% if repo_url %}repo_url: {{ repo_url }}{% endif %}
+{% if repo_name %}repo_name: {{ repo_name }}{% endif %}
+docs_dir: docs
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.sections
+    - content.code.copy
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      use_pygments: true
+      pygments_lang_class: true
+  - pymdownx.superfences
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Development: development.md

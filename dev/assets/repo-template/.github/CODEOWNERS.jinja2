@@ -1,0 +1,4 @@
+{% for owner in code_owners -%}
+# {{ owner.name }} <{{ owner.email }}>
+{% endfor -%}
+* {% for owner in code_owners %}{{ owner.email }}{% if not loop.last %} {% endif %}{% endfor %}
