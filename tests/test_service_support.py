@@ -1,10 +1,16 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from dev.repo_status import RepoStatusRecord
-from dev.service_support import STALE_DIRTY_AFTER, build_monitor_snapshot, icon_for_snapshot
+from dev.service_support import (
+    STALE_DIRTY_AFTER,
+    build_monitor_snapshot,
+    format_local_timestamp,
+    icon_for_snapshot,
+    repo_check_spacing_seconds,
+)
 
 
 def test_build_monitor_snapshot_marks_stale_dirty_repos_red(tmp_path: Path) -> None:
@@ -108,3 +114,18 @@ def test_build_monitor_snapshot_clean_workspace_is_green(tmp_path: Path) -> None
     assert snapshot.error_repo_count == 0
     assert snapshot.color == "green"
     assert icon_for_snapshot(snapshot) == "🟢"
+
+
+def test_format_local_timestamp_uses_requested_timezone() -> None:
+    timestamp = datetime(2026, 4, 12, 16, 30, tzinfo=UTC)
+    toronto = timezone(timedelta(hours=-4), name="EDT")
+
+    assert format_local_timestamp(timestamp, timezone=toronto) == "2026-04-12 12:30:00 EDT"
+
+
+def test_repo_check_spacing_seconds_spreads_interval_across_repo_count() -> None:
+    assert repo_check_spacing_seconds(60, 3) == 20.0
+
+
+def test_repo_check_spacing_seconds_has_small_positive_floor() -> None:
+    assert repo_check_spacing_seconds(1, 100) == 0.1

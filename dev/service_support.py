@@ -5,7 +5,7 @@ import os
 import signal
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from hashlib import sha1
 from pathlib import Path
 from typing import Literal
@@ -16,6 +16,7 @@ from dev.repo_status import RepoStatusRecord
 type MonitorColor = Literal["green", "yellow", "red"]
 
 STALE_DIRTY_AFTER = timedelta(hours=8)
+MIN_REPO_CHECK_SPACING_SECONDS = 0.1
 
 
 @dataclass(frozen=True)
@@ -344,6 +345,18 @@ def format_dirty_age(dirty_since: datetime | None, *, now: datetime | None = Non
     return f"{minutes}m"
 
 
+def format_local_timestamp(timestamp: datetime, *, timezone: tzinfo | None = None) -> str:
+    effective_timestamp = timestamp if timestamp.tzinfo is not None else timestamp.replace(tzinfo=UTC)
+    localized = effective_timestamp.astimezone() if timezone is None else effective_timestamp.astimezone(timezone)
+    return localized.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def repo_check_spacing_seconds(interval_seconds: int, repo_count: int) -> float:
+    normalized_interval = max(1, interval_seconds)
+    normalized_repo_count = max(1, repo_count)
+    return max(MIN_REPO_CHECK_SPACING_SECONDS, normalized_interval / normalized_repo_count)
+
+
 def icon_for_snapshot(snapshot: MonitorSnapshot) -> str:
     if snapshot.color == "green":
         return "🟢"
@@ -365,10 +378,12 @@ __all__ = [
     "cleanup_stale_service_pid",
     "ensure_service_dir",
     "format_dirty_age",
+    "format_local_timestamp",
     "icon_for_snapshot",
     "load_monitor_snapshot",
     "load_service_pid",
     "process_is_alive",
+    "repo_check_spacing_seconds",
     "remove_service_pid",
     "service_paths_for_workspace",
     "terminate_process",

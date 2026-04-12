@@ -10,9 +10,11 @@ from dev.config import find_workspace_root
 from dev.failure_context import contextualize_failure
 from dev.messages import accent, error, heading, info, muted, success, warning
 from dev.service_support import (
+    ServicePid,
     cleanup_stale_service_pid,
     ensure_service_dir,
     format_dirty_age,
+    format_local_timestamp,
     icon_for_snapshot,
     load_monitor_snapshot,
     load_service_pid,
@@ -21,7 +23,6 @@ from dev.service_support import (
     service_paths_for_workspace,
     terminate_process,
     write_service_pid,
-    ServicePid,
 )
 
 
@@ -146,7 +147,7 @@ def service_status() -> int:
     if pid_info is None:
         warning(f"Repo monitor is not running for {workspace_root}.")
         if snapshot is not None:
-            print(f"  Last snapshot: {snapshot.checked_at.isoformat()}")
+            print(f"  Last snapshot: {format_local_timestamp(snapshot.checked_at)}")
             print(f"  Last state: {icon_for_snapshot(snapshot)}")
         return 1
 
@@ -160,7 +161,7 @@ def service_status() -> int:
         return 0
 
     print(
-        f"{heading('Snapshot')}: {snapshot.checked_at.isoformat()} {icon_for_snapshot(snapshot)} "
+        f"{heading('Snapshot')}: {format_local_timestamp(snapshot.checked_at)} {icon_for_snapshot(snapshot)} "
         f"({snapshot.dirty_repo_count}/{snapshot.total_repo_count} dirty, {snapshot.stale_repo_count} stale)"
     )
     dirty_repos = [repo for repo in snapshot.repos if repo.is_dirty]
