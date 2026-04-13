@@ -16,6 +16,10 @@ path-or-project targets when it can infer what you meant.
 Use `dev where` to inspect the exact workspace, project, and repo context
 the CLI inferred from the current directory.
 
+This reference covers both the visible command tree from `dev --help` and the
+supported compatibility paths that stay hidden from the top-level help output,
+such as `docs check`, `release verify`, `security scan`, and `check describe`.
+
 ## Target Model
 
 Many commands now share the same target conventions.
@@ -141,6 +145,19 @@ being exposed in `.tools/bin`. Python-package signatures are not consistently
 published upstream, so Python tools are installed through pip with PyPI/HTTPS
 transport and reported separately in the install output.
 
+### `install hooks`
+
+```bash
+dev install hooks
+dev install hooks app-wabbit-dev
+dev install hooks --json
+```
+
+Installs local Git hooks for the current repo or selected repos. Targets can be
+repo IDs, project IDs, or paths inside a git repository.
+
+Use `--json` when editor tooling or bootstrap scripts need a structured result.
+
 ## Shell Completion
 
 ### `completion bash`
@@ -176,6 +193,16 @@ they can complete:
 - configured project IDs
 - configured repo IDs
 - loaded check names
+
+### `completion query`
+
+```bash
+dev completion query SHELL INDEX WORD ...
+```
+
+Internal compatibility protocol used by the generated completion scripts. You
+normally do not call this directly, but it remains a supported command path and
+is documented here because the completion scripts depend on it.
 
 ## Environment Diagnostics
 
@@ -216,9 +243,38 @@ project closure.
 
 ## Documentation
 
-### `docs check`
+### `verify`
 
 ```bash
+dev verify
+```
+
+Lists the slower workflow-oriented verification entrypoints:
+
+- `verify docs`
+- `verify release`
+- `verify security`
+- `verify list`
+
+These are the visible grouped verification commands shown by `dev --help`.
+Compatibility entrypoints such as `docs check`, `release verify`, and
+`security scan` remain supported and are documented below.
+
+### `verify list`
+
+```bash
+dev verify list
+dev verify list --json
+```
+
+Prints the available verification workflows and their summaries. Use `--json`
+for editor tooling, wrappers, or CI helpers that want to discover the available
+verification families programmatically.
+
+### `verify docs` / `docs check`
+
+```bash
+dev verify docs [TARGET ...] [--semantic] [--json]
 dev docs check [TARGET ...] [--semantic] [--json]
 ```
 
@@ -249,6 +305,9 @@ such as path listing, grep, and file reads.
 Examples:
 
 ```bash
+dev verify docs
+dev verify docs app-wabbit-dev
+dev verify docs --semantic app-wabbit-dev
 dev docs check
 dev docs check app-wabbit-dev
 dev docs check --semantic app-wabbit-dev
@@ -326,6 +385,18 @@ Parses `root.clj` and `root.private.clj` and validates:
 - feature blocks and typed config fields
 
 Use this first when changing the config DSL or debugging setup/build behavior.
+
+### `config cut`
+
+```bash
+dev config cut subset.clj app-wabbit-dev jeeves
+```
+
+Writes a reduced `root.clj`-style config file containing only the selected
+projects and the transitive local project definitions they need.
+
+Use this when you want a smaller extracted workspace config for debugging,
+isolated builds, or handing a focused subset to another tool or agent.
 
 ### `project list`
 
@@ -454,6 +525,25 @@ dev project targets ./jeeves/client
 dev project targets jeeves --json
 ```
 
+### `project versions`
+
+```bash
+dev project versions PROJECT
+dev project versions PROJECT --json
+```
+
+Shows release-state diagnostics for one configured project, including:
+
+- current configured version
+- reachable local tags
+- remote tags when the git remote is configured
+- commits after the latest version-like tag
+- unpushed commit count and local dirty state
+- registry visibility such as Maven Central, PyPI, NuGet, or JitPack when applicable
+
+Use this when you need to answer “what is published, what is only tagged, and
+what still exists only locally?”
+
 ## Generation, Build, and Maintenance
 
 ### `setup`
@@ -511,9 +601,10 @@ Only Gradle and Python projects are buildable through this command.
 Use `--json` to emit the resolved targets, topological build order, per-project
 results, and a summary count.
 
-### `release verify`
+### `verify release` / `release verify`
 
 ```bash
+dev verify release [TARGET ...] [--json]
 dev release verify [TARGET ...] [--json]
 ```
 
@@ -546,11 +637,24 @@ per-project results, and summary counts.
 Examples:
 
 ```bash
+dev verify release
+dev verify release app-wabbit-dev
+dev verify release jeeves
 dev release verify
 dev release verify app-wabbit-dev
 dev release verify jeeves
 dev release verify --json app-wabbit-dev
 ```
+
+### `release bundle`
+
+```bash
+dev release bundle [TARGET ...] [--json]
+```
+
+Builds release artifacts suitable for GitHub Releases for publishable projects.
+Use this when verification is not enough and you want the packaged output that a
+release workflow would attach or upload later.
 
 ### `clean`
 
@@ -707,9 +811,11 @@ targets without uploading artifacts or contacting remote publish services.
 ```bash
 dev check list
 dev check list --json
+dev check show SpdxHeaderCheck
+dev check show SpdxHeaderCheck --json
 dev check describe SpdxHeaderCheck
-dev check describe SpdxHeaderCheck --json
 dev check [TARGET] [CHECK ...] [--fix]
+dev check run [TARGET] [CHECK ...] [--fix]
 ```
 
 Runs the loaded check suite against:
@@ -722,8 +828,10 @@ Runs the loaded check suite against:
 Discovery helpers:
 
 - `check list`: show every loaded check with its scope and whether it advertises auto-fix support
-- `check describe CHECK`: show issue IDs, config commands, and suppression examples for one check
-- `--json`: with `check list` or `check describe`, emit structured output instead of text
+- `check show CHECK`: show issue IDs, config commands, and suppression examples for one check
+- `check describe CHECK`: hidden compatibility alias for `check show`
+- `check config`: hidden compatibility shortcut for `config check`
+- `--json`: with `check list` or `check show`, emit structured output instead of text
 
 Examples:
 
@@ -734,11 +842,14 @@ dev check jeeves
 dev check app-wabbit-dev/dev/cli.py
 dev check :app-wabbit-dev
 dev check :root --fix
+dev check run . SpdxHeaderCheck
+dev check show SpdxHeaderCheck
 dev check . SpdxHeaderCheck
 ```
 
 Important notes:
 
+- `dev check` and `dev check run` are equivalent
 - explicit check names use the Python class names registered by the loaded check modules
 - checks honor `.gitignore`, `.checkignore`, `checks/disable`, and `checks/ignore-finding`
 - `--fix` only applies to checks that supply an automatic fix callback
@@ -779,9 +890,10 @@ Targets can be:
 - a configured project or repo ID prefixed with `:`
 - `:root` to walk every configured project path
 
-### `security scan`
+### `verify security` / `security scan`
 
 ```bash
+dev verify security [TARGET ...]
 dev security scan [TARGET ...]
 ```
 
@@ -803,6 +915,8 @@ Known tools:
 Examples:
 
 ```bash
+dev verify security .
+dev verify security app-wabbit-dev
 dev security scan .
 dev security scan app-wabbit-dev
 dev security scan --tool gitleaks --tool shellcheck .
@@ -862,6 +976,20 @@ Requirements:
 Use `--dry-run` to print the PROD setup order and repository commit plan without
 modifying files or creating commits.
 
+### `commit verify`
+
+```bash
+dev commit verify --message-file .git/COMMIT_EDITMSG
+dev commit verify --message "feat: tighten docs coverage"
+dev commit verify --range origin/master..HEAD
+dev commit verify --staged
+dev commit verify --json
+```
+
+Validates commit messages against the commit policy, optionally including staged
+diff context checks such as version/changelog coupling. This is intended for
+hook integration, local preflight, and CI enforcement.
+
 ### `push`
 
 ```bash
@@ -882,6 +1010,52 @@ Current caveat: the branch target is hard-coded to `master`.
 
 Use `--dry-run` to print the resolved repositories before pushing branch or tag
 updates.
+
+## Services and Backup
+
+### `service`
+
+```bash
+dev service
+dev service start
+dev service stop
+dev service status
+dev service dashboard
+```
+
+Hosts the workspace monitoring surface:
+
+- `service start`: start the macOS menubar monitor for this workspace
+- `service stop`: stop the monitor and dashboard processes
+- `service status`: show the current monitor and dashboard process state
+- `service dashboard`: start or open the localhost dashboard
+
+Use the optional `--interval-seconds` flag on `service start` and
+`service dashboard` to tune the refresh cadence.
+
+### `backup`
+
+```bash
+dev backup
+dev backup push
+dev backup restore
+```
+
+Hosts immutable restic-based repo backup commands configured through
+`root.clj` backup policy and target definitions.
+
+- `backup push`: snapshot selected repos, the current repo, or all configured repos from the workspace root
+- `backup restore`: restore one repo snapshot into a destination directory
+
+Examples:
+
+```bash
+dev backup push
+dev backup push --target cold-storage app-wabbit-dev
+dev backup push --dry-run
+dev backup restore app-wabbit-dev --into /tmp/restore
+dev backup restore --snapshot latest --json
+```
 
 ## Standalone Helper
 

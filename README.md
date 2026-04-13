@@ -106,12 +106,13 @@ dev build app-datatron
 Verify release readiness without publishing:
 
 ```bash
-dev release verify app-wabbit-dev
+dev verify release app-wabbit-dev
 ```
 
 ## Command Reference
 
-Every command is documented here and in the MkDocs reference under
+Core commands are summarized here. The full command reference, including nested
+subcommands and compatibility aliases, lives in
 [docs/commands.md](docs/commands.md).
 
 | Command | What it does |
