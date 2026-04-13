@@ -269,6 +269,34 @@ def _issue_types_for_check(check: Check) -> tuple[IssueType, ...]:
     if module is None:
         return ()
 
+    for cls in check.__class__.__mro__:
+        declared_issue_types = vars(cls).get("issue_types")
+        match declared_issue_types:
+            case tuple() as values:
+                declared: list[IssueType] = []
+                for value in values:
+                    match value:
+                        case IssueType() as issue_type:
+                            declared.append(issue_type)
+                        case _:
+                            declared = []
+                            break
+                if declared:
+                    return tuple(declared)
+            case list() as values:
+                declared = []
+                for value in values:
+                    match value:
+                        case IssueType() as issue_type:
+                            declared.append(issue_type)
+                        case _:
+                            declared = []
+                            break
+                if declared:
+                    return tuple(declared)
+            case _:
+                pass
+
     issue_types_by_name = {name: value for name, value in vars(module).items() if isinstance(value, IssueType)}
     if not issue_types_by_name:
         return ()
@@ -375,7 +403,12 @@ def list_check_names(config: Config | None = None) -> list[str]:
 
 def list_check_selectors(config: Config | None = None) -> list[str]:
     catalog = load_check_catalog(config)
-    return sorted(entry.id for entry in catalog.values())
+    selectors: set[str] = set()
+    for entry in catalog.values():
+        selectors.add(entry.id)
+        for issue_type in entry.issue_types:
+            selectors.add(issue_type.id)
+    return sorted(selectors)
 
 
 def list_check_bundle_names() -> list[str]:
@@ -447,18 +480,56 @@ def _selector_lookup(catalog: dict[str, CheckCatalogEntry]) -> dict[str, str]:
     return lookup
 
 
+def _check_names_for_issue_id(catalog: dict[str, CheckCatalogEntry], issue_id: str) -> tuple[str, ...]:
+    matches: list[str] = []
+    for entry in catalog.values():
+        if any(issue_type.id == issue_id for issue_type in entry.issue_types):
+            matches.append(entry.name)
+    return tuple(sorted(matches))
+
+
+def _issue_type_for_id(catalog: dict[str, CheckCatalogEntry], issue_id: str) -> IssueType | None:
+    for entry in catalog.values():
+        for issue_type in entry.issue_types:
+            if issue_type.id == issue_id:
+                return issue_type
+    return None
+
+
+def _selector_choices(catalog: dict[str, CheckCatalogEntry]) -> tuple[str, ...]:
+    selectors: set[str] = set()
+    for entry in catalog.values():
+        selectors.add(entry.id)
+        for legacy_name in entry.legacy_names:
+            selectors.add(legacy_name)
+        for issue_type in entry.issue_types:
+            selectors.add(issue_type.id)
+    return tuple(sorted(selectors))
+
+
 def _resolve_check_names(catalog: dict[str, CheckCatalogEntry], selectors: Sequence[str]) -> tuple[str, ...]:
     lookup = _selector_lookup(catalog)
     resolved: list[str] = []
     seen: set[str] = set()
     for selector in selectors:
         resolved_name = lookup.get(selector)
-        if resolved_name is None:
-            raise ValueError(unknown_name_message("check", selector, lookup))
-        if resolved_name in seen:
+        if resolved_name is not None:
+            if resolved_name in seen:
+                continue
+            seen.add(resolved_name)
+            resolved.append(resolved_name)
             continue
-        seen.add(resolved_name)
-        resolved.append(resolved_name)
+
+        matched_names = _check_names_for_issue_id(catalog, selector)
+        if matched_names:
+            for matched_name in matched_names:
+                if matched_name in seen:
+                    continue
+                seen.add(matched_name)
+                resolved.append(matched_name)
+            continue
+
+        raise ValueError(unknown_name_message("check", selector, _selector_choices(catalog)))
     return tuple(resolved)
 
 
@@ -545,12 +616,56 @@ def list_checks(*, json_output: bool = False) -> int:
         )
         print(f"    legacy: {entry.name}")
     print()
-    print(f"Run `{command_text('check show <check-id>')}` for issue IDs, config knobs, and suppression examples.")
+    print(
+        f"Run `{command_text('check show <check-id-or-issue-id>')}` "
+        "for config knobs, issue IDs, and suppression examples."
+    )
     return 0
 
 
 def show_check(check_selector: str, *, json_output: bool = False) -> int:
     catalog = _catalog(_load_optional_config())
+    issue_type = _issue_type_for_id(catalog, check_selector)
+    if issue_type is not None:
+        resolved_names = _check_names_for_issue_id(catalog, check_selector)
+        payload = {
+            "selectorType": "issue",
+            "issue": _issue_type_payload(issue_type),
+            "checks": [_check_catalog_payload(catalog[name]) for name in resolved_names],
+            "suppressionExamples": {
+                "rootCljDisable": f'(checks/disable "{issue_type.id}" "**/*")',
+                "rootCljIgnoreFinding": f'(checks/ignore-finding "{issue_type.id}" "**/*" "needle")',
+            },
+        }
+        if json_output:
+            print(json.dumps(payload, indent=2))
+            return 0
+
+        print(f"{heading('Issue')}: {accent(issue_type.id)}")
+        print(
+            f"{heading('Severity')}: "
+            f"{style(issue_type.severity.value, _severity_color(issue_type.severity), attrs=('bold',))}"
+        )
+        print(f"{heading('Message')}: {issue_type.message}")
+        print(f"{heading('Matching checks')}: {len(resolved_names)}")
+        for resolved_name in resolved_names:
+            entry = catalog[resolved_name]
+            fix_color = "green" if entry.fixable == "yes" else "yellow" if entry.fixable == "unknown" else "white"
+            print(
+                f"  - {accent(entry.id)}  "
+                f"[{style(entry.kind, _kind_color(entry.kind), attrs=('bold',))}]  "
+                f"fix:{style(entry.fixable, fix_color, attrs=('bold',) if entry.fixable == 'yes' else ())}  "
+                f"bundles:{','.join(entry.bundles)}  "
+                f"legacy:{entry.name}"
+            )
+        disable_example = f'(checks/disable "{issue_type.id}" "**/*")'
+        ignore_example = f'(checks/ignore-finding "{issue_type.id}" "**/*" "needle")'
+        print(heading("Suppression examples:"))
+        print(f"  - root.clj disable: {command_text(disable_example)}")
+        print("  - root.clj ignore finding text: " + command_text(ignore_example))
+        print(f"Run `{command_text('check show <check-id>')}` for check-specific config knobs and fixability.")
+        return 0
+
     resolved_names = _resolve_check_names(catalog, [check_selector])
     entry = catalog[resolved_names[0]]
 

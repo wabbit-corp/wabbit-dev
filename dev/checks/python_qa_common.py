@@ -399,6 +399,11 @@ _TOOL_ISSUE_TYPES: dict[str, tuple[IssueType, IssueType]] = {
 }
 
 
+def qa_tool_issue_types(tool_key: str) -> tuple[IssueType, ...]:
+    t_error, t_warn = _TOOL_ISSUE_TYPES[tool_key]
+    return (t_error, t_warn, E_PYQA_TOOL_MISSING, E_PYQA_TOOL_FAILED)
+
+
 @dataclass
 class ToolRunResult:
     rc: int
@@ -2981,6 +2986,7 @@ def reset_all_python_qa_state() -> None:
 
 __all__ = [
     "subprocess",
+    "qa_tool_issue_types",
     "run_ruff",
     "run_black",
     "run_import_linter",

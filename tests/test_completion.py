@@ -172,11 +172,11 @@ def test_completion_suggests_check_names_for_show(monkeypatch, capsys) -> None:
     import dev.typed_cli as typed_cli
 
     monkeypatch.setattr(typed_cli, "_load_workspace_config", lambda: None)
-    monkeypatch.setattr(check_task, "list_check_selectors", lambda config=None: ["spdx-header"])
+    monkeypatch.setattr(check_task, "list_check_selectors", lambda config=None: ["spdx-header", "E_INCORRECT_SPDX_HEADER"])
 
     candidates = _run_typed_completion(["dev", "check", "show", ""], 3, capsys)
 
-    assert candidates == ("spdx-header",)
+    assert candidates == ("spdx-header", "E_INCORRECT_SPDX_HEADER")
 
 
 def test_completion_suggests_check_bundles(monkeypatch, capsys) -> None:

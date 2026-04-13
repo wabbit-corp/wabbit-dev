@@ -52,6 +52,7 @@ def _make_tree_issue(group: TreeGroup) -> Issue:
 
 class DuplicateFilesCheck(RepoCheck):
     order = 70
+    issue_types = (E_DUPLICATE_FILE, E_DUPLICATE_DIRECTORY_TREE)
 
     def check(self, path: Path, project: Project | None) -> list[Issue]:
         report = find_duplicates(
