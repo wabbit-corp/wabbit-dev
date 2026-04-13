@@ -299,6 +299,7 @@ class IntellijPlatformLibrary(Feature):
     __feature_name__ = "intellij-platform-library"
     ideaVersion: str | None = None
     bundledPlugins: list[str] | None = None
+    modulePlugin: bool = True
 
     def implied(self) -> list[Feature]:
         return [Kotlin(), Jvm()]

@@ -1610,7 +1610,7 @@ def test_setup_gradle_project_renders_intellij_platform_library_defaults(
     setup_gradle_project(ctx, project, interactive=False)
 
     build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
-    assert 'id("org.jetbrains.intellij.platform")' in build_text
+    assert 'id("org.jetbrains.intellij.platform.module")' in build_text
     assert 'intellijIdea("2025.3")' in build_text
     assert '"org.jetbrains.kotlin"' in build_text
     assert "pluginConfiguration {" not in build_text

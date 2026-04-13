@@ -132,7 +132,7 @@ plugins {
     id("org.jetbrains.intellij")
     {% endif %}
     {% elif 'intellij-platform-library' in features %}
-    id("org.jetbrains.intellij.platform")
+    id("org.jetbrains.intellij.platform{% if features['intellij-platform-library'].modulePlugin %}.module{% endif %}")
     {% endif %}
     {% for plugin in extra_gradle_plugins %}
     id("{{ plugin.plugin_id }}")

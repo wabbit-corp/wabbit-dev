@@ -636,6 +636,7 @@ class IntellijPluginCommand:
 class IntellijPlatformLibraryCommand:
     ideaVersion: str | None = None
     bundledPlugins: list[str] | None = None
+    modulePlugin: bool = True
 
 
 @tag("kotlin-serialization")

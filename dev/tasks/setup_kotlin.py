@@ -78,7 +78,7 @@ BUILTIN_GRADLE_PLUGIN_IDS_BY_FEATURE: dict[str, tuple[str, ...]] = {
     "kmp-compose": ("org.jetbrains.compose", "org.jetbrains.kotlin.plugin.compose"),
     "shadow-jar": ("com.gradleup.shadow",),
     "intellij-plugin": ("org.jetbrains.intellij", "org.jetbrains.intellij.platform"),
-    "intellij-platform-library": ("org.jetbrains.intellij.platform",),
+    "intellij-platform-library": ("org.jetbrains.intellij.platform.module",),
     "paper-plugin": ("io.papermc.paperweight.userdev", "net.minecrell.plugin-yml.bukkit"),
 }
 

@@ -275,9 +275,17 @@ def test_gradle_templates_declare_both_intellij_gradle_plugin_variants() -> None
         'id("org.jetbrains.intellij.platform") version "{{ intellij_platform_gradle_plugin_version }}"'
         in settings_content
     )
+    assert (
+        'id("org.jetbrains.intellij.platform.module") version "{{ intellij_platform_gradle_plugin_version }}"'
+        in settings_content
+    )
     assert 'id("org.jetbrains.intellij") version "{{ intellij_gradle_plugin_version }}"' in subproject_settings_content
     assert (
         'id("org.jetbrains.intellij.platform") version "{{ intellij_platform_gradle_plugin_version }}"'
+        in subproject_settings_content
+    )
+    assert (
+        'id("org.jetbrains.intellij.platform.module") version "{{ intellij_platform_gradle_plugin_version }}"'
         in subproject_settings_content
     )
 
@@ -289,7 +297,7 @@ def test_gradle_jvm_subproject_template_supports_intellij_platform_gradle_plugin
     assert "use_intellij_platform_gradle_plugin_v2" in content
     assert "intellij-platform-library" in content
     assert "uses_intellij_platform_dependencies" in content
-    assert 'id("org.jetbrains.intellij.platform")' in content
+    assert 'id("org.jetbrains.intellij.platform{% if features[\'intellij-platform-library\'].modulePlugin %}.module{% endif %}")' in content
     assert "intellijPlatform {" in content
     assert 'intellijIdea("{{ intellij_platform_idea_version }}")' in content
     assert "testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)" in content

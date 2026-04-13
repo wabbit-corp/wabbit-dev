@@ -130,6 +130,7 @@ pluginManagement {
         id("com.vanniktech.maven.publish") version "{{ maven_publish_plugin_version }}"
         id("org.jetbrains.intellij") version "{{ intellij_gradle_plugin_version }}"
         id("org.jetbrains.intellij.platform") version "{{ intellij_platform_gradle_plugin_version }}"
+        id("org.jetbrains.intellij.platform.module") version "{{ intellij_platform_gradle_plugin_version }}"
         id("io.papermc.paperweight.userdev") version "{{ paperweight_userdev_plugin_version }}"
         id("net.minecrell.plugin-yml.bukkit") version "{{ bukkit_plugin_yml_version }}"
         {% for plugin in extra_gradle_plugins %}
