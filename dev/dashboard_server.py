@@ -210,6 +210,10 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
       white-space: nowrap;
       background: rgba(255, 255, 255, 0.74);
     }}
+    button.badge {{
+      font: inherit;
+      cursor: pointer;
+    }}
     .badge.ok {{
       color: var(--ok);
       border-color: rgba(22, 101, 52, 0.24);
@@ -233,22 +237,33 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
     .badge.muted {{
       color: var(--muted);
     }}
+    .badge.active {{
+      box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.25);
+    }}
     .mono {{
       font-family: var(--mono);
+    }}
+    .details-panel {{
+      margin-top: 0.45rem;
+      padding: 0.55rem 0.75rem;
+      border-left: 3px solid rgba(15, 118, 110, 0.22);
+      background: rgba(255, 255, 255, 0.36);
+      border-radius: 0.6rem;
     }}
     .actions {{
       display: flex;
       flex-wrap: wrap;
-      gap: 0.4rem;
+      gap: 0.32rem;
+      align-items: center;
     }}
     .actions button {{
-      padding: 0.45rem 0.62rem;
+      padding: 0.35rem 0.56rem;
       border-radius: 0.65rem;
       border: 1px solid var(--border);
       background: var(--surface-strong);
       color: var(--ink);
       cursor: pointer;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
     }}
     .actions button:hover {{
       border-color: rgba(15, 118, 110, 0.35);
@@ -256,6 +271,45 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
     .actions button:disabled {{
       opacity: 0.55;
       cursor: default;
+    }}
+    .action-menu {{
+      position: relative;
+      display: inline-block;
+    }}
+    .action-menu > summary {{
+      list-style: none;
+      padding: 0.35rem 0.56rem;
+      border-radius: 0.65rem;
+      border: 1px solid var(--border);
+      background: var(--surface-strong);
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 0.8rem;
+      user-select: none;
+    }}
+    .action-menu > summary::-webkit-details-marker {{
+      display: none;
+    }}
+    .action-menu[open] > summary {{
+      border-color: rgba(15, 118, 110, 0.35);
+    }}
+    .action-menu-panel {{
+      position: absolute;
+      top: calc(100% + 0.35rem);
+      right: 0;
+      z-index: 30;
+      display: grid;
+      gap: 0.3rem;
+      min-width: 8rem;
+      padding: 0.45rem;
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      background: rgba(255, 250, 240, 0.98);
+      box-shadow: var(--shadow);
+    }}
+    .action-menu-panel button {{
+      width: 100%;
+      text-align: left;
     }}
     a {{
       color: var(--accent);
@@ -331,6 +385,7 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
     const dashboardToken = {session_token_json};
     let currentState = initialState;
     let refreshInFlight = false;
+    const expandedReleaseDetails = new Set();
 
     function escapeHtml(value) {{
       return String(value)
@@ -370,9 +425,11 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
 
     function badgeClass(status) {{
       switch (status) {{
+        case "ok":
         case "success":
         case "published":
           return "ok";
+        case "warn":
         case "warning":
         case "skipped":
         case "missing":
@@ -400,6 +457,10 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
       return `<span class="badge ${{badgeClass(command.status)}}" title="${{escapeHtml(titleParts.join(" · "))}}">${{escapeHtml(label)}} · ${{escapeHtml(command.status)}}</span>`;
     }}
 
+    function releaseDetailKey(repoName, projectId) {{
+      return `${{repoName}}::${{projectId}}`;
+    }}
+
     function repoNeedsAttention(repo) {{
       if (repo.monitor.error) {{
         return true;
@@ -415,7 +476,7 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
         return true;
       }}
       return repo.releaseProjects.some((project) =>
-        project.registryVisible === "missing"
+        (project.registryStatuses || []).some((registry) => registry.status === "warn" || registry.status === "error")
         || (project.commitsAfterTag || 0) > 0
         || (project.unpushedCommits || 0) > 0
         || project.dirty
@@ -429,8 +490,12 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
         score += 10;
       }}
       for (const project of repo.releaseProjects) {{
-        if (project.registryVisible === "missing") {{
-          score += 12;
+        for (const registry of (project.registryStatuses || [])) {{
+          if (registry.status === "error") {{
+            score += 12;
+          }} else if (registry.status === "warn") {{
+            score += 8;
+          }}
         }}
         score += (project.commitsAfterTag || 0) * 2;
         score += (project.unpushedCommits || 0) * 2;
@@ -559,25 +624,52 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
       const releaseBlocks = repo.releaseProjects.length === 0
         ? ['<span class="secondary">No publishable projects</span>']
         : repo.releaseProjects.map((project) => {{
-            const registryLine = `${{project.publishTarget}} · current ${{project.currentVersion || "?"}} · registry ${{project.registryLatest || "?"}}`;
             const gitBits = [
               project.latestTag ? `tag ${{project.latestTag}}` : "tag —",
               `+${{project.commitsAfterTag ?? "?"}} commits`,
               `unpushed ${{project.unpushedCommits ?? "?"}}`,
               project.dirty ? "dirty" : "clean",
             ].join(" · ");
-            const diagnosticBlock = project.diagnostics.length === 0
-              ? ""
-              : `<div class="secondary">${{project.diagnostics.map(escapeHtml).join("<br>")}}</div>`;
+            const registryBadges = (project.registryStatuses || []).length === 0
+              ? ['<span class="badge muted">no registry</span>']
+              : (project.registryStatuses || []).map((registry) => {{
+                  const detailKey = releaseDetailKey(repo.name, `${{project.projectId}}::${{registry.name}}`);
+                  const detailExpanded = expandedReleaseDetails.has(detailKey);
+                  return `
+                    <button type="button" class="badge badge-button ${{badgeClass(registry.status)}} ${{detailExpanded ? "active" : ""}}" data-release-detail-toggle="${{escapeHtml(detailKey)}}" aria-expanded="${{detailExpanded ? "true" : "false"}}">
+                      ${{escapeHtml(registry.name)}} · ${{escapeHtml(registry.status)}}
+                    </button>
+                  `;
+                }});
+            const detailBlocks = (project.registryStatuses || []).flatMap((registry) => {{
+              const detailKey = releaseDetailKey(repo.name, `${{project.projectId}}::${{registry.name}}`);
+              const detailExpanded = expandedReleaseDetails.has(detailKey);
+              if (!detailExpanded) {{
+                return [];
+              }}
+              const detailLines = [
+                `package: ${{registry.package}}`,
+                `current: ${{registry.currentVersion || "?"}}`,
+                `latest: ${{registry.latest || "none"}}`,
+                gitBits,
+              ];
+              for (const diagnostic of (registry.diagnostics || [])) {{
+                detailLines.push(diagnostic);
+              }}
+              for (const diagnostic of (project.diagnostics || [])) {{
+                detailLines.push(diagnostic);
+              }}
+              return [`
+                <div class="details-panel">
+                  <div class="secondary">${{detailLines.map(escapeHtml).join("<br>")}}</div>
+                </div>
+              `];
+            }});
             return `
               <div class="stack">
                 <div><strong>${{escapeHtml(project.projectId)}}</strong></div>
-                <div class="badge-row">
-                  <span class="badge ${{badgeClass(project.registryVisible)}}">registry · ${{escapeHtml(project.registryVisible)}}</span>
-                  <span class="badge muted">${{escapeHtml(registryLine)}}</span>
-                </div>
-                <div class="secondary">${{escapeHtml(gitBits)}}</div>
-                ${{diagnosticBlock}}
+                <div class="badge-row">${{registryBadges.join("")}}</div>
+                ${{detailBlocks.join("")}}
               </div>
             `;
           }});
@@ -592,8 +684,8 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
       ];
 
       const releaseRunning = Boolean(repo.releaseVerify && repo.releaseVerify.status === "running");
-      const buildRunning = Boolean(repo.build && repo.build.status === "running");
       const checkRunning = Boolean(repo.checkRun && repo.checkRun.status === "running");
+      const securityRunning = Boolean(repo.spotCheck && repo.spotCheck.status === "running");
       const docsRunning = Boolean(
         (repo.docsCheck && repo.docsCheck.status === "running")
         || (repo.docsSnippets && repo.docsSnippets.status === "running")
@@ -630,10 +722,15 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
           <td><div class="badge-row">${{healthBlocks.join("")}}</div></td>
           <td>
             <div class="actions">
-              <button type="button" data-repo="${{escapeHtml(repo.name)}}" data-action="check" ${{checkRunning ? "disabled" : ""}}>Check</button>
-              <button type="button" data-repo="${{escapeHtml(repo.name)}}" data-action="docs-verify" ${{docsRunning ? "disabled" : ""}}>Docs</button>
-              <button type="button" data-repo="${{escapeHtml(repo.name)}}" data-action="release-verify" ${{releaseRunning ? "disabled" : ""}}>Release</button>
-              <button type="button" data-repo="${{escapeHtml(repo.name)}}" data-action="build" ${{buildRunning ? "disabled" : ""}}>Build</button>
+              <details class="action-menu">
+                <summary>Check</summary>
+                <div class="action-menu-panel">
+                  <button type="button" data-repo="${{escapeHtml(repo.name)}}" data-action="check" ${{checkRunning ? "disabled" : ""}}>All checks</button>
+                  <button type="button" data-repo="${{escapeHtml(repo.name)}}" data-action="docs-verify" ${{docsRunning ? "disabled" : ""}}>Docs</button>
+                  <button type="button" data-repo="${{escapeHtml(repo.name)}}" data-action="security-check" ${{securityRunning ? "disabled" : ""}}>Security</button>
+                  <button type="button" data-repo="${{escapeHtml(repo.name)}}" data-action="release-verify" ${{releaseRunning ? "disabled" : ""}}>Release</button>
+                </div>
+              </details>
               <button type="button" data-repo="${{escapeHtml(repo.name)}}" data-action="difftool">Diff</button>
               <button type="button" data-repo="${{escapeHtml(repo.name)}}" data-action="commit">Commit</button>
               <button type="button" data-repo="${{escapeHtml(repo.name)}}" data-action="push">Push</button>
@@ -705,6 +802,16 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
     document.getElementById("repo-body").addEventListener("click", async (event) => {{
       const target = event.target;
       if (!(target instanceof HTMLButtonElement)) {{
+        return;
+      }}
+      const detailKey = target.dataset.releaseDetailToggle;
+      if (detailKey) {{
+        if (expandedReleaseDetails.has(detailKey)) {{
+          expandedReleaseDetails.delete(detailKey);
+        }} else {{
+          expandedReleaseDetails.add(detailKey);
+        }}
+        render(currentState);
         return;
       }}
       const repo = target.dataset.repo;
@@ -841,11 +948,11 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             case "docs-verify":
                 coordinator.run_docs_verify(repo_name)
                 return True
+            case "security-check":
+                coordinator.run_security_check(repo_name)
+                return True
             case "release-verify":
                 coordinator.run_release_verify(repo_name)
-                return True
-            case "build":
-                coordinator.run_build(repo_name)
                 return True
             case "difftool":
                 coordinator.run_difftool(repo_name)

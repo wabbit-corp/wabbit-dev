@@ -91,6 +91,26 @@ class GithubRepoState:
 
 
 @dataclass(frozen=True)
+class RegistryStatusState:
+    name: str
+    package: str
+    current_version: str | None
+    latest: str | None
+    status: str
+    diagnostics: tuple[str, ...]
+
+    def to_json(self) -> JSONObject:
+        return {
+            "name": self.name,
+            "package": self.package,
+            "currentVersion": self.current_version,
+            "latest": self.latest,
+            "status": self.status,
+            "diagnostics": list(self.diagnostics),
+        }
+
+
+@dataclass(frozen=True)
 class ReleaseProjectState:
     project_id: str
     publish_target: str
@@ -98,6 +118,7 @@ class ReleaseProjectState:
     registry_latest: str | None
     registry_names: tuple[str, ...]
     registry_visible: str
+    registry_statuses: tuple[RegistryStatusState, ...]
     latest_tag: str | None
     latest_tag_version: str | None
     commits_after_tag: int | None
@@ -118,6 +139,7 @@ class ReleaseProjectState:
             "registryLatest": self.registry_latest,
             "registryNames": list(self.registry_names),
             "registryVisible": self.registry_visible,
+            "registryStatuses": [registry_status.to_json() for registry_status in self.registry_statuses],
             "latestTag": self.latest_tag,
             "latestTagVersion": self.latest_tag_version,
             "commitsAfterTag": self.commits_after_tag,
@@ -472,20 +494,35 @@ def _simple_results_command_state(
     )
 
 
-def _registry_visibility(report: ProjectVersionReport) -> str:
-    current_version = report.current_version
+def _registry_status(current_version: str | None, registry_name: str, package: str, latest: str | None, versions: tuple[str, ...], diagnostics: tuple[str, ...]) -> RegistryStatusState:
     if current_version is None:
-        return "unknown"
+        status = "unknown"
+    elif current_version in versions:
+        status = "ok"
+    elif not versions:
+        status = "error"
+    else:
+        status = "warn"
 
-    registry_snapshots = report.registries
-    if not registry_snapshots:
-        return "unknown"
+    return RegistryStatusState(
+        name=registry_name,
+        package=package,
+        current_version=current_version,
+        latest=latest,
+        status=status,
+        diagnostics=diagnostics,
+    )
 
-    visible_anywhere = any(current_version in registry.versions for registry in registry_snapshots)
-    if visible_anywhere:
+
+def _overall_registry_visibility(registry_statuses: tuple[RegistryStatusState, ...]) -> str:
+    if not registry_statuses:
+        return "unknown"
+    if any(registry.status == "ok" for registry in registry_statuses):
         return "published"
-    if any(registry.versions for registry in registry_snapshots):
+    if any(registry.status == "warn" for registry in registry_statuses):
         return "missing"
+    if any(registry.status == "error" for registry in registry_statuses):
+        return "unknown"
     return "unknown"
 
 
@@ -493,13 +530,25 @@ def _release_project_state(report: ProjectVersionReport, *, checked_at: datetime
     latest_tag = report.git_state.latest_tag
     primary_registry = report.registry
     diagnostics = tuple(f"{diagnostic.source}: {diagnostic.message}" for diagnostic in report.diagnostics)
+    registry_statuses = tuple(
+        _registry_status(
+            report.current_version,
+            registry.name,
+            registry.package,
+            registry.latest,
+            registry.versions,
+            tuple(f"{diagnostic.source}: {diagnostic.message}" for diagnostic in registry.diagnostics),
+        )
+        for registry in report.registries
+    )
     return ReleaseProjectState(
         project_id=report.project_id,
         publish_target=report.publish_target,
         current_version=report.current_version,
         registry_latest=primary_registry.latest if primary_registry is not None else None,
         registry_names=tuple(registry.name for registry in report.registries),
-        registry_visible=_registry_visibility(report),
+        registry_visible=_overall_registry_visibility(registry_statuses),
+        registry_statuses=registry_statuses,
         latest_tag=latest_tag.tag if latest_tag is not None else None,
         latest_tag_version=latest_tag.version if latest_tag is not None else None,
         commits_after_tag=latest_tag.commits_after if latest_tag is not None else None,
@@ -750,6 +799,9 @@ class DashboardCoordinator:
     def run_docs_verify(self, repo_name: str) -> None:
         self.run_docs_check(repo_name)
         self.run_docs_snippets(repo_name)
+
+    def run_security_check(self, repo_name: str) -> None:
+        self._enqueue_job(_DashboardJob(kind="spot-check", repo_name=repo_name))
 
     def run_release_verify(self, repo_name: str) -> None:
         self._enqueue_job(_DashboardJob(kind="release-verify", repo_name=repo_name))
@@ -1067,6 +1119,7 @@ __all__ = [
     "DashboardRepoState",
     "DashboardWorkspaceState",
     "GithubRepoState",
+    "RegistryStatusState",
     "ReleaseProjectState",
     "RepoCommandState",
 ]

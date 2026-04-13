@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import io
 import shutil
 import subprocess
+import tarfile
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+import time
 
 from git import Repo
 from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
@@ -18,6 +22,9 @@ from dev.tasks.setup import commit_repo_changes
 class RepoActionResult:
     ok: bool
     message: str
+
+
+_MELD_SNAPSHOT_RETENTION_SECONDS = 48 * 60 * 60
 
 
 def _resolve_target(workspace_root: Path, target_name: str) -> tuple[Config, ResolvedRepoTarget]:
@@ -59,13 +66,52 @@ def _configured_difftool_name(repo_root: Path) -> str | None:
     return None
 
 
+def _cleanup_old_meld_snapshots(snapshot_root: Path) -> None:
+    if not snapshot_root.is_dir():
+        return
+    cutoff = time.time() - _MELD_SNAPSHOT_RETENTION_SECONDS
+    for child in snapshot_root.iterdir():
+        try:
+            child_stat = child.stat()
+        except OSError:
+            continue
+        if child_stat.st_mtime >= cutoff:
+            continue
+        if child.is_dir():
+            shutil.rmtree(child, ignore_errors=True)
+
+
+def _create_meld_snapshot_dir(repo_root: Path, config: Config) -> Path:
+    snapshot_root = Path(tempfile.gettempdir()) / "dev-meld-diffs"
+    snapshot_root.mkdir(parents=True, exist_ok=True)
+    _cleanup_old_meld_snapshots(snapshot_root)
+    snapshot_dir = Path(tempfile.mkdtemp(prefix=f"{repo_root.name}-", dir=snapshot_root))
+    archive = subprocess.run(
+        ["git", "archive", "--format=tar", "HEAD"],
+        cwd=repo_root,
+        env=git_subprocess_env(config),
+        capture_output=True,
+        check=False,
+    )
+    if archive.returncode != 0:
+        return snapshot_dir
+
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout), mode="r:") as tar:
+        tar.extractall(snapshot_dir, filter="data")
+    return snapshot_dir
+
+
 def open_repo_in_difftool(workspace_root: Path, repo_root: Path) -> RepoActionResult:
     config = load_config(workspace_root)
-    command = ["git", "difftool"]
     tool_name = _configured_difftool_name(repo_root)
-    if tool_name is not None:
-        command.extend(["--tool", tool_name])
-    command.extend(["--dir-diff", "--no-prompt", "HEAD"])
+    if tool_name == "meld":
+        snapshot_dir = _create_meld_snapshot_dir(repo_root, config)
+        command = ["meld", str(snapshot_dir), str(repo_root)]
+    else:
+        command = ["git", "difftool"]
+        if tool_name is not None:
+            command.extend(["--tool", tool_name])
+        command.extend(["--dir-diff", "--no-prompt", "HEAD"])
 
     try:
         subprocess.Popen(
@@ -79,7 +125,7 @@ def open_repo_in_difftool(workspace_root: Path, repo_root: Path) -> RepoActionRe
     except OSError as ex:
         return RepoActionResult(ok=False, message=f"{repo_root.name}: failed to open difftool ({ex})")
 
-    tool_summary = tool_name if tool_name is not None else "git difftool"
+    tool_summary = "meld" if tool_name == "meld" else (tool_name if tool_name is not None else "git difftool")
     return RepoActionResult(ok=True, message=f"{repo_root.name}: opened difftool ({tool_summary})")
 
 
