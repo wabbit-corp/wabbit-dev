@@ -471,6 +471,35 @@ class JitpackCookieCommand:
     cookie: str
 
 
+@tag("define-backup-target")
+@dataclass(frozen=True)
+class DefineBackupTargetCommand:
+    name: str
+    kind: str
+    host: str
+    user: str
+    path: str
+    sshKey: str | None = None
+    passwordFile: str | None = None
+    passwordCommand: str | None = None
+    compression: str | None = None
+
+
+@tag("backup-policy")
+@dataclass(frozen=True)
+class BackupPolicyCommand:
+    targets: list[str]
+    service: bool | None = None
+    serviceDirtyAgeMinutes: int | None = None
+    serviceMinIntervalMinutes: int | None = None
+    includeGit: bool | None = None
+    exclude: list[str] | None = None
+    excludeIfPresent: list[str] | None = None
+    excludeCaches: bool | None = None
+    includeRepos: list[str] | None = None
+    excludeRepos: list[str] | None = None
+
+
 @tag("default-maven-project-group")
 @dataclass(frozen=True)
 class DefaultMavenProjectGroupCommand:
@@ -1046,6 +1075,8 @@ BuiltinTopLevelCommand = (
     | MavenGpgPassphraseCommand
     | MavenGpgKeyIdCommand
     | JitpackCookieCommand
+    | DefineBackupTargetCommand
+    | BackupPolicyCommand
     | DefaultMavenProjectGroupCommand
     | DefaultCompanyEmailCommand
     | DefaultCompanyLegalNameCommand
@@ -1089,6 +1120,8 @@ BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[object], ...] = (
     MavenGpgPassphraseCommand,
     MavenGpgKeyIdCommand,
     JitpackCookieCommand,
+    DefineBackupTargetCommand,
+    BackupPolicyCommand,
     DefaultMavenProjectGroupCommand,
     DefaultCompanyEmailCommand,
     DefaultCompanyLegalNameCommand,
@@ -1137,9 +1170,11 @@ __all__ = [
     "ChecksIgnoreFindingCommand",
     "CodeOwnerCommand",
     "Const",
+    "BackupPolicyCommand",
     "DataProjectCommand",
     "CsharpProjectCommand",
     "DefaultMavenProjectGroupCommand",
+    "DefineBackupTargetCommand",
     "DefineCommand",
     "AddDefaultGradlePluginCommand",
     "DefineKotlinPluginCommand",

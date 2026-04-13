@@ -1730,6 +1730,33 @@ def source_set_is_allowed_for_platforms(source_set: str, platforms: list[str]) -
     return _source_set_is_allowed_for_platforms(source_set, platforms)
 
 
+@dataclass(frozen=True)
+class BackupTarget:
+    name: str
+    kind: Literal["restic-sftp"]
+    host: str
+    user: str
+    path: str
+    ssh_key: str | None = None
+    password_file: str | None = None
+    password_command: str | None = None
+    compression: str = "auto"
+
+
+@dataclass(frozen=True)
+class BackupPolicy:
+    target_names: tuple[str, ...]
+    service_enabled: bool = True
+    service_dirty_age_minutes: int = 60
+    service_min_interval_minutes: int = 360
+    include_git: bool = True
+    exclude: tuple[str, ...] = ()
+    exclude_if_present: tuple[str, ...] = ()
+    exclude_caches: bool = True
+    include_repos: tuple[str, ...] = ("*",)
+    exclude_repos: tuple[str, ...] = ()
+
+
 @dataclass
 class Config:
     raw: Document
@@ -1748,6 +1775,9 @@ class Config:
     maven_gpg_passphrase: str | None = None
     maven_gpg_key_id: str | None = None
     jitpack_cookie: str | None = None
+
+    backup_targets: OrderedDict[str, BackupTarget] = dataclasses.field(default_factory=OrderedDict)
+    backup_policy: BackupPolicy | None = None
 
     default_maven_project_group: str | None = None
     default_company_email: str | None = None
@@ -3040,6 +3070,50 @@ def load_config(start: Path | None = None) -> Config:
             config.jitpack_cookie = command.cookie
             return
 
+        if isinstance(command, config_typed.DefineBackupTargetCommand):
+            if command.name in config.backup_targets:
+                raise ValueError(f"Backup target {command.name} already exists")
+            if command.kind != "restic-sftp":
+                raise ValueError(f"Unsupported backup target kind: {command.kind}")
+            compression = command.compression or "auto"
+            if compression not in {"auto", "off", "max"}:
+                raise ValueError(f"Unsupported backup compression mode: {compression}")
+            config.backup_targets[command.name] = BackupTarget(
+                name=command.name,
+                kind="restic-sftp",
+                host=command.host,
+                user=command.user,
+                path=command.path,
+                ssh_key=command.sshKey,
+                password_file=command.passwordFile,
+                password_command=command.passwordCommand,
+                compression=compression,
+            )
+            return
+
+        if isinstance(command, config_typed.BackupPolicyCommand):
+            if not command.targets:
+                raise ValueError("backup-policy.targets must not be empty")
+            dirty_age_minutes = command.serviceDirtyAgeMinutes if command.serviceDirtyAgeMinutes is not None else 60
+            min_interval_minutes = command.serviceMinIntervalMinutes if command.serviceMinIntervalMinutes is not None else 360
+            if dirty_age_minutes < 0:
+                raise ValueError("backup-policy.serviceDirtyAgeMinutes must be >= 0")
+            if min_interval_minutes < 0:
+                raise ValueError("backup-policy.serviceMinIntervalMinutes must be >= 0")
+            config.backup_policy = BackupPolicy(
+                target_names=tuple(command.targets),
+                service_enabled=command.service if command.service is not None else True,
+                service_dirty_age_minutes=dirty_age_minutes,
+                service_min_interval_minutes=min_interval_minutes,
+                include_git=command.includeGit if command.includeGit is not None else True,
+                exclude=tuple(command.exclude or []),
+                exclude_if_present=tuple(command.excludeIfPresent or []),
+                exclude_caches=command.excludeCaches if command.excludeCaches is not None else True,
+                include_repos=tuple(command.includeRepos or ["*"]),
+                exclude_repos=tuple(command.excludeRepos or []),
+            )
+            return
+
         if isinstance(command, config_typed.AnthropicKeyCommand):
             config.anthropic_key = command.key
             return
@@ -3300,6 +3374,13 @@ def load_config(start: Path | None = None) -> Config:
 
     _decode_and_apply(root, "root")
     _decode_and_apply(root_private, "root.private")
+
+    if config.backup_policy is not None:
+        missing_targets = [
+            target_name for target_name in config.backup_policy.target_names if target_name not in config.backup_targets
+        ]
+        if missing_targets:
+            raise ValueError(f"backup-policy references undefined backup target(s): {', '.join(missing_targets)}")
 
     for project in config.defined_projects.values():
         if not isinstance(project, GradleProject):

@@ -48,13 +48,21 @@ def test_completion_lists_top_level_commands(capsys) -> None:
     candidates = _run_typed_completion(["dev", ""], 1, capsys)
 
     assert "completion" in candidates
+    assert "config" in candidates
     assert "install" in candidates
     assert "doctor" in candidates
     assert "verify" in candidates
-    assert "config" not in candidates
+    assert "backup" in candidates
     assert "docs" not in candidates
     assert "release" not in candidates
     assert "security" not in candidates
+
+
+def test_completion_lists_backup_subcommands(capsys) -> None:
+    candidates = _run_typed_completion(["dev", "backup", ""], 2, capsys)
+
+    assert "push" in candidates
+    assert "restore" in candidates
 
 
 def test_completion_lists_project_subcommands(capsys) -> None:

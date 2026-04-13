@@ -22,7 +22,8 @@ from Foundation import NSObject, NSTimer
 from dev.config import Config, load_config
 from dev.dashboard_process import ensure_dashboard_server
 from dev.repo_resolution import ResolvedRepoTarget, configured_repo_targets
-from dev.repo_status import collect_repo_status_record, refresh_remote_tracking
+from dev.repo_status import RepoStatusRecord, collect_repo_status_record, refresh_remote_tracking
+from dev.tasks.backup import push_resolved_repo_backup, service_backup_due
 from dev.service_actions import commit_repo_target, open_repo_in_difftool, push_repo_target
 from dev.service_support import (
     MonitorRepoState,
@@ -70,6 +71,7 @@ class DirtyRepoMenuApp(NSObject):
         self._last_error: str | None = None
         self._busy_repo_actions: dict[str, str] = {}
         self._last_action_message: str | None = None
+        self._backup_attempted_at_by_repo: dict[str, datetime] = {}
         self._tracking_attempted_at_by_repo: dict[str, datetime] = {}
         self._tracking_refreshed_at_by_repo: dict[str, datetime] = {}
         self._last_tracking_fetch_attempt_at: datetime | None = None
@@ -113,7 +115,7 @@ class DirtyRepoMenuApp(NSObject):
             return
 
         spacing_seconds = repo_check_spacing_seconds(self.interval_seconds, len(targets))
-        repo_statuses = []
+        repo_status_pairs: list[tuple[ResolvedRepoTarget, RepoStatusRecord]] = []
 
         for index, target in enumerate(targets):
             if self._stop_event.is_set():
@@ -123,7 +125,7 @@ class DirtyRepoMenuApp(NSObject):
             repo_status = collect_repo_status_record(target)
             if tracking_refreshed_at is not None:
                 repo_status = replace(repo_status, tracking_refreshed_at=tracking_refreshed_at)
-            repo_statuses.append(repo_status)
+            repo_status_pairs.append((target, repo_status))
             if index == len(targets) - 1:
                 continue
             elapsed = time.monotonic() - started_at
@@ -131,6 +133,8 @@ class DirtyRepoMenuApp(NSObject):
             if self._wait_for_next_step(wait_seconds):
                 return
 
+        self._maybe_start_due_backup(config, repo_status_pairs)
+        repo_statuses = [repo_status for _, repo_status in repo_status_pairs]
         snapshot = build_monitor_snapshot(self.workspace_root, repo_statuses)
         write_monitor_snapshot(self.paths, snapshot)
         with self._snapshot_lock:
@@ -189,6 +193,85 @@ class DirtyRepoMenuApp(NSObject):
         with self._snapshot_lock:
             self._tracking_refreshed_at_by_repo[target.name] = refreshed_at
         return refreshed_at
+
+    def _maybe_start_due_backup(
+        self,
+        config: Config,
+        repo_status_pairs: list[tuple[ResolvedRepoTarget, RepoStatusRecord]],
+    ) -> None:
+        with self._snapshot_lock:
+            busy_repo_actions = dict(self._busy_repo_actions)
+            backup_attempted_at_by_repo = dict(self._backup_attempted_at_by_repo)
+
+        if any(action_kind == "backup" for action_kind in busy_repo_actions.values()):
+            return
+
+        now = datetime.now(UTC)
+        due_pairs: list[tuple[ResolvedRepoTarget, RepoStatusRecord]] = []
+        for target, repo_status in repo_status_pairs:
+            if target.name in busy_repo_actions:
+                continue
+            if service_backup_due(
+                config,
+                target,
+                repo_status,
+                last_attempted_at=backup_attempted_at_by_repo.get(target.name),
+                now=now,
+            ):
+                due_pairs.append((target, repo_status))
+
+        if not due_pairs:
+            return
+
+        def _sort_key(item: tuple[ResolvedRepoTarget, RepoStatusRecord]) -> tuple[float, str]:
+            target, repo_status = item
+            dirty_since = repo_status.oldest_dirty_timestamp
+            if dirty_since is None:
+                return (now.timestamp(), target.name)
+            return (dirty_since.timestamp(), target.name)
+
+        due_pairs.sort(key=_sort_key)
+        selected_target, _selected_repo_status = due_pairs[0]
+
+        with self._snapshot_lock:
+            if any(action_kind == "backup" for action_kind in self._busy_repo_actions.values()):
+                return
+            if selected_target.name in self._busy_repo_actions:
+                return
+            self._busy_repo_actions[selected_target.name] = "backup"
+            self._backup_attempted_at_by_repo[selected_target.name] = datetime.now(UTC)
+            self._last_action_message = f"{selected_target.name}: backup started"
+
+        worker = threading.Thread(
+            target=self._run_service_backup,
+            args=(selected_target,),
+            name=f"dev-menubar-backup-{selected_target.name}",
+            daemon=True,
+        )
+        worker.start()
+
+    def _run_service_backup(self, target: ResolvedRepoTarget) -> None:
+        try:
+            config = load_config(self.workspace_root)
+            results = push_resolved_repo_backup(
+                config,
+                target,
+                backup_target_name=None,
+                reason="service",
+                dry_run=False,
+            )
+            if not results:
+                result_message = f"{target.name}: backup skipped"
+            else:
+                result_message = "; ".join(result.message for result in results)
+        except Exception as ex:
+            result_message = f"{target.name}: backup failed ({ex})"
+
+        with self._snapshot_lock:
+            self._busy_repo_actions.pop(target.name, None)
+            self._last_action_message = result_message
+
+        self._refresh_requested.set()
 
     def _set_title(self, snapshot: MonitorSnapshot) -> None:
         button = self.status_item.button()

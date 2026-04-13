@@ -160,6 +160,83 @@ def test_code_owner_entries_are_loaded(tmp_path: Path) -> None:
     assert config.default_code_owners[0].email == "wabbit@wabbit.one"
 
 
+def test_backup_targets_and_policy_are_loaded(tmp_path: Path) -> None:
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                "("
+                'define-backup-target "desktop-archive" '
+                '"restic-sftp" '
+                '"100.79.145.10" '
+                '"alexk" '
+                '"/H:/restic/datatron" '
+                ':sshKey "~/.ssh/id_host_desktop-b5ld5nd_alexk" '
+                ':passwordCommand "cat ~/.config/restic/datatron.pass" '
+                ':compression "max")',
+                "("
+                'backup-policy ["desktop-archive"] '
+                ":service true "
+                ":serviceDirtyAgeMinutes 90 "
+                ":serviceMinIntervalMinutes 720 "
+                ":includeGit false "
+                ':exclude ["tmp/**"] '
+                ':excludeIfPresent [".nobackup"] '
+                ":excludeCaches false "
+                ':includeRepos ["app-*"] '
+                ':excludeRepos ["app-secret"])',
+                "",
+            ]
+        ),
+    )
+
+    target = config.backup_targets["desktop-archive"]
+    assert target.kind == "restic-sftp"
+    assert target.host == "100.79.145.10"
+    assert target.user == "alexk"
+    assert target.path == "/H:/restic/datatron"
+    assert target.ssh_key == "~/.ssh/id_host_desktop-b5ld5nd_alexk"
+    assert target.password_command == "cat ~/.config/restic/datatron.pass"
+    assert target.compression == "max"
+
+    policy = config.backup_policy
+    assert policy is not None
+    assert policy.target_names == ("desktop-archive",)
+    assert policy.service_enabled is True
+    assert policy.service_dirty_age_minutes == 90
+    assert policy.service_min_interval_minutes == 720
+    assert policy.include_git is False
+    assert policy.exclude == ("tmp/**",)
+    assert policy.exclude_if_present == (".nobackup",)
+    assert policy.exclude_caches is False
+    assert policy.include_repos == ("app-*",)
+    assert policy.exclude_repos == ("app-secret",)
+
+
+def test_backup_policy_can_reference_target_defined_in_root_private(tmp_path: Path) -> None:
+    config = _load_from_temp_root(
+        tmp_path,
+        '(backup-policy ["desktop-archive"] :includeRepos ["*"] :excludeRepos [])\n',
+        "\n".join(
+            [
+                "("
+                'define-backup-target "desktop-archive" '
+                '"restic-sftp" '
+                '"100.79.145.10" '
+                '"alexk" '
+                '"/H:/restic/datatron" '
+                ':passwordCommand "cat ~/.config/restic/datatron.pass")',
+                "",
+            ]
+        ),
+    )
+
+    policy = config.backup_policy
+    assert policy is not None
+    assert policy.target_names == ("desktop-archive",)
+    assert "desktop-archive" in config.backup_targets
+
+
 def test_purescript_project_is_loaded_with_explicit_license(tmp_path: Path) -> None:
     from dev.config import PurescriptProject
 

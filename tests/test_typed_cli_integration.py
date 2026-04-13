@@ -491,6 +491,7 @@ async def test_security_scan_bypasses_argparse_with_typed_cli(monkeypatch: pytes
 @pytest.mark.asyncio
 async def test_build_status_and_push_bypass_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev import cli
+    from dev.tasks import backup as backup_task
     from dev.tasks import build as build_task
     from dev.tasks import doctor as doctor_task
     from dev.tasks import push as push_task
@@ -499,6 +500,8 @@ async def test_build_status_and_push_bypass_argparse_with_typed_cli(monkeypatch:
     build_called: list[tuple[list[str] | None, bool]] = []
     status_called: list[tuple[list[str] | None, bool]] = []
     push_called: list[tuple[list[str] | None, bool]] = []
+    backup_push_called: list[tuple[list[str] | None, str | None, bool, bool]] = []
+    backup_restore_called: list[tuple[str | None, str | None, str, str, bool, bool]] = []
 
     def fake_build(projects: str | list[str] | None = None, *, json_output: bool = False) -> int:
         match projects:
@@ -527,11 +530,38 @@ async def test_build_status_and_push_bypass_argparse_with_typed_cli(monkeypatch:
         push_called.append((targets, dry_run))
         return 0
 
+    def fake_backup_push(
+        targets: list[str] | None = None,
+        *,
+        backup_target_name: str | None = None,
+        dry_run: bool = False,
+        json_output: bool = False,
+        reason: str = "manual",
+        emit_output: bool = True,
+    ) -> int:
+        del reason, emit_output
+        backup_push_called.append((targets, backup_target_name, dry_run, json_output))
+        return 0
+
+    def fake_backup_restore(
+        target: str | None,
+        *,
+        backup_target_name: str | None,
+        snapshot: str,
+        into: str,
+        dry_run: bool = False,
+        json_output: bool = False,
+    ) -> int:
+        backup_restore_called.append((target, backup_target_name, snapshot, into, dry_run, json_output))
+        return 0
+
     monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
     monkeypatch.setattr(doctor_task, "preflight_for_command", lambda *args, **kwargs: True)
     monkeypatch.setattr(build_task, "build", fake_build)
     monkeypatch.setattr(status_task, "status", fake_status)
     monkeypatch.setattr(push_task, "push", fake_push)
+    monkeypatch.setattr(backup_task, "push", fake_backup_push)
+    monkeypatch.setattr(backup_task, "restore", fake_backup_restore)
 
     monkeypatch.setattr("sys.argv", ["dev.py", "build", "--json", "app-wabbit-dev"])
     build_result = await cli.async_main()
@@ -542,12 +572,43 @@ async def test_build_status_and_push_bypass_argparse_with_typed_cli(monkeypatch:
     monkeypatch.setattr("sys.argv", ["dev.py", "push", "--dry-run", "app-wabbit-dev"])
     push_result = await cli.async_main()
 
+    monkeypatch.setattr(
+        "sys.argv",
+        ["dev.py", "backup", "push", "--target", "desktop-archive", "--dry-run", "--json", "app-wabbit-dev"],
+    )
+    backup_push_result = await cli.async_main()
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "dev.py",
+            "backup",
+            "restore",
+            "--target",
+            "desktop-archive",
+            "--snapshot",
+            "latest",
+            "--into",
+            "/tmp/restore-root",
+            "--dry-run",
+            "--json",
+            "app-wabbit-dev",
+        ],
+    )
+    backup_restore_result = await cli.async_main()
+
     assert build_result == 0
     assert status_result == 0
     assert push_result == 0
+    assert backup_push_result == 0
+    assert backup_restore_result == 0
     assert build_called == [(["app-wabbit-dev"], True)]
     assert status_called == [(["app-wabbit-dev"], True)]
     assert push_called == [(["app-wabbit-dev"], True)]
+    assert backup_push_called == [(["app-wabbit-dev"], "desktop-archive", True, True)]
+    assert backup_restore_called == [
+        ("app-wabbit-dev", "desktop-archive", "latest", "/tmp/restore-root", True, True)
+    ]
 
 
 @pytest.mark.asyncio

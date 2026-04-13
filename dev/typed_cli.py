@@ -260,6 +260,22 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         dry_run: bool
 
     @dataclass(frozen=True)
+    class BackupPushRequest:
+        repo_targets: list[str]
+        backup_target_name: str | None
+        dry_run: bool
+        json_output: bool
+
+    @dataclass(frozen=True)
+    class BackupRestoreRequest:
+        repo_target: str | None
+        backup_target_name: str | None
+        snapshot: str
+        into: str
+        dry_run: bool
+        json_output: bool
+
+    @dataclass(frozen=True)
     class CheckRunRequest:
         target: str | None
         selectors: list[str]
@@ -412,6 +428,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         | CommitRequest
         | CommitVerifyRequest
         | PushRequest
+        | BackupPushRequest
+        | BackupRestoreRequest
         | CheckRunRequest
         | CheckListRequest
         | CheckShowRequest
@@ -1299,6 +1317,60 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             )
         )
 
+    def _backup_push_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        match _optional_string(values.option_or("--target", None), "target"):
+            case Failure(issues=issues):
+                return fail(issues)
+            case Success(value=backup_target_name):
+                return succeed(
+                    BackupPushRequest(
+                        repo_targets=_string_list(values.positional("repo")),
+                        backup_target_name=backup_target_name,
+                        dry_run=_bool_value(values, "--dry-run"),
+                        json_output=_bool_value(values, "--json"),
+                    )
+                )
+
+    def _backup_restore_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        repo_target = _optional_string(values.positional("repo"), "repo")
+        backup_target_name = _optional_string(values.option_or("--target", None), "target")
+        into = _optional_string(values.option_or("--into", None), "into")
+        snapshot = _optional_string(values.option_or("--snapshot", "latest"), "snapshot")
+        match (repo_target, backup_target_name, into, snapshot):
+            case (Failure(issues=issues), _, _, _):
+                return fail(issues)
+            case (_, Failure(issues=issues), _, _):
+                return fail(issues)
+            case (_, _, Failure(issues=issues), _):
+                return fail(issues)
+            case (_, _, _, Failure(issues=issues)):
+                return fail(issues)
+            case (
+                Success(value=repo_target_value),
+                Success(value=backup_target_name_value),
+                Success(value=None),
+                _,
+            ):
+                return fail([ValidationFailed("Expected --into <DIR> for `backup restore`.")])
+            case (
+                Success(value=repo_target_value),
+                Success(value=backup_target_name_value),
+                Success(value=into_value),
+                Success(value=snapshot_value),
+            ):
+                return succeed(
+                    BackupRestoreRequest(
+                        repo_target=repo_target_value,
+                        backup_target_name=backup_target_name_value,
+                        snapshot="latest" if snapshot_value is None else snapshot_value,
+                        into=into_value,
+                        dry_run=_bool_value(values, "--dry-run"),
+                        json_output=_bool_value(values, "--json"),
+                    )
+                )
+            case _:
+                return fail([ValidationFailed("Invalid backup restore arguments.")])
+
     def _check_run_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         args = _string_list(values.positional("arg"))
         target = args[0] if args else None
@@ -1463,6 +1535,10 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _commit_verify_decode(values)
             case ["push"]:
                 return _push_decode(values)
+            case ["backup", "push"]:
+                return _backup_push_decode(values)
+            case ["backup", "restore"]:
+                return _backup_restore_decode(values)
             case ["check"]:
                 return _check_run_decode(values)
             case ["check", "run"]:
@@ -2102,6 +2178,71 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         ),
         decode=_unused_decode,
     )
+    backup_push_command = Command(
+        name="push",
+        header="Create immutable restic snapshots for selected repos.",
+        options=(
+            option(
+                Argument.string(),
+                long="target",
+                help="Backup target name from root.clj. Defaults to the active backup-policy target(s).",
+                meta_var="NAME",
+            ),
+            flag(long="dry-run", help="Validate selection and print the backup plan without writing snapshots."),
+            flag(long="json", help="Emit a machine-readable backup report."),
+        ),
+        positionals=(
+            positional(
+                repo_target_argument,
+                "repo",
+                help="Repo IDs, project IDs, or paths. Omit to use the current repo, or all configured repos from the workspace root.",
+                repeated=True,
+            ),
+        ),
+        decode=_unused_decode,
+    )
+    backup_restore_command = Command(
+        name="restore",
+        header="Restore one repo snapshot into a destination directory.",
+        options=(
+            option(
+                Argument.string(),
+                long="target",
+                help="Backup target name from root.clj. Defaults to the active backup-policy target.",
+                meta_var="NAME",
+            ),
+            option(
+                Argument.string(),
+                long="snapshot",
+                help="Snapshot ID to restore. Defaults to latest.",
+                meta_var="SNAPSHOT",
+            ),
+            option(
+                _path_argument(directories_only=True),
+                long="into",
+                help="Destination directory for the restored repo tree.",
+                meta_var="DIR",
+            ),
+            flag(long="dry-run", help="Show what would be restored without writing files."),
+            flag(long="json", help="Emit a machine-readable restore report."),
+        ),
+        positionals=(
+            positional(
+                repo_target_argument,
+                "repo",
+                help="Optional repo ID, project ID, or path. Omit to use the current inferred repo.",
+                required=False,
+            ),
+        ),
+        decode=_unused_decode,
+    )
+    backup_command = Command(
+        name="backup",
+        header="Create or restore immutable repo backups with restic targets configured in root.clj.",
+        subcommands=(backup_push_command, backup_restore_command),
+        decode=_unused_decode,
+        help_on_empty=True,
+    )
     check_run_command = Command(
         name="run",
         header="Run the configured check suite against a project, directory, or file.",
@@ -2333,6 +2474,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             service_command,
             commit_command,
             push_command,
+            backup_command,
             check_command,
             spdx_command,
             secrets_command,
@@ -2347,6 +2489,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             f"  {prog} where\n"
             f"  {prog} service start\n"
             f"  {prog} service dashboard\n"
+            f"  {prog} backup push\n"
             f"  {prog} completion bash\n"
             f"  {prog} setup --local app-datatron\n"
             f"  {prog} build app-datatron\n"
@@ -2667,6 +2810,38 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 exit_code = push(targets, dry_run=dry_run)
                 _print_next_steps("push", targets=targets, dry_run=dry_run)
                 return exit_code
+            case BackupPushRequest(
+                repo_targets=repo_targets,
+                backup_target_name=backup_target_name,
+                dry_run=dry_run,
+                json_output=json_output,
+            ):
+                from dev.tasks.backup import push
+
+                return push(
+                    repo_targets,
+                    backup_target_name=backup_target_name,
+                    dry_run=dry_run,
+                    json_output=json_output,
+                )
+            case BackupRestoreRequest(
+                repo_target=repo_target,
+                backup_target_name=backup_target_name,
+                snapshot=snapshot,
+                into=into,
+                dry_run=dry_run,
+                json_output=json_output,
+            ):
+                from dev.tasks.backup import restore
+
+                return restore(
+                    repo_target,
+                    backup_target_name=backup_target_name,
+                    snapshot=snapshot,
+                    into=into,
+                    dry_run=dry_run,
+                    json_output=json_output,
+                )
             case CheckRunRequest(
                 target=target,
                 selectors=selectors,
