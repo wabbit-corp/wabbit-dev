@@ -1938,7 +1938,7 @@ def test_write_gradle_local_overlay_groups_external_builds_and_uses_correct_proj
         "{{ plugin_build_path }}:[plugin]\n"
         "{% endfor %}"
         "{% for included_build in included_builds %}"
-        "{{ included_build.build_path }}:"
+        "{{ included_build.build_path }}:{{ included_build.build_name }}:"
         "{% for substitution in included_build.substitutions %}"
         "[{{ substitution.module_coordinate }}=>{{ substitution.project_path }}]"
         "{% endfor %}\n"
@@ -1952,8 +1952,8 @@ def test_write_gradle_local_overlay_groups_external_builds_and_uses_correct_proj
     )
 
     overlay_text = (repo_root / "settings.local.gradle.kts").read_text(encoding="utf-8")
-    assert "../kotlin-dotenv-parser:[one.wabbit:kotlin-dotenv-parser=>:]" in overlay_text
-    assert "../shared:[one.wabbit:shared-api=>:shared-api][one.wabbit:shared-cli=>:shared-cli]" in overlay_text
+    assert "../kotlin-dotenv-parser:local-build-kotlin-dotenv-parser:[one.wabbit:kotlin-dotenv-parser=>:]" in overlay_text
+    assert "../shared:local-build-shared:[one.wabbit:shared-api=>:shared-api][one.wabbit:shared-cli=>:shared-cli]" in overlay_text
 
 
 def test_write_gradle_local_overlay_includes_kmp_source_set_project_dependencies(tmp_path: Path) -> None:

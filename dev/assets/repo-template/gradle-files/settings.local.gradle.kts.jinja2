@@ -9,6 +9,7 @@
 
 {% for included_build in included_builds %}
 includeBuild("{{ included_build.build_path }}") {
+    name = "{{ included_build.build_name }}"
     dependencySubstitution {
         {% for substitution in included_build.substitutions %}
         substitute(module("{{ substitution.module_coordinate }}")).using(project("{{ substitution.project_path }}"))

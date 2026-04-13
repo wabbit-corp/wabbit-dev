@@ -107,6 +107,7 @@ def test_settings_templates_place_plugin_builds_under_plugin_management() -> Non
     assert 'includeBuild("{{ plugin_build.build_path }}")' in settings_content
     assert 'includeBuild("{{ plugin_build.build_path }}")' in subproject_settings_content
     assert "dependencySubstitution" in settings_local_content
+    assert 'name = "{{ included_build.build_name }}"' in settings_local_content
 
 
 @pytest.mark.parametrize(

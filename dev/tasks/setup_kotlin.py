@@ -42,6 +42,7 @@ from dev.config import (
     resolve_kotlin_plugin_id,
     resolve_kotlin_plugin_version,
 )
+from dev.gitignore_files import merged_gitignore_text
 from dev.generated_files import stamp_managed_text
 from dev.licenses import canonicalize_license_key, license_display_name, license_spdx_url
 from dev.messages import error, warning
@@ -2121,7 +2122,10 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
 
         dev.io.write_text_file(
             project.path / ".gitignore",
-            clean_text(render_template(ctx.gitignore_template) + "\n" + render_template(ctx.gradle_gitignore_template)),
+            merged_gitignore_text(
+                project.path,
+                clean_text(render_template(ctx.gitignore_template) + "\n" + render_template(ctx.gradle_gitignore_template)),
+            ),
         )
         dev.io.write_text_file(
             project.path / "gradle.properties",

@@ -256,6 +256,40 @@ def test_setup_gradle_project_writes_nested_gradle_gitignore_for_repo_managed_su
     assert gitignore_text == "/build\n/.gradle\n"
 
 
+def test_setup_gradle_project_preserves_custom_gitignore_for_standalone_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project_root = tmp_path / "standalone"
+    project = _make_repo_gradle_project(
+        project_root,
+        project_id="standalone",
+        repo_root=project_root,
+        gradle_project_name="standalone",
+        github_repo="org/standalone",
+    )
+    project.path.mkdir(parents=True, exist_ok=True)
+    (project.path / ".gitignore").write_text("# custom\n/custom-cache/\n", encoding="utf-8")
+    ctx = _make_context(
+        tmp_path,
+        jvm_template="JVM_TEMPLATE",
+        kmp_template="KMP_TEMPLATE",
+    )
+    ctx.gitignore_template = jinja2.Template("# base\n/.DS_Store\n")
+    ctx.gradle_gitignore_template = jinja2.Template("/build\n/.gradle\n")
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    gitignore_text = (project.path / ".gitignore").read_text(encoding="utf-8")
+    assert "# base" in gitignore_text
+    assert "/.DS_Store" in gitignore_text
+    assert "/build" in gitignore_text
+    assert "/.gradle" in gitignore_text
+    assert "# custom" in gitignore_text
+    assert "/custom-cache/" in gitignore_text
+
+
 def test_setup_gradle_project_inlines_optional_build_inline_script(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import pprint
+import re
 import sys
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
@@ -160,6 +161,7 @@ class LocalIncludedBuildSubstitution:
 @dataclass(frozen=True)
 class LocalIncludedBuild:
     build_path: str
+    build_name: str
     substitutions: list[LocalIncludedBuildSubstitution]
 
 
@@ -836,6 +838,11 @@ def _included_build_project_path(project: GradleProject) -> str:
     return f":{project.effective_gradle_project_name}"
 
 
+def _local_included_build_name(relative_path: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9]+", "-", relative_path).strip("-")
+    return f"local-build-{normalized or 'build'}"
+
+
 def _local_included_builds(
     config: Config,
     *,
@@ -875,9 +882,11 @@ def _local_included_builds(
         if not substitutions:
             continue
 
+        relative_build_path = _relative_project_dir(root_path, gradle_root)
         included_builds.append(
             LocalIncludedBuild(
-                build_path=_relative_project_dir(root_path, gradle_root),
+                build_path=relative_build_path,
+                build_name=_local_included_build_name(relative_build_path),
                 substitutions=substitutions,
             )
         )
