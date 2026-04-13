@@ -7,10 +7,21 @@ from dev.service_db import BackupRepoSummary
 from dev.dashboard_backend import (
     DashboardRepoState,
     _backup_state_from_summary,
+    _clear_matching_failure_message,
     _empty_monitor_state,
     _merge_cached_repo_state,
     _overall_registry_visibility,
+    _release_project_state,
     _registry_status,
+    _sanitize_cached_last_action_message,
+)
+from dev.tasks.project_versions import (
+    GitState,
+    GitWorkingTreeState,
+    LatestTagState,
+    ProjectVersionReport,
+    RegistrySnapshot,
+    VersionDiagnostic,
 )
 
 
@@ -124,3 +135,58 @@ def test_backup_state_from_summary_preserves_latest_backup_metadata() -> None:
     assert backup.target_name == "desktop-archive"
     assert backup.snapshot_id == "abc123"
     assert backup.success_at == finished_at
+
+
+def test_release_project_state_returns_structured_release_data() -> None:
+    checked_at = datetime(2026, 4, 12, 21, 0, tzinfo=UTC)
+    report = ProjectVersionReport(
+        project_id="kotlin-web-wayback",
+        project_path=Path("/tmp/kotlin-web-wayback"),
+        repo_root=Path("/tmp/kotlin-web-wayback"),
+        current_version="2.0.0",
+        publish_target="maven-central",
+        registries=(
+            RegistrySnapshot(
+                name="maven-central",
+                package="one.wabbit:kotlin-web-wayback",
+                latest="2.0.0",
+                versions=("1.0.0", "2.0.0"),
+                diagnostics=(VersionDiagnostic(source="maven-central", message="ok"),),
+            ),
+        ),
+        git_state=GitState(
+            branch="master",
+            remote="origin",
+            remote_branch="master",
+            remote_head="origin/master",
+            unpushed_commits=2,
+            remote_only_commits=0,
+            latest_tag=LatestTagState(tag="v2.0.0", version="2.0.0", commits_after=3),
+            working_tree=GitWorkingTreeState(entries=()),
+        ),
+        versions=(),
+        diagnostics=(VersionDiagnostic(source="git-upstream", message="ahead 2"),),
+    )
+
+    release_state = _release_project_state(report, checked_at=checked_at)
+
+    assert release_state.project_id == "kotlin-web-wayback"
+    assert release_state.publish_target == "maven-central"
+    assert release_state.registry_visible == "published"
+    assert release_state.latest_tag == "v2.0.0"
+    assert release_state.commits_after_tag == 3
+    assert release_state.unpushed_commits == 2
+    assert release_state.checked_at == checked_at
+    assert release_state.diagnostics == ("git-upstream: ahead 2",)
+
+
+def test_clear_matching_failure_message_only_clears_same_job_kind() -> None:
+    assert _clear_matching_failure_message("versions failed: boom", "versions") is None
+    assert _clear_matching_failure_message("github failed: boom", "versions") == "github failed: boom"
+    assert _clear_matching_failure_message("manual commit complete", "versions") == "manual commit complete"
+
+
+def test_sanitize_cached_last_action_message_drops_background_refresh_failures() -> None:
+    assert _sanitize_cached_last_action_message("versions failed: boom") is None
+    assert _sanitize_cached_last_action_message("github failed: boom") is None
+    assert _sanitize_cached_last_action_message("commit failed: boom") == "commit failed: boom"

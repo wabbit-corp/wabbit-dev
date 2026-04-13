@@ -658,8 +658,10 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
         githubBlocks.push(`<div class="secondary">${{escapeHtml(repo.github.error)}}</div>`);
       }}
 
-      const releaseBlocks = repo.releaseProjects.length === 0
+      const releaseBlocks = (!repo.publishableProjectIds || repo.publishableProjectIds.length === 0)
         ? ['<span class="secondary">No publishable projects</span>']
+        : repo.releaseProjects.length === 0
+        ? ['<span class="secondary">Loading release status…</span>']
         : repo.releaseProjects.map((project) => {{
             const gitBits = [
               project.latestTag ? `tag ${{project.latestTag}}` : "tag —",

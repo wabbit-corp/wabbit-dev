@@ -481,7 +481,7 @@ def _merge_cached_repo_state(repo: DashboardRepoState, payload: JSONObject) -> D
         check_run=_parse_repo_command_state(payload.get("checkRun")),
         release_verify=_parse_repo_command_state(payload.get("releaseVerify")),
         build=_parse_repo_command_state(payload.get("build")),
-        last_action_message=_str_or_none(payload.get("lastActionMessage")),
+        last_action_message=_sanitize_cached_last_action_message(_str_or_none(payload.get("lastActionMessage"))),
     )
 
 
@@ -617,6 +617,22 @@ def _failed_command_state(kind: str, *, detail: str, checked_at: datetime) -> Re
         detail=detail,
         exit_code=1,
     )
+
+
+def _clear_matching_failure_message(message: str | None, kind: str) -> str | None:
+    match message:
+        case str(text) if text.startswith(f"{kind} failed:"):
+            return None
+        case _:
+            return message
+
+
+def _sanitize_cached_last_action_message(message: str | None) -> str | None:
+    match message:
+        case str(text) if text.startswith("versions failed:") or text.startswith("github failed:"):
+            return None
+        case _:
+            return message
 
 
 def _check_command_state(kind: str, payload: JSONObject, *, exit_code: int, checked_at: datetime) -> RepoCommandState:
@@ -810,20 +826,6 @@ def _release_project_state(report: ProjectVersionReport, *, checked_at: datetime
         )
         for registry in report.registries
     )
-
-
-def _backup_state_from_summary(summary: BackupRepoSummary | None) -> BackupStatusState | None:
-    if summary is None:
-        return None
-    return BackupStatusState(
-        attempted_at=summary.last_attempted_at,
-        finished_at=summary.last_finished_at,
-        success_at=summary.last_success_at,
-        status=summary.last_status,
-        message=summary.last_message,
-        target_name=summary.last_backup_target_name,
-        snapshot_id=summary.last_snapshot_id,
-    )
     return ReleaseProjectState(
         project_id=report.project_id,
         publish_target=report.publish_target,
@@ -843,6 +845,20 @@ def _backup_state_from_summary(summary: BackupRepoSummary | None) -> BackupStatu
         untracked_count=report.git_state.working_tree.untracked_count,
         checked_at=checked_at,
         diagnostics=diagnostics,
+    )
+
+
+def _backup_state_from_summary(summary: BackupRepoSummary | None) -> BackupStatusState | None:
+    if summary is None:
+        return None
+    return BackupStatusState(
+        attempted_at=summary.last_attempted_at,
+        finished_at=summary.last_finished_at,
+        success_at=summary.last_success_at,
+        status=summary.last_status,
+        message=summary.last_message,
+        target_name=summary.last_backup_target_name,
+        snapshot_id=summary.last_snapshot_id,
     )
 
 
@@ -1375,8 +1391,12 @@ class DashboardCoordinator:
                     )
                     should_persist_cache = True
                 case _:
-                    self._repo_states[job.repo_name] = replace(repo, last_action_message=f"{job.kind} failed: {detail}")
-                    should_persist_cache = True
+                    if job.source == "user":
+                        self._repo_states[job.repo_name] = replace(
+                            repo,
+                            last_action_message=f"{job.kind} failed: {detail}",
+                        )
+                        should_persist_cache = True
         if should_persist_cache:
             self._persist_repo_cache(job.repo_name, updated_at=checked_at)
         self._record_action_history(
@@ -1400,7 +1420,11 @@ class DashboardCoordinator:
                     updated_projects = [item for item in repo.release_projects if item.project_id != job.project_id]
                     updated_projects.append(release_state)
                     updated_projects.sort(key=lambda item: item.project_id)
-                    self._repo_states[job.repo_name] = replace(repo, release_projects=tuple(updated_projects))
+                    self._repo_states[job.repo_name] = replace(
+                        repo,
+                        release_projects=tuple(updated_projects),
+                        last_action_message=_clear_matching_failure_message(repo.last_action_message, job.kind),
+                    )
                 self._persist_repo_cache(job.repo_name, updated_at=checked_at)
             case "github":
                 descriptor = next((item for item in self._descriptors if item.target.name == job.repo_name), None)
@@ -1410,7 +1434,11 @@ class DashboardCoordinator:
                 checked_at = _now_utc()
                 with self._lock:
                     repo = self._repo_states[job.repo_name]
-                    self._repo_states[job.repo_name] = replace(repo, github=github_state)
+                    self._repo_states[job.repo_name] = replace(
+                        repo,
+                        github=github_state,
+                        last_action_message=_clear_matching_failure_message(repo.last_action_message, job.kind),
+                    )
                 self._persist_repo_cache(job.repo_name, updated_at=checked_at)
             case "spot-check":
                 self._set_command_running(job.repo_name, "spot_check", "spot-check")
