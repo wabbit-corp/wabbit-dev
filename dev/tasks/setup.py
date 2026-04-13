@@ -13,6 +13,7 @@ from pathlib import Path
 
 import jinja2
 from git import Repo
+from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 
 import dev.agents_md
 import dev.io
@@ -23,6 +24,7 @@ from dev.build_order import toposort_projects
 from dev.commit_policy import ensure_semver_impact_line, staged_diff_context, verify_commit_message
 from dev.config import (
     Config,
+    CONFIG_FILE,
     DataProject,
     Dependency,
     DotnetProject,
@@ -154,6 +156,31 @@ class LocalIncludedBuildSubstitution:
 class LocalIncludedBuild:
     build_path: str
     substitutions: list[LocalIncludedBuildSubstitution]
+
+
+@dataclass(frozen=True)
+class SetupAutoCommitRepoCandidate:
+    repo_root: Path
+    representative_project: Project
+    preexisting_managed_paths: frozenset[str]
+
+
+@dataclass(frozen=True)
+class SetupAutoCommitRepoResult:
+    repo_root: Path
+    representative_project_id: str | None
+    status: str
+    message: str
+    changed_paths: tuple[str, ...]
+
+    def to_json(self) -> JSONObject:
+        return {
+            "repoRoot": str(self.repo_root.resolve()),
+            "representativeProjectId": self.representative_project_id,
+            "status": self.status,
+            "message": self.message,
+            "changedPaths": list(self.changed_paths),
+        }
 
 
 def setup_project(
@@ -1510,6 +1537,285 @@ def commit_repo_changes(
             repo.index.commit(commit_name)
 
 
+def _select_setup_auto_commit_representative_project(
+    existing: Project | None,
+    candidate: Project,
+) -> Project:
+    if existing is None:
+        return candidate
+    if existing.quarantine and not candidate.quarantine:
+        return candidate
+    return existing
+
+
+def _tracked_setup_managed_paths(repo: Repo) -> frozenset[str]:
+    working_tree_dir = repo.working_tree_dir
+    if working_tree_dir is None:
+        return frozenset()
+    try:
+        tracked_output = repo.git.ls_files()
+    except GitCommandError:
+        return frozenset()
+
+    repo_root = Path(working_tree_dir)
+    managed_paths: set[str] = set()
+    for line in tracked_output.splitlines():
+        relative_path = line.strip()
+        if not relative_path:
+            continue
+        if is_setup_managed_file(repo_root / relative_path):
+            managed_paths.add(relative_path)
+    return frozenset(managed_paths)
+
+
+def _collect_setup_auto_commit_candidates(
+    selected_projects: Sequence[Project],
+    *,
+    workspace_root: Path,
+    include_workspace_root: bool,
+) -> tuple[SetupAutoCommitRepoCandidate, ...]:
+    representative_by_repo_root: dict[Path, Project] = {}
+    for project in selected_projects:
+        repo_root = project_repo_root(project).resolve()
+        representative_by_repo_root[repo_root] = _select_setup_auto_commit_representative_project(
+            representative_by_repo_root.get(repo_root),
+            project,
+        )
+
+    if include_workspace_root and selected_projects:
+        workspace_representative = next(
+            (project for project in selected_projects if not project.quarantine),
+            selected_projects[0],
+        )
+        representative_by_repo_root[workspace_root] = _select_setup_auto_commit_representative_project(
+            representative_by_repo_root.get(workspace_root),
+            workspace_representative,
+        )
+
+    candidates: list[SetupAutoCommitRepoCandidate] = []
+    for repo_root in sorted(representative_by_repo_root):
+        representative_project = representative_by_repo_root[repo_root]
+        try:
+            repo = Repo(repo_root)
+        except (InvalidGitRepositoryError, NoSuchPathError):
+            continue
+        try:
+            candidates.append(
+                SetupAutoCommitRepoCandidate(
+                    repo_root=repo_root,
+                    representative_project=representative_project,
+                    preexisting_managed_paths=_tracked_setup_managed_paths(repo),
+                )
+            )
+        finally:
+            repo.close()
+    return tuple(candidates)
+
+
+def _diff_changed_paths(diff_item: FileDiff) -> tuple[str, ...]:
+    paths: list[str] = []
+    for candidate_path in (diff_item.old_path, diff_item.new_path):
+        match candidate_path:
+            case str(path_text):
+                if path_text not in paths:
+                    paths.append(path_text)
+            case _:
+                continue
+    return tuple(paths)
+
+
+def _is_setup_auto_commit_allowed_path(
+    relative_path: str,
+    *,
+    repo_root: Path,
+    workspace_root: Path,
+    preexisting_managed_paths: frozenset[str],
+) -> bool:
+    if Path(relative_path).name == ".gitignore":
+        return True
+    if repo_root == workspace_root and relative_path == CONFIG_FILE:
+        return True
+    if relative_path in preexisting_managed_paths:
+        return True
+    return is_setup_managed_file(repo_root / relative_path)
+
+
+def _auto_commit_setup_candidate(
+    candidate: SetupAutoCommitRepoCandidate,
+    *,
+    workspace_root: Path,
+    openai_key: str | None,
+) -> SetupAutoCommitRepoResult:
+    representative_project = candidate.representative_project
+    representative_project_id = representative_project.project_id
+
+    if openai_key is None:
+        return SetupAutoCommitRepoResult(
+            repo_root=candidate.repo_root,
+            representative_project_id=representative_project_id,
+            status="skipped",
+            message="OpenAI key is required to generate the auto-commit message.",
+            changed_paths=(),
+        )
+
+    try:
+        repo = Repo(candidate.repo_root)
+    except (InvalidGitRepositoryError, NoSuchPathError) as ex:
+        return SetupAutoCommitRepoResult(
+            repo_root=candidate.repo_root,
+            representative_project_id=representative_project_id,
+            status="skipped",
+            message=f"Could not open git repo: {ex}",
+            changed_paths=(),
+        )
+
+    try:
+        try:
+            branch_name = repo.active_branch.name
+        except TypeError:
+            branch_name = None
+        except ValueError:
+            branch_name = None
+
+        if branch_name != "master":
+            return SetupAutoCommitRepoResult(
+                repo_root=candidate.repo_root,
+                representative_project_id=representative_project_id,
+                status="skipped",
+                message="Auto-commit only runs on master.",
+                changed_paths=(),
+            )
+
+        final_diffs = [
+            diff_item
+            for diff_item in compute_repo_diffs(repo, include_untracked=True)
+            if diff_item.change_type != ChangeType.UNCHANGED
+        ]
+        changed_paths = tuple(
+            sorted(
+                {
+                    path_text
+                    for diff_item in final_diffs
+                    for path_text in _diff_changed_paths(diff_item)
+                }
+            )
+        )
+
+        if not final_diffs:
+            return SetupAutoCommitRepoResult(
+                repo_root=candidate.repo_root,
+                representative_project_id=representative_project_id,
+                status="skipped",
+                message="No changes to commit.",
+                changed_paths=(),
+            )
+
+        if any(diff_item.untracked for diff_item in final_diffs):
+            return SetupAutoCommitRepoResult(
+                repo_root=candidate.repo_root,
+                representative_project_id=representative_project_id,
+                status="skipped",
+                message="Repo has untracked files after setup.",
+                changed_paths=changed_paths,
+            )
+
+        if any(diff_item.partial_staging_suspected for diff_item in final_diffs):
+            return SetupAutoCommitRepoResult(
+                repo_root=candidate.repo_root,
+                representative_project_id=representative_project_id,
+                status="skipped",
+                message="Repo has partially staged files.",
+                changed_paths=changed_paths,
+            )
+
+        disallowed_paths: list[str] = []
+        for diff_item in final_diffs:
+            for path_text in _diff_changed_paths(diff_item):
+                if _is_setup_auto_commit_allowed_path(
+                    path_text,
+                    repo_root=candidate.repo_root,
+                    workspace_root=workspace_root,
+                    preexisting_managed_paths=candidate.preexisting_managed_paths,
+                ):
+                    continue
+                if path_text not in disallowed_paths:
+                    disallowed_paths.append(path_text)
+
+        if disallowed_paths:
+            return SetupAutoCommitRepoResult(
+                repo_root=candidate.repo_root,
+                representative_project_id=representative_project_id,
+                status="skipped",
+                message="Repo has changes outside the setup-only auto-commit scope.",
+                changed_paths=tuple(disallowed_paths),
+            )
+
+        commit_repo_changes(
+            representative_project,
+            repo,
+            openai_key=openai_key,
+            interactive=False,
+            add_files=False,
+        )
+
+        remaining_diffs = [
+            diff_item
+            for diff_item in compute_repo_diffs(repo, include_untracked=True)
+            if diff_item.change_type != ChangeType.UNCHANGED
+        ]
+        if remaining_diffs:
+            remaining_paths = tuple(
+                sorted(
+                    {
+                        path_text
+                        for diff_item in remaining_diffs
+                        for path_text in _diff_changed_paths(diff_item)
+                    }
+                )
+            )
+            return SetupAutoCommitRepoResult(
+                repo_root=candidate.repo_root,
+                representative_project_id=representative_project_id,
+                status="error",
+                message="Auto-commit completed but local changes remain.",
+                changed_paths=remaining_paths,
+            )
+
+        return SetupAutoCommitRepoResult(
+            repo_root=candidate.repo_root,
+            representative_project_id=representative_project_id,
+            status="committed",
+            message="Committed setup-only changes.",
+            changed_paths=changed_paths,
+        )
+    except Exception as ex:
+        return SetupAutoCommitRepoResult(
+            repo_root=candidate.repo_root,
+            representative_project_id=representative_project_id,
+            status="error",
+            message=str(ex),
+            changed_paths=(),
+        )
+    finally:
+        repo.close()
+
+
+def _auto_commit_setup_repos(
+    candidates: Sequence[SetupAutoCommitRepoCandidate],
+    *,
+    workspace_root: Path,
+    openai_key: str | None,
+) -> tuple[SetupAutoCommitRepoResult, ...]:
+    return tuple(
+        _auto_commit_setup_candidate(
+            candidate,
+            workspace_root=workspace_root,
+            openai_key=openai_key,
+        )
+        for candidate in candidates
+    )
+
+
 def create_repo_setup_context(
     config: Config,
     mode: RepoSetupMode,
@@ -1712,6 +2018,7 @@ def setup(
     interactive: bool = True,
     project: str | None = None,
     projects: list[str] | None = None,
+    commit_if_setup_only: bool = False,
     json_output: bool = False,
 ) -> int:
     selected_projects_input = projects if projects is not None else ([project] if project is not None else None)
@@ -1732,6 +2039,10 @@ def setup(
         "localOverlayRootsWritten": [],
         "localOverlayRootsRemoved": [],
         "unexpectedDirectories": [],
+        "autoCommit": {
+            "requested": commit_if_setup_only,
+            "repos": [],
+        },
     }
 
     def project_payload(project_item: Project) -> JSONObject:
@@ -1757,6 +2068,7 @@ def setup(
 
     def run() -> int:
         config = load_config()
+        workspace_root = (config.workspace_root or Path(".")).resolve()
         effective_selected_projects_input = inferred_project_targets(config, selected_projects_input)
         if selected_projects_input is None and effective_selected_projects_input is not None:
             payload["inferredTargets"] = list(effective_selected_projects_input)
@@ -1777,6 +2089,11 @@ def setup(
         payload["selectedProjectIds"] = list(selected_project_names)
         selected_projects = [config.defined_projects[name] for name in selected_project_names]
         payload["projects"] = [project_payload(project_item) for project_item in selected_projects]
+        if commit_if_setup_only and mode != RepoSetupMode.PROD:
+            message = "--commit-if-setup-only only supports PROD setup."
+            payload["error"] = message
+            error(message)
+            return 1
         requires_github_api = any(project_item.github_repo is not None for project_item in selected_projects)
         create_ctx_signature = inspect.signature(create_repo_setup_context)
         create_ctx_kwargs: dict[str, object] = {}
@@ -1801,6 +2118,13 @@ def setup(
         dotnet_projects = [
             project_item for project_item in selected_projects if isinstance(project_item, DotnetProject)
         ]
+        auto_commit_candidates: tuple[SetupAutoCommitRepoCandidate, ...] = ()
+        if commit_if_setup_only:
+            auto_commit_candidates = _collect_setup_auto_commit_candidates(
+                selected_projects,
+                workspace_root=workspace_root,
+                include_workspace_root=effective_selected_projects_input is None and bool(gradle_projects),
+            )
         if gradle_projects:
             if effective_selected_projects_input is None:
                 workspace_seed_projects = gradle_projects
@@ -1946,8 +2270,26 @@ def setup(
             for overlay_root in sorted(overlay_roots):
                 _delete_gradle_local_overlay(root_path=overlay_root)
 
+        if commit_if_setup_only:
+            auto_commit_results = _auto_commit_setup_repos(
+                auto_commit_candidates,
+                workspace_root=workspace_root,
+                openai_key=config.openai_key,
+            )
+            payload["autoCommit"]["repos"] = [result.to_json() for result in auto_commit_results]
+            for result in auto_commit_results:
+                match result.status:
+                    case "committed":
+                        info(f"Auto-committed setup-only changes in {result.repo_root}")
+                    case "skipped":
+                        info(f"Skipping setup-only auto-commit for {result.repo_root}: {result.message}")
+                    case "error":
+                        error(f"Setup-only auto-commit failed for {result.repo_root}: {result.message}")
+            if any(result.status == "error" for result in auto_commit_results):
+                payload["error"] = "One or more setup-only auto-commits failed."
+                return 1
+
         if effective_selected_projects_input is None:
-            workspace_root = (config.workspace_root or Path(".")).resolve()
             expected_top_level_dirs = {
                 top_level_dir
                 for project_item in config.defined_projects.values()

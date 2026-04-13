@@ -57,7 +57,7 @@ commands from the workspace root.
 | `docs snippets [TARGET ...] [--verify] [--json]` | Validate fenced docs snippets with optional deeper project-specific verification. |
 | `where [--json]` | Show the workspace, repo, and project context inferred from the current directory. |
 | `config check` | Parse and validate `root.clj` and `root.private.clj`. |
-| `setup [TARGET ...] [--json]` | Generate or refresh managed project files. |
+| `setup [TARGET ...] [--commit-if-setup-only] [--json]` | Generate or refresh managed project files, with an optional safe post-setup auto-commit. |
 | `llmcopy PATH ...` | Copy file contents to the clipboard in an LLM-friendly wrapper and report GPT-5.4 token totals. |
 | `dep graph [TARGET ...]` | Render an SVG dependency graph. |
 | `dep updates` | Check configured Maven libraries for newer versions. |
@@ -459,7 +459,7 @@ dev project targets jeeves --json
 ### `setup`
 
 ```bash
-dev setup [--dev] [--local] [--json] [TARGET ...]
+dev setup [--dev] [--local] [--commit-if-setup-only] [--json] [TARGET ...]
 ```
 
 Generates or refreshes managed files from configuration.
@@ -476,6 +476,10 @@ Behavior:
 - in default mode, runs PROD setup
 - with `--dev`, switches to DEV mode
 - with `--local`, switches to LOCAL mode and writes local dependency overlays
+- with `--commit-if-setup-only`, after PROD setup finishes, auto-commits only
+  when every affected repo remains on `master`, has no untracked files, and the
+  remaining diffs are limited to `root.clj`, `.gitignore`, and setup-managed
+  generated files
 - with `--json`, emits a machine-readable summary while progress logs go to stderr
 
 Typical uses:
@@ -485,6 +489,7 @@ dev setup
 dev setup app-wabbit-dev
 dev setup jeeves
 dev setup --local app-datatron
+dev setup --commit-if-setup-only app-wabbit-dev
 dev setup app-wabbit-dev --json
 ```
 

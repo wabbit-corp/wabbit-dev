@@ -399,7 +399,7 @@ async def test_setup_bypasses_argparse_with_typed_cli(monkeypatch: pytest.Monkey
     from dev.tasks import setup as setup_task
     from dev.tasks.setup_common import RepoSetupMode
 
-    called: list[tuple[RepoSetupMode, list[str] | None, bool]] = []
+    called: list[tuple[RepoSetupMode, list[str] | None, bool, bool]] = []
 
     def fake_setup(
         mode: RepoSetupMode,
@@ -407,10 +407,11 @@ async def test_setup_bypasses_argparse_with_typed_cli(monkeypatch: pytest.Monkey
         interactive: bool = True,
         project: str | None = None,
         projects: list[str] | None = None,
+        commit_if_setup_only: bool = False,
         json_output: bool = False,
     ) -> int:
         del interactive, project
-        called.append((mode, projects, json_output))
+        called.append((mode, projects, commit_if_setup_only, json_output))
         return 0
 
     monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
@@ -421,7 +422,43 @@ async def test_setup_bypasses_argparse_with_typed_cli(monkeypatch: pytest.Monkey
     result = await cli.async_main()
 
     assert result == 0
-    assert called == [(RepoSetupMode.LOCAL, ["app-wabbit-dev"], True)]
+    assert called == [(RepoSetupMode.LOCAL, ["app-wabbit-dev"], False, True)]
+
+
+@pytest.mark.asyncio
+async def test_setup_commit_if_setup_only_bypasses_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import doctor as doctor_task
+    from dev.tasks import setup as setup_task
+    from dev.tasks.setup_common import RepoSetupMode
+
+    called: list[tuple[RepoSetupMode, list[str] | None, bool, bool]] = []
+
+    def fake_setup(
+        mode: RepoSetupMode,
+        *,
+        interactive: bool = True,
+        project: str | None = None,
+        projects: list[str] | None = None,
+        commit_if_setup_only: bool = False,
+        json_output: bool = False,
+    ) -> int:
+        del interactive, project
+        called.append((mode, projects, commit_if_setup_only, json_output))
+        return 0
+
+    monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda *args, **kwargs: True)
+    monkeypatch.setattr(setup_task, "setup", fake_setup)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["dev.py", "setup", "--commit-if-setup-only", "--json", "app-wabbit-dev"],
+    )
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [(RepoSetupMode.PROD, ["app-wabbit-dev"], True, True)]
 
 
 @pytest.mark.asyncio

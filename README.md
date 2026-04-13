@@ -125,7 +125,7 @@ Every command is documented here and in the MkDocs reference under
 | `docs snippets [TARGET ...] [--verify] [--json]` | Validates fenced docs snippets, with optional deeper project-specific verification. |
 | `where [--json]` | Shows the workspace, repo, and project context inferred from the current directory. |
 | `config check` | Parses and validates `root.clj` and `root.private.clj`. |
-| `setup [TARGET ...] [--json]` | Generates or refreshes managed project files from configuration. |
+| `setup [TARGET ...] [--commit-if-setup-only] [--json]` | Generates or refreshes managed project files from configuration, with an optional safe post-setup auto-commit mode. |
 | `llmcopy PATH ...` | Copies file contents to the clipboard in an LLM-friendly wrapper and reports GPT-5.4 token totals. |
 | `dep graph [TARGET ...]` | Renders an SVG dependency graph for the workspace or selected configured targets. |
 | `dep updates` | Checks configured Maven libraries for newer upstream versions. |
@@ -359,6 +359,12 @@ just to satisfy release verification.
 Managed generated config files also carry a short integrity stamp. `check` uses
 that stamp to distinguish hand-edited managed files from files that are merely
 stale and need regeneration.
+
+For setup-driven config refreshes that should be checkpointed immediately, use
+`dev setup --commit-if-setup-only <target>`. That post-setup auto-commit path
+is intentionally narrow: it only commits when the repo stays on `master`, has
+no untracked files, and the remaining diffs are limited to `root.clj`,
+`.gitignore`, and setup-managed generated files.
 
 `setup` also owns a small repo-root metadata bundle for Wabbit-managed repos:
 

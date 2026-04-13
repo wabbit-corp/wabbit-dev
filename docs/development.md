@@ -30,7 +30,7 @@ dev check app-wabbit-dev
 
 The CLI help and docs should stay aligned:
 
-- update `dev/cli.py` when command behavior or syntax changes
+- update `dev/typed_cli.py` when command behavior or syntax changes
 - update [Command Reference](commands.md) when user-facing behavior changes
 - update [Configuration Reference](configuration.md) when the config DSL changes
 - rebuild docs with `mkdocs build --strict`

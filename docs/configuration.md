@@ -88,6 +88,11 @@ Managed generated config files also carry a short embedded integrity stamp.
 That lets `check` detect manual edits to setup-owned files separately from
 future staleness checks that compare against regenerated output.
 
+If a setup run only changes config-owned files and you want to checkpoint that
+immediately, `dev setup --commit-if-setup-only <target>` will auto-commit only
+when the repo stays within the safe setup-owned scope: `root.clj`,
+`.gitignore`, and setup-managed generated files, with no untracked files.
+
 `setup` can also maintain a small facts block in a repo-root `AGENTS.md`. The
 behavior is intentionally conservative:
 

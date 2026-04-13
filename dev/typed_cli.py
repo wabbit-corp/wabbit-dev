@@ -173,6 +173,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         targets: list[str]
         dev_mode: bool
         local_mode: bool
+        commit_if_setup_only: bool
         json_output: bool
 
     @dataclass(frozen=True)
@@ -845,12 +846,20 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                     tokens.append("--json")
                 tokens.extend(targets)
                 return tokens
-            case SetupRequest(targets=targets, dev_mode=dev_mode, local_mode=local_mode, json_output=json_output):
+            case SetupRequest(
+                targets=targets,
+                dev_mode=dev_mode,
+                local_mode=local_mode,
+                commit_if_setup_only=commit_if_setup_only,
+                json_output=json_output,
+            ):
                 tokens = ["setup"]
                 if dev_mode:
                     tokens.append("--dev")
                 if local_mode:
                     tokens.append("--local")
+                if commit_if_setup_only:
+                    tokens.append("--commit-if-setup-only")
                 if json_output:
                     tokens.append("--json")
                 tokens.extend(targets)
@@ -1190,6 +1199,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 targets=_string_list(values.positional("target")),
                 dev_mode=_bool_value(values, "--dev"),
                 local_mode=_bool_value(values, "--local"),
+                commit_if_setup_only=_bool_value(values, "--commit-if-setup-only"),
                 json_output=_bool_value(values, "--json"),
             )
         )
@@ -1833,6 +1843,13 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         options=(
             flag(long="dev", help="Run setup in DEV mode instead of the default PROD mode."),
             flag(long="local", help="Run setup in LOCAL mode and generate local dependency overlays."),
+            flag(
+                long="commit-if-setup-only",
+                help=(
+                    "After PROD setup, auto-commit repo changes only when they stay within the safe setup-only "
+                    "scope: root.clj, .gitignore, and setup-managed generated files, with no untracked files."
+                ),
+            ),
             flag(long="json", help="Emit a machine-readable setup summary instead of human-oriented progress output."),
         ),
         positionals=(
@@ -2624,7 +2641,13 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 from dev.tasks.docs_check import docs_snippets
 
                 return docs_snippets(targets, verify=verify, json_output=json_output)
-            case SetupRequest(targets=targets, dev_mode=dev_mode, local_mode=local_mode, json_output=json_output):
+            case SetupRequest(
+                targets=targets,
+                dev_mode=dev_mode,
+                local_mode=local_mode,
+                commit_if_setup_only=commit_if_setup_only,
+                json_output=json_output,
+            ):
                 targets = _project_targets_with_defaults(targets)
                 if not _preflight("setup", targets):
                     return 2
@@ -2640,6 +2663,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                     mode,
                     projects=targets,
                     interactive=sys.stdin.isatty() and not json_output,
+                    commit_if_setup_only=commit_if_setup_only,
                     json_output=json_output,
                 )
                 _print_next_steps("setup", targets=targets, json_output=json_output)
