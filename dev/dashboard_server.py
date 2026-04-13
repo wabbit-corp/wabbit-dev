@@ -487,6 +487,72 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
       return `<span class="badge ${{badgeClass(backup.status || "muted")}}" title="${{escapeHtml(titleParts.join(" · "))}}">backup · ${{escapeHtml(label)}}</span>`;
     }}
 
+    function trackingState(monitor) {{
+      const branchName = monitor.branchName || "HEAD";
+      const upstreamName = monitor.upstreamName;
+      const aheadCount = typeof monitor.aheadCount === "number" ? monitor.aheadCount : null;
+      const behindCount = typeof monitor.behindCount === "number" ? monitor.behindCount : null;
+      if (!upstreamName) {{
+        return {{
+          label: "no upstream",
+          status: "muted",
+          detail: branchName,
+          title: `${{branchName}} has no configured upstream branch.`,
+          countBadges: [],
+        }};
+      }}
+      if (aheadCount === null || behindCount === null) {{
+        return {{
+          label: "tracking ?",
+          status: "muted",
+          detail: `${{branchName}} vs ${{upstreamName}}`,
+          title: `${{branchName}} vs ${{upstreamName}}. Ahead/behind counts are not available yet.`,
+          countBadges: [],
+        }};
+      }}
+      const countBadges = [];
+      if (aheadCount > 0) {{
+        countBadges.push(`<span class="badge muted">ahead ${{escapeHtml(String(aheadCount))}}</span>`);
+      }}
+      if (behindCount > 0) {{
+        countBadges.push(`<span class="badge muted">behind ${{escapeHtml(String(behindCount))}}</span>`);
+      }}
+      if (aheadCount > 0 && behindCount > 0) {{
+        return {{
+          label: "diverged",
+          status: "error",
+          detail: `${{branchName}} vs ${{upstreamName}}`,
+          title: `${{branchName}} has diverged from ${{upstreamName}}: ahead ${{aheadCount}}, behind ${{behindCount}}.`,
+          countBadges,
+        }};
+      }}
+      if (aheadCount > 0) {{
+        return {{
+          label: "needs push",
+          status: "warn",
+          detail: `${{branchName}} vs ${{upstreamName}}`,
+          title: `${{branchName}} is ahead of ${{upstreamName}} by ${{aheadCount}} commit${{aheadCount === 1 ? "" : "s"}}.`,
+          countBadges,
+        }};
+      }}
+      if (behindCount > 0) {{
+        return {{
+          label: "needs pull",
+          status: "warn",
+          detail: `${{branchName}} vs ${{upstreamName}}`,
+          title: `${{branchName}} is behind ${{upstreamName}} by ${{behindCount}} commit${{behindCount === 1 ? "" : "s"}}.`,
+          countBadges,
+        }};
+      }}
+      return {{
+        label: "in sync",
+        status: "ok",
+        detail: `${{branchName}} vs ${{upstreamName}}`,
+        title: `${{branchName}} is in sync with ${{upstreamName}}.`,
+        countBadges: [],
+      }};
+    }}
+
     function releaseDetailKey(repoName, projectId) {{
       return `${{repoName}}::${{projectId}}`;
     }}
@@ -640,9 +706,7 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
       const rowClass = repo.monitor.error ? "error" : (repo.monitor.dirty ? "dirty" : "clean");
       const monitor = repo.monitor;
       const counts = `${{monitor.stagedCount}} staged · ${{monitor.unstagedCount}} unstaged · ${{monitor.untrackedCount}} untracked`;
-      const tracking = monitor.upstreamName
-        ? `${{monitor.branchName || "HEAD"}} vs ${{monitor.upstreamName}} · ahead ${{monitor.aheadCount || 0}} · behind ${{monitor.behindCount || 0}}`
-        : `${{monitor.branchName || "HEAD"}} · no upstream`;
+      const tracking = trackingState(monitor);
       const backupBlock = backupBadge(repo.backup);
       const githubBlocks = [];
       if (repo.github && repo.github.ciUrl && repo.github.ciName) {{
@@ -753,7 +817,11 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
           </td>
           <td>
             <div class="stack">
-              <div>${{escapeHtml(tracking)}}</div>
+              <div class="badge-row">
+                <span class="badge ${{tracking.status}}" title="${{escapeHtml(tracking.title)}}">${{escapeHtml(tracking.label)}}</span>
+                ${{tracking.countBadges.join("")}}
+              </div>
+              <div class="secondary">${{escapeHtml(tracking.detail)}}</div>
               <div class="secondary">refreshed: ${{escapeHtml(formatTimestamp(monitor.trackingRefreshedAt))}}</div>
             </div>
           </td>
