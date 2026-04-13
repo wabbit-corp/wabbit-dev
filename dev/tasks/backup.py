@@ -20,6 +20,8 @@ from dev.repo_resolution import (
     resolve_repo_targets,
 )
 from dev.repo_status import RepoStatusRecord
+from dev.service_db import note_backup_attempt, record_backup_run, update_backup_repo_summary
+from dev.service_support import service_paths_for_workspace
 
 _DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
     ".DS_Store",
@@ -87,6 +89,13 @@ def _workspace_root(config: Config) -> Path:
     if workspace_root is None:
         raise ValueError("Workspace root is not available in config.")
     return workspace_root.resolve()
+
+
+def _service_paths(config: Config):
+    workspace_root = config.workspace_root
+    if workspace_root is None:
+        return None
+    return service_paths_for_workspace(workspace_root.resolve())
 
 
 def _relative_repo_path(workspace_root: Path, repo_root: Path) -> str:
@@ -603,6 +612,96 @@ def service_backup_due(
     return active_now - last_attempted_at >= timedelta(minutes=policy.service_min_interval_minutes)
 
 
+def _record_backup_results(
+    config: Config,
+    *,
+    repo_name: str,
+    repo_path: Path,
+    reason: str,
+    started_at: datetime,
+    finished_at: datetime,
+    results: list[BackupRunResult],
+) -> None:
+    paths = _service_paths(config)
+    if paths is None:
+        return
+
+    summary_status = "success" if all(result.ok for result in results) else "error"
+    summary_message = "; ".join(result.message for result in results)
+    first_result = results[0] if len(results) == 1 else None
+    last_success_at = finished_at if summary_status == "success" else None
+
+    note_backup_attempt(paths, repo_name, repo_path, attempted_at=started_at)
+    for result in results:
+        record_backup_run(
+            paths,
+            repo_name=repo_name,
+            repo_path=repo_path,
+            backup_target_name=result.backup_target_name,
+            action=result.action,
+            reason=reason,
+            ok=result.ok,
+            message=result.message,
+            snapshot_id=result.snapshot_id,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+    update_backup_repo_summary(
+        paths,
+        repo_name=repo_name,
+        repo_path=repo_path,
+        last_attempted_at=started_at,
+        last_finished_at=finished_at,
+        last_success_at=last_success_at,
+        last_status=summary_status,
+        last_message=summary_message,
+        last_backup_target_name=first_result.backup_target_name if first_result is not None else None,
+        last_snapshot_id=first_result.snapshot_id if first_result is not None else None,
+    )
+
+
+def _record_backup_exception(
+    config: Config,
+    *,
+    repo_name: str,
+    repo_path: Path,
+    action: str,
+    reason: str,
+    started_at: datetime,
+    finished_at: datetime,
+    message: str,
+) -> None:
+    paths = _service_paths(config)
+    if paths is None:
+        return
+    note_backup_attempt(paths, repo_name, repo_path, attempted_at=started_at)
+    update_backup_repo_summary(
+        paths,
+        repo_name=repo_name,
+        repo_path=repo_path,
+        last_attempted_at=started_at,
+        last_finished_at=finished_at,
+        last_success_at=None,
+        last_status="error",
+        last_message=message,
+        last_backup_target_name=None,
+        last_snapshot_id=None,
+    )
+    record_backup_run(
+        paths,
+        repo_name=repo_name,
+        repo_path=repo_path,
+        backup_target_name="",
+        action=action,
+        reason=reason,
+        ok=False,
+        message=message,
+        snapshot_id=None,
+        started_at=started_at,
+        finished_at=finished_at,
+    )
+
+
 def push(
     targets: list[str] | None = None,
     *,
@@ -632,15 +731,51 @@ def push(
 
     results: list[BackupRunResult] = []
     for resolved_target in resolved_targets:
-        results.extend(
-            push_resolved_repo_backup(
+        started_at = _now_utc()
+        try:
+            repo_results = push_resolved_repo_backup(
                 config,
                 resolved_target,
                 backup_target_name=backup_target_name,
                 reason=reason,
                 dry_run=dry_run,
             )
-        )
+        except Exception as ex:
+            finished_at = _now_utc()
+            message = str(ex)
+            if not dry_run:
+                _record_backup_exception(
+                    config,
+                    repo_name=resolved_target.name,
+                    repo_path=resolved_target.path.resolve(),
+                    action="push",
+                    reason=reason,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    message=message,
+                )
+            repo_results = [
+                BackupRunResult(
+                    repo_name=resolved_target.name,
+                    backup_target_name="",
+                    action="push",
+                    ok=False,
+                    message=message,
+                )
+            ]
+        else:
+            finished_at = _now_utc()
+            if not dry_run:
+                _record_backup_results(
+                    config,
+                    repo_name=resolved_target.name,
+                    repo_path=resolved_target.path.resolve(),
+                    reason=reason,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    results=repo_results,
+                )
+        results.extend(repo_results)
 
     if json_output:
         payload: JSONObject = {"results": [result.to_json() for result in results]}
@@ -680,14 +815,49 @@ def restore(
         error(str(ex))
         return 1
 
-    result = restore_resolved_repo_backup(
-        config,
-        resolved_target,
-        backup_target_name=backup_target_name,
-        snapshot=snapshot,
-        into=Path(into),
-        dry_run=dry_run,
-    )
+    started_at = _now_utc()
+    try:
+        result = restore_resolved_repo_backup(
+            config,
+            resolved_target,
+            backup_target_name=backup_target_name,
+            snapshot=snapshot,
+            into=Path(into),
+            dry_run=dry_run,
+        )
+    except Exception as ex:
+        finished_at = _now_utc()
+        message = str(ex)
+        if not dry_run:
+            _record_backup_exception(
+                config,
+                repo_name=resolved_target.name,
+                repo_path=resolved_target.path.resolve(),
+                action="restore",
+                reason="manual",
+                started_at=started_at,
+                finished_at=finished_at,
+                message=message,
+            )
+        result = BackupRunResult(
+            repo_name=resolved_target.name,
+            backup_target_name="",
+            action="restore",
+            ok=False,
+            message=message,
+        )
+    else:
+        finished_at = _now_utc()
+        if not dry_run:
+            _record_backup_results(
+                config,
+                repo_name=resolved_target.name,
+                repo_path=resolved_target.path.resolve(),
+                reason="manual",
+                started_at=started_at,
+                finished_at=finished_at,
+                results=[result],
+            )
 
     if json_output:
         payload: JSONObject = {"result": result.to_json()}

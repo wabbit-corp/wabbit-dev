@@ -91,6 +91,7 @@ class ServicePaths:
     pid_file: Path
     state_file: Path
     dashboard_state_file: Path
+    database_file: Path
     stdout_log: Path
     stderr_log: Path
     dashboard_pid_file: Path
@@ -174,6 +175,7 @@ def service_paths_for_workspace(workspace_root: Path) -> ServicePaths:
         pid_file=root / "monitor.pid.json",
         state_file=root / "monitor.state.json",
         dashboard_state_file=root / "dashboard.state.json",
+        database_file=root / "service.db",
         stdout_log=root / "monitor.stdout.log",
         stderr_log=root / "monitor.stderr.log",
         dashboard_pid_file=root / "dashboard.pid.json",
@@ -423,6 +425,22 @@ def load_dashboard_snapshot_summary(paths: ServicePaths) -> DashboardSnapshotSum
         return None
     raw = json.loads(paths.dashboard_state_file.read_text(encoding="utf-8"))
     match raw:
+        case {
+            "workspaceRoot": str(workspace_root),
+            "workspaceName": str(workspace_name),
+            "updatedAt": str(updated_at),
+            "dirtyRepoCount": int(dirty_repo_count),
+            "publishableRepoCount": int(publishable_repo_count),
+            "repoCount": int(repo_count),
+        }:
+            return DashboardSnapshotSummary(
+                workspace_root=Path(workspace_root),
+                workspace_name=workspace_name,
+                updated_at=datetime.fromisoformat(updated_at),
+                dirty_repo_count=dirty_repo_count,
+                publishable_repo_count=publishable_repo_count,
+                repo_count=repo_count,
+            )
         case {
             "workspaceRoot": str(workspace_root),
             "workspaceName": str(workspace_name),

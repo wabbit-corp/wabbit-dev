@@ -10,6 +10,7 @@ from dev.config import find_workspace_root
 from dev.dashboard_process import ensure_dashboard_server, stop_dashboard_server
 from dev.failure_context import contextualize_failure
 from dev.messages import accent, error, heading, info, muted, success, warning
+from dev.service_db import load_backup_repo_summaries
 from dev.service_support import (
     cleanup_stale_dashboard_pid,
     ServicePid,
@@ -159,6 +160,7 @@ def service_status() -> int:
     snapshot = load_monitor_snapshot(paths)
     dashboard_pid = load_dashboard_pid(paths)
     dashboard_summary = load_dashboard_snapshot_summary(paths)
+    backup_summaries = load_backup_repo_summaries(paths)
 
     print(f"{heading('Workspace')}: {muted(workspace_root)}")
 
@@ -209,6 +211,33 @@ def service_status() -> int:
         print(f"{heading('Dashboard')}: {muted('not running')}")
         if dashboard_summary is not None:
             print(f"  Last state: {format_local_timestamp(dashboard_summary.updated_at)}")
+
+    if not backup_summaries:
+        print(f"{heading('Backups')}: {muted('no recorded backup activity')}")
+    else:
+        latest_attempts = [summary.last_attempted_at for summary in backup_summaries if summary.last_attempted_at is not None]
+        success_count = sum(1 for summary in backup_summaries if summary.last_status == "success")
+        error_count = sum(1 for summary in backup_summaries if summary.last_status == "error")
+        latest_attempt_text = (
+            format_local_timestamp(max(latest_attempts))
+            if latest_attempts
+            else muted("unknown")
+        )
+        print(
+            f"{heading('Backups')}: "
+            f"{success_count} ok, {error_count} error, latest attempt {latest_attempt_text}"
+        )
+        failing_summaries = [summary for summary in backup_summaries if summary.last_status == "error"]
+        for summary in failing_summaries[:8]:
+            attempted_text = (
+                format_local_timestamp(summary.last_attempted_at)
+                if summary.last_attempted_at is not None
+                else "unknown"
+            )
+            detail = summary.last_message or "backup failed"
+            print(f"  {accent(summary.repo_name, 'red')} at {attempted_text}: {detail}")
+        if len(failing_summaries) > 8:
+            print(f"  {muted(f'... and {len(failing_summaries) - 8} more backup failures')}")
 
     if not monitor_running and not dashboard_running:
         warning(f"No workspace services are running for {workspace_root}.")

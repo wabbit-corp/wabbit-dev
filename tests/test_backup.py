@@ -5,6 +5,8 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from pytest import MonkeyPatch
+
 
 def _load_from_temp_root(
     tmp_path: Path,
@@ -131,3 +133,54 @@ def test_snapshot_subpath_uses_repo_relative_layout() -> None:
     assert _snapshot_subpath("app-wabbit-dev") == "/app-wabbit-dev"
     assert _snapshot_subpath("nested/repo") == "/nested/repo"
     assert _snapshot_subpath(".") == "/"
+
+
+def test_backup_push_dry_run_does_not_persist_service_state(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    from dev.config import Config
+    from dev.repo_resolution import ResolvedRepoTarget
+    from dev.service_support import service_paths_for_workspace
+    from dev.tasks import backup as backup_task
+    from dev.tasks.backup import BackupRunResult
+
+    repo_path = tmp_path / "demo-repo"
+    repo_path.mkdir()
+    config = _load_from_temp_root(tmp_path, "\n")
+
+    def fake_resolve_repo_targets(
+        targets: list[str],
+        *,
+        config: Config | None = None,
+    ) -> list[ResolvedRepoTarget]:
+        assert targets == ["demo-repo"]
+        return [ResolvedRepoTarget(name="demo-repo", path=repo_path)]
+
+    def fake_push_resolved_repo_backup(
+        config: Config,
+        resolved_target: ResolvedRepoTarget,
+        *,
+        backup_target_name: str | None,
+        reason: str,
+        dry_run: bool,
+    ) -> list[BackupRunResult]:
+        assert resolved_target.name == "demo-repo"
+        assert backup_target_name is None
+        assert reason == "manual"
+        assert dry_run is True
+        return [
+            BackupRunResult(
+                repo_name="demo-repo",
+                backup_target_name="desktop-archive",
+                action="push",
+                ok=True,
+                message="Dry run: would back up demo-repo to desktop-archive",
+            )
+        ]
+
+    monkeypatch.setattr(backup_task, "load_config", lambda: config)
+    monkeypatch.setattr(backup_task, "resolve_repo_targets", fake_resolve_repo_targets)
+    monkeypatch.setattr(backup_task, "push_resolved_repo_backup", fake_push_resolved_repo_backup)
+
+    result = backup_task.push(["demo-repo"], dry_run=True, emit_output=False)
+
+    assert result == 0
+    assert service_paths_for_workspace(tmp_path).database_file.exists() is False

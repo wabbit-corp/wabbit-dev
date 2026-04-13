@@ -457,6 +457,36 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
       return `<span class="badge ${{badgeClass(command.status)}}" title="${{escapeHtml(titleParts.join(" · "))}}">${{escapeHtml(label)}} · ${{escapeHtml(command.status)}}</span>`;
     }}
 
+    function backupBadge(backup) {{
+      if (!backup) {{
+        return `<span class="badge muted">backup · —</span>`;
+      }}
+      const effectiveTime = backup.successAt || backup.finishedAt || backup.attemptedAt;
+      const titleParts = [];
+      if (backup.status) {{
+        titleParts.push(`status ${{backup.status}}`);
+      }}
+      if (backup.targetName) {{
+        titleParts.push(`target ${{backup.targetName}}`);
+      }}
+      if (backup.snapshotId) {{
+        titleParts.push(`snapshot ${{backup.snapshotId}}`);
+      }}
+      if (effectiveTime) {{
+        titleParts.push(`at ${{formatTimestamp(effectiveTime)}}`);
+      }}
+      if (backup.message) {{
+        titleParts.push(backup.message);
+      }}
+      let label = "recorded";
+      if (backup.status === "error") {{
+        label = "failed";
+      }} else if (effectiveTime) {{
+        label = formatAge(effectiveTime);
+      }}
+      return `<span class="badge ${{badgeClass(backup.status || "muted")}}" title="${{escapeHtml(titleParts.join(" · "))}}">backup · ${{escapeHtml(label)}}</span>`;
+    }}
+
     function releaseDetailKey(repoName, projectId) {{
       return `${{repoName}}::${{projectId}}`;
     }}
@@ -466,6 +496,9 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
         return true;
       }}
       if (repo.monitor.dirty) {{
+        return true;
+      }}
+      if (repo.backup && repo.backup.status === "error") {{
         return true;
       }}
       const healthCommands = [repo.spotCheck, repo.docsCheck, repo.docsSnippets, repo.checkRun, repo.releaseVerify, repo.build];
@@ -488,6 +521,9 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
       let score = 0;
       if (repo.monitor.dirty) {{
         score += 10;
+      }}
+      if (repo.backup && repo.backup.status === "error") {{
+        score += 6;
       }}
       for (const project of repo.releaseProjects) {{
         for (const registry of (project.registryStatuses || [])) {{
@@ -607,6 +643,7 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
       const tracking = monitor.upstreamName
         ? `${{monitor.branchName || "HEAD"}} vs ${{monitor.upstreamName}} · ahead ${{monitor.aheadCount || 0}} · behind ${{monitor.behindCount || 0}}`
         : `${{monitor.branchName || "HEAD"}} · no upstream`;
+      const backupBlock = backupBadge(repo.backup);
       const githubBlocks = [];
       if (repo.github && repo.github.ciUrl && repo.github.ciName) {{
         githubBlocks.push(`<a href="${{escapeHtml(repo.github.ciUrl)}}" target="_blank" rel="noreferrer noopener">${{escapeHtml(repo.github.ciName)}}</a>`);
@@ -705,8 +742,9 @@ def _html_shell(snapshot: DashboardWorkspaceState, *, session_token: str) -> str
                 <span class="badge ${{monitor.error ? "error" : (monitor.dirty ? "warn" : "ok")}}">
                   ${{monitor.error ? "repo error" : (monitor.dirty ? "dirty" : "clean")}}
                 </span>
-                <span class="badge muted">${{escapeHtml(counts)}}</span>
+                ${{backupBlock}}
               </div>
+              <div class="secondary">${{escapeHtml(counts)}}</div>
               <div class="secondary">oldest change: ${{escapeHtml(formatAge(monitor.dirtySince))}}</div>
               ${{monitor.error ? `<div class="secondary">${{escapeHtml(monitor.error)}}</div>` : ""}}
             </div>

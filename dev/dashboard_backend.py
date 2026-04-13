@@ -23,6 +23,14 @@ from dev.service_actions import (
     open_repo_in_difftool,
     push_repo_target,
 )
+from dev.service_db import (
+    BackupRepoSummary,
+    load_backup_repo_summaries,
+    load_backup_repo_summary,
+    load_dashboard_repo_caches,
+    record_dashboard_action,
+    save_dashboard_repo_cache,
+)
 from dev.service_support import MonitorRepoState, ServicePaths, repo_check_spacing_seconds, service_paths_for_workspace
 from dev.tasks.build import build
 from dev.tasks.check import check_main
@@ -87,6 +95,28 @@ class GithubRepoState:
                 self.latest_release_published_at.isoformat() if self.latest_release_published_at is not None else None
             ),
             "error": self.error,
+        }
+
+
+@dataclass(frozen=True)
+class BackupStatusState:
+    attempted_at: datetime | None = None
+    finished_at: datetime | None = None
+    success_at: datetime | None = None
+    status: str | None = None
+    message: str | None = None
+    target_name: str | None = None
+    snapshot_id: str | None = None
+
+    def to_json(self) -> JSONObject:
+        return {
+            "attemptedAt": self.attempted_at.isoformat() if self.attempted_at is not None else None,
+            "finishedAt": self.finished_at.isoformat() if self.finished_at is not None else None,
+            "successAt": self.success_at.isoformat() if self.success_at is not None else None,
+            "status": self.status,
+            "message": self.message,
+            "targetName": self.target_name,
+            "snapshotId": self.snapshot_id,
         }
 
 
@@ -164,6 +194,7 @@ class DashboardRepoState:
     docs_project_ids: tuple[str, ...]
     github_repo: str | None
     monitor: MonitorRepoState
+    backup: BackupStatusState | None = None
     release_projects: tuple[ReleaseProjectState, ...] = ()
     github: GithubRepoState | None = None
     spot_check: RepoCommandState | None = None
@@ -187,6 +218,8 @@ class DashboardRepoState:
             "releaseProjects": [project.to_json() for project in self.release_projects],
             "lastActionMessage": self.last_action_message,
         }
+        if self.backup is not None:
+            payload["backup"] = self.backup.to_json()
         if self.github is not None:
             payload["github"] = self.github.to_json()
         if self.spot_check is not None:
@@ -247,10 +280,246 @@ class _DashboardJob:
     kind: str
     repo_name: str
     project_id: str | None = None
+    source: str = "auto"
 
 
 def _now_utc() -> datetime:
     return datetime.now(UTC)
+
+
+def _str_or_none(value: JSONValue | None) -> str | None:
+    match value:
+        case str(text):
+            return text
+        case _:
+            return None
+
+
+def _int_or_none(value: JSONValue | None) -> int | None:
+    match value:
+        case int(number):
+            return number
+        case _:
+            return None
+
+
+def _datetime_or_none(value: JSONValue | None) -> datetime | None:
+    match value:
+        case str(text):
+            try:
+                return datetime.fromisoformat(text)
+            except ValueError:
+                return None
+        case _:
+            return None
+
+
+def _string_tuple(value: JSONValue | None) -> tuple[str, ...]:
+    match value:
+        case list() as items:
+            values: list[str] = []
+            for item in items:
+                match item:
+                    case str(text):
+                        values.append(text)
+                    case _:
+                        continue
+            return tuple(values)
+        case _:
+            return ()
+
+
+def _parse_repo_command_state(value: JSONValue | None) -> RepoCommandState | None:
+    match value:
+        case {
+            "kind": str(kind),
+            "status": str(status),
+            "summary": str(summary),
+        }:
+            if status == "running":
+                return None
+            payload = value
+            exit_code = _int_or_none(payload.get("exitCode"))
+            return RepoCommandState(
+                kind=kind,
+                status=status,
+                summary=summary,
+                checked_at=_datetime_or_none(payload.get("checkedAt")),
+                started_at=_datetime_or_none(payload.get("startedAt")),
+                exit_code=exit_code,
+                detail=_str_or_none(payload.get("detail")),
+            )
+        case _:
+            return None
+
+
+def _parse_github_repo_state(value: JSONValue | None) -> GithubRepoState | None:
+    match value:
+        case dict() as payload:
+            return GithubRepoState(
+                checked_at=_datetime_or_none(payload.get("checkedAt")),
+                ci_status=_str_or_none(payload.get("ciStatus")),
+                ci_name=_str_or_none(payload.get("ciName")),
+                ci_url=_str_or_none(payload.get("ciUrl")),
+                latest_release_tag=_str_or_none(payload.get("latestReleaseTag")),
+                latest_release_url=_str_or_none(payload.get("latestReleaseUrl")),
+                latest_release_published_at=_datetime_or_none(payload.get("latestReleasePublishedAt")),
+                error=_str_or_none(payload.get("error")),
+            )
+        case _:
+            return None
+
+
+def _parse_registry_status_state(value: JSONValue) -> RegistryStatusState | None:
+    match value:
+        case {
+            "name": str(name),
+            "package": str(package),
+            "status": str(status),
+        }:
+            payload = value
+            return RegistryStatusState(
+                name=name,
+                package=package,
+                current_version=_str_or_none(payload.get("currentVersion")),
+                latest=_str_or_none(payload.get("latest")),
+                status=status,
+                diagnostics=_string_tuple(payload.get("diagnostics")),
+            )
+        case _:
+            return None
+
+
+def _parse_release_project_state(value: JSONValue) -> ReleaseProjectState | None:
+    match value:
+        case {
+            "projectId": str(project_id),
+            "publishTarget": str(publish_target),
+            "registryVisible": str(registry_visible),
+            "dirty": bool() as dirty,
+            "stagedCount": int(staged_count),
+            "unstagedCount": int(unstaged_count),
+            "untrackedCount": int(untracked_count),
+        }:
+            payload = value
+            registry_statuses_value = payload.get("registryStatuses")
+            registry_statuses: list[RegistryStatusState] = []
+            match registry_statuses_value:
+                case list() as items:
+                    for item in items:
+                        parsed = _parse_registry_status_state(item)
+                        if parsed is not None:
+                            registry_statuses.append(parsed)
+                case _:
+                    pass
+            return ReleaseProjectState(
+                project_id=project_id,
+                publish_target=publish_target,
+                current_version=_str_or_none(payload.get("currentVersion")),
+                registry_latest=_str_or_none(payload.get("registryLatest")),
+                registry_names=_string_tuple(payload.get("registryNames")),
+                registry_visible=registry_visible,
+                registry_statuses=tuple(registry_statuses),
+                latest_tag=_str_or_none(payload.get("latestTag")),
+                latest_tag_version=_str_or_none(payload.get("latestTagVersion")),
+                commits_after_tag=_int_or_none(payload.get("commitsAfterTag")),
+                unpushed_commits=_int_or_none(payload.get("unpushedCommits")),
+                remote_only_commits=_int_or_none(payload.get("remoteOnlyCommits")),
+                dirty=dirty,
+                staged_count=staged_count,
+                unstaged_count=unstaged_count,
+                untracked_count=untracked_count,
+                checked_at=_datetime_or_none(payload.get("checkedAt")),
+                diagnostics=_string_tuple(payload.get("diagnostics")),
+            )
+        case _:
+            return None
+
+
+def _cached_repo_payload(repo: DashboardRepoState) -> JSONObject:
+    payload: JSONObject = {}
+    if repo.release_projects:
+        payload["releaseProjects"] = [project.to_json() for project in repo.release_projects]
+    if repo.github is not None:
+        payload["github"] = repo.github.to_json()
+    if repo.spot_check is not None and repo.spot_check.status != "running":
+        payload["spotCheck"] = repo.spot_check.to_json()
+    if repo.docs_check is not None and repo.docs_check.status != "running":
+        payload["docsCheck"] = repo.docs_check.to_json()
+    if repo.docs_snippets is not None and repo.docs_snippets.status != "running":
+        payload["docsSnippets"] = repo.docs_snippets.to_json()
+    if repo.check_run is not None and repo.check_run.status != "running":
+        payload["checkRun"] = repo.check_run.to_json()
+    if repo.release_verify is not None and repo.release_verify.status != "running":
+        payload["releaseVerify"] = repo.release_verify.to_json()
+    if repo.build is not None and repo.build.status != "running":
+        payload["build"] = repo.build.to_json()
+    if repo.last_action_message is not None:
+        payload["lastActionMessage"] = repo.last_action_message
+    return payload
+
+
+def _merge_cached_repo_state(repo: DashboardRepoState, payload: JSONObject) -> DashboardRepoState:
+    release_projects_raw = payload.get("releaseProjects")
+    release_projects: list[ReleaseProjectState] = []
+    match release_projects_raw:
+        case list() as items:
+            for item in items:
+                parsed = _parse_release_project_state(item)
+                if parsed is not None:
+                    release_projects.append(parsed)
+        case _:
+            pass
+
+    return replace(
+        repo,
+        release_projects=tuple(release_projects),
+        github=_parse_github_repo_state(payload.get("github")),
+        spot_check=_parse_repo_command_state(payload.get("spotCheck")),
+        docs_check=_parse_repo_command_state(payload.get("docsCheck")),
+        docs_snippets=_parse_repo_command_state(payload.get("docsSnippets")),
+        check_run=_parse_repo_command_state(payload.get("checkRun")),
+        release_verify=_parse_repo_command_state(payload.get("releaseVerify")),
+        build=_parse_repo_command_state(payload.get("build")),
+        last_action_message=_str_or_none(payload.get("lastActionMessage")),
+    )
+
+
+def _command_started_at(repo: DashboardRepoState, field_name: str) -> datetime | None:
+    match field_name:
+        case "spot_check":
+            command = repo.spot_check
+        case "docs_check":
+            command = repo.docs_check
+        case "docs_snippets":
+            command = repo.docs_snippets
+        case "check_run":
+            command = repo.check_run
+        case "release_verify":
+            command = repo.release_verify
+        case "build":
+            command = repo.build
+        case _:
+            return None
+    return command.started_at if command is not None else None
+
+
+def _command_result_message(command_state: RepoCommandState) -> str:
+    detail = command_state.detail
+    if detail is not None and detail.strip():
+        return f"{command_state.summary}: {detail}"
+    return command_state.summary
+
+
+def _dashboard_summary_payload(snapshot: DashboardWorkspaceState) -> JSONObject:
+    return {
+        "workspaceRoot": str(snapshot.workspace_root.resolve()),
+        "workspaceName": snapshot.workspace_name,
+        "updatedAt": snapshot.updated_at.isoformat(),
+        "dirtyRepoCount": snapshot.dirty_repo_count,
+        "publishableRepoCount": snapshot.publishable_repo_count,
+        "repoCount": len(snapshot.repos),
+    }
 
 
 def _monitor_state_from_status(status: RepoStatusRecord) -> MonitorRepoState:
@@ -541,6 +810,20 @@ def _release_project_state(report: ProjectVersionReport, *, checked_at: datetime
         )
         for registry in report.registries
     )
+
+
+def _backup_state_from_summary(summary: BackupRepoSummary | None) -> BackupStatusState | None:
+    if summary is None:
+        return None
+    return BackupStatusState(
+        attempted_at=summary.last_attempted_at,
+        finished_at=summary.last_finished_at,
+        success_at=summary.last_success_at,
+        status=summary.last_status,
+        message=summary.last_message,
+        target_name=summary.last_backup_target_name,
+        snapshot_id=summary.last_snapshot_id,
+    )
     return ReleaseProjectState(
         project_id=report.project_id,
         publish_target=report.publish_target,
@@ -752,6 +1035,8 @@ class DashboardCoordinator:
         self._running_job_keys: set[tuple[str, str, str | None]] = set()
         self._updated_at = _now_utc()
         self._status_index = 0
+        self._load_backup_summaries()
+        self._load_persisted_repo_cache()
 
     def start(self) -> None:
         self._status_thread.start()
@@ -779,35 +1064,35 @@ class DashboardCoordinator:
         )
 
     def run_difftool(self, repo_name: str) -> None:
-        self._enqueue_job(_DashboardJob(kind="difftool", repo_name=repo_name))
+        self._enqueue_job(_DashboardJob(kind="difftool", repo_name=repo_name, source="user"))
 
     def run_commit(self, repo_name: str) -> None:
-        self._enqueue_job(_DashboardJob(kind="commit", repo_name=repo_name))
+        self._enqueue_job(_DashboardJob(kind="commit", repo_name=repo_name, source="user"))
 
     def run_push(self, repo_name: str) -> None:
-        self._enqueue_job(_DashboardJob(kind="push", repo_name=repo_name))
+        self._enqueue_job(_DashboardJob(kind="push", repo_name=repo_name, source="user"))
 
     def run_check(self, repo_name: str) -> None:
-        self._enqueue_job(_DashboardJob(kind="check-run", repo_name=repo_name))
+        self._enqueue_job(_DashboardJob(kind="check-run", repo_name=repo_name, source="user"))
 
     def run_docs_check(self, repo_name: str) -> None:
-        self._enqueue_job(_DashboardJob(kind="docs-check", repo_name=repo_name))
+        self._enqueue_job(_DashboardJob(kind="docs-check", repo_name=repo_name, source="user"))
 
     def run_docs_snippets(self, repo_name: str) -> None:
-        self._enqueue_job(_DashboardJob(kind="docs-snippets", repo_name=repo_name))
+        self._enqueue_job(_DashboardJob(kind="docs-snippets", repo_name=repo_name, source="user"))
 
     def run_docs_verify(self, repo_name: str) -> None:
         self.run_docs_check(repo_name)
         self.run_docs_snippets(repo_name)
 
     def run_security_check(self, repo_name: str) -> None:
-        self._enqueue_job(_DashboardJob(kind="spot-check", repo_name=repo_name))
+        self._enqueue_job(_DashboardJob(kind="spot-check", repo_name=repo_name, source="user"))
 
     def run_release_verify(self, repo_name: str) -> None:
-        self._enqueue_job(_DashboardJob(kind="release-verify", repo_name=repo_name))
+        self._enqueue_job(_DashboardJob(kind="release-verify", repo_name=repo_name, source="user"))
 
     def run_build(self, repo_name: str) -> None:
-        self._enqueue_job(_DashboardJob(kind="build", repo_name=repo_name))
+        self._enqueue_job(_DashboardJob(kind="build", repo_name=repo_name, source="user"))
 
     def _job_key(self, job: _DashboardJob) -> tuple[str, str, str | None]:
         return (job.repo_name, job.kind, job.project_id)
@@ -819,6 +1104,69 @@ class DashboardCoordinator:
                 return
             self._queued_job_keys.add(key)
         self._job_queue.put(job)
+
+    def _load_persisted_repo_cache(self) -> None:
+        latest_updated_at: datetime | None = None
+        for entry in load_dashboard_repo_caches(self.paths):
+            repo = self._repo_states.get(entry.repo_name)
+            if repo is None:
+                continue
+            if entry.repo_path != repo.path.resolve():
+                continue
+            self._repo_states[entry.repo_name] = _merge_cached_repo_state(repo, entry.payload)
+            if latest_updated_at is None or entry.updated_at > latest_updated_at:
+                latest_updated_at = entry.updated_at
+        if latest_updated_at is not None:
+            self._updated_at = latest_updated_at
+
+    def _load_backup_summaries(self) -> None:
+        for summary in load_backup_repo_summaries(self.paths):
+            repo = self._repo_states.get(summary.repo_name)
+            if repo is None:
+                continue
+            if summary.repo_path != repo.path.resolve():
+                continue
+            self._repo_states[summary.repo_name] = replace(repo, backup=_backup_state_from_summary(summary))
+
+    def _persist_repo_cache(self, repo_name: str, *, updated_at: datetime) -> None:
+        with self._lock:
+            repo = self._repo_states.get(repo_name)
+        if repo is None:
+            return
+        save_dashboard_repo_cache(
+            self.paths,
+            repo_name=repo.name,
+            repo_path=repo.path,
+            updated_at=updated_at,
+            payload=_cached_repo_payload(repo),
+        )
+
+    def _record_action_history(
+        self,
+        job: _DashboardJob,
+        *,
+        status: str,
+        message: str,
+        started_at: datetime | None,
+        finished_at: datetime,
+    ) -> None:
+        if job.source != "user":
+            return
+        with self._lock:
+            repo = self._repo_states.get(job.repo_name)
+        if repo is None:
+            return
+        record_dashboard_action(
+            self.paths,
+            repo_name=repo.name,
+            repo_path=repo.path,
+            action_kind=job.kind,
+            action_source=job.source,
+            status=status,
+            message=message,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
 
     def _run_status_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -837,9 +1185,21 @@ class DashboardCoordinator:
                     _empty_monitor_state(descriptor.target.name, descriptor.target.path),
                     error=str(ex),
                 )
+            backup_state_loaded = False
+            backup_state: BackupStatusState | None = None
+            try:
+                backup_state = _backup_state_from_summary(load_backup_repo_summary(self.paths, descriptor.target.name))
+                backup_state_loaded = True
+            except Exception:
+                backup_state_loaded = False
             with self._lock:
                 existing = self._repo_states[descriptor.target.name]
-                self._repo_states[descriptor.target.name] = replace(existing, monitor=monitor_state)
+                effective_backup_state = backup_state if backup_state_loaded else existing.backup
+                self._repo_states[descriptor.target.name] = replace(
+                    existing,
+                    monitor=monitor_state,
+                    backup=effective_backup_state,
+                )
                 self._updated_at = _now_utc()
             self._write_state_file()
             self._maybe_enqueue_background_job(_now_utc())
@@ -931,13 +1291,38 @@ class DashboardCoordinator:
             )
             self._repo_states[repo_name] = replace(repo, **{field_name: running_state})
 
-    def _set_last_action_message(self, repo_name: str, message: str) -> None:
+    def _set_last_action_message(self, repo_name: str, message: str, *, updated_at: datetime) -> None:
         with self._lock:
             repo = self._repo_states[repo_name]
             self._repo_states[repo_name] = replace(repo, last_action_message=message)
+        self._persist_repo_cache(repo_name, updated_at=updated_at)
+
+    def _set_command_result(
+        self,
+        job: _DashboardJob,
+        *,
+        field_name: str,
+        command_state: RepoCommandState,
+        updated_at: datetime,
+    ) -> None:
+        started_at: datetime | None
+        with self._lock:
+            repo = self._repo_states[job.repo_name]
+            started_at = _command_started_at(repo, field_name)
+            self._repo_states[job.repo_name] = replace(repo, **{field_name: command_state})
+        self._persist_repo_cache(job.repo_name, updated_at=updated_at)
+        self._record_action_history(
+            job,
+            status=command_state.status,
+            message=_command_result_message(command_state),
+            started_at=started_at,
+            finished_at=updated_at,
+        )
 
     def _record_job_failure(self, job: _DashboardJob, detail: str) -> None:
         checked_at = _now_utc()
+        action_started_at: datetime | None = None
+        should_persist_cache = False
         with self._lock:
             repo = self._repo_states[job.repo_name]
             match job.kind:
@@ -946,38 +1331,61 @@ class DashboardCoordinator:
                         repo,
                         github=GithubRepoState(checked_at=checked_at, error=detail),
                     )
+                    should_persist_cache = True
                 case "spot-check":
+                    action_started_at = _command_started_at(repo, "spot_check")
                     self._repo_states[job.repo_name] = replace(
                         repo,
                         spot_check=_failed_command_state("spot-check", detail=detail, checked_at=checked_at),
                     )
+                    should_persist_cache = True
                 case "docs-check":
+                    action_started_at = _command_started_at(repo, "docs_check")
                     self._repo_states[job.repo_name] = replace(
                         repo,
                         docs_check=_failed_command_state("docs-check", detail=detail, checked_at=checked_at),
                     )
+                    should_persist_cache = True
                 case "docs-snippets":
+                    action_started_at = _command_started_at(repo, "docs_snippets")
                     self._repo_states[job.repo_name] = replace(
                         repo,
                         docs_snippets=_failed_command_state("docs-snippets", detail=detail, checked_at=checked_at),
                     )
+                    should_persist_cache = True
                 case "check-run":
+                    action_started_at = _command_started_at(repo, "check_run")
                     self._repo_states[job.repo_name] = replace(
                         repo,
                         check_run=_failed_command_state("check", detail=detail, checked_at=checked_at),
                     )
+                    should_persist_cache = True
                 case "release-verify":
+                    action_started_at = _command_started_at(repo, "release_verify")
                     self._repo_states[job.repo_name] = replace(
                         repo,
                         release_verify=_failed_command_state("release-verify", detail=detail, checked_at=checked_at),
                     )
+                    should_persist_cache = True
                 case "build":
+                    action_started_at = _command_started_at(repo, "build")
                     self._repo_states[job.repo_name] = replace(
                         repo,
                         build=_failed_command_state("build", detail=detail, checked_at=checked_at),
                     )
+                    should_persist_cache = True
                 case _:
                     self._repo_states[job.repo_name] = replace(repo, last_action_message=f"{job.kind} failed: {detail}")
+                    should_persist_cache = True
+        if should_persist_cache:
+            self._persist_repo_cache(job.repo_name, updated_at=checked_at)
+        self._record_action_history(
+            job,
+            status="error",
+            message=detail,
+            started_at=action_started_at,
+            finished_at=checked_at,
+        )
 
     def _run_job(self, job: _DashboardJob) -> None:
         match job.kind:
@@ -993,14 +1401,17 @@ class DashboardCoordinator:
                     updated_projects.append(release_state)
                     updated_projects.sort(key=lambda item: item.project_id)
                     self._repo_states[job.repo_name] = replace(repo, release_projects=tuple(updated_projects))
+                self._persist_repo_cache(job.repo_name, updated_at=checked_at)
             case "github":
                 descriptor = next((item for item in self._descriptors if item.target.name == job.repo_name), None)
                 if descriptor is None or descriptor.github_repo is None:
                     return
                 github_state = _fetch_github_repo_state(self._config, descriptor.github_repo)
+                checked_at = _now_utc()
                 with self._lock:
                     repo = self._repo_states[job.repo_name]
                     self._repo_states[job.repo_name] = replace(repo, github=github_state)
+                self._persist_repo_cache(job.repo_name, updated_at=checked_at)
             case "spot-check":
                 self._set_command_running(job.repo_name, "spot_check", "spot-check")
                 exit_code, payload = _capture_json_report(
@@ -1013,9 +1424,7 @@ class DashboardCoordinator:
                 )
                 checked_at = _now_utc()
                 command_state = _check_command_state("spot-check", payload, exit_code=exit_code, checked_at=checked_at)
-                with self._lock:
-                    repo = self._repo_states[job.repo_name]
-                    self._repo_states[job.repo_name] = replace(repo, spot_check=command_state)
+                self._set_command_result(job, field_name="spot_check", command_state=command_state, updated_at=checked_at)
             case "docs-check":
                 self._set_command_running(job.repo_name, "docs_check", "docs-check")
                 exit_code, payload = _capture_json_report(
@@ -1026,9 +1435,7 @@ class DashboardCoordinator:
                 )
                 checked_at = _now_utc()
                 command_state = _docs_command_state("docs-check", payload, exit_code=exit_code, checked_at=checked_at)
-                with self._lock:
-                    repo = self._repo_states[job.repo_name]
-                    self._repo_states[job.repo_name] = replace(repo, docs_check=command_state)
+                self._set_command_result(job, field_name="docs_check", command_state=command_state, updated_at=checked_at)
             case "docs-snippets":
                 self._set_command_running(job.repo_name, "docs_snippets", "docs-snippets")
                 exit_code, payload = _capture_json_report(
@@ -1044,9 +1451,12 @@ class DashboardCoordinator:
                     exit_code=exit_code,
                     checked_at=checked_at,
                 )
-                with self._lock:
-                    repo = self._repo_states[job.repo_name]
-                    self._repo_states[job.repo_name] = replace(repo, docs_snippets=command_state)
+                self._set_command_result(
+                    job,
+                    field_name="docs_snippets",
+                    command_state=command_state,
+                    updated_at=checked_at,
+                )
             case "check-run":
                 self._set_command_running(job.repo_name, "check_run", "check")
                 exit_code, payload = _capture_json_report(
@@ -1059,9 +1469,7 @@ class DashboardCoordinator:
                 )
                 checked_at = _now_utc()
                 command_state = _check_command_state("check", payload, exit_code=exit_code, checked_at=checked_at)
-                with self._lock:
-                    repo = self._repo_states[job.repo_name]
-                    self._repo_states[job.repo_name] = replace(repo, check_run=command_state)
+                self._set_command_result(job, field_name="check_run", command_state=command_state, updated_at=checked_at)
             case "release-verify":
                 self._set_command_running(job.repo_name, "release_verify", "release-verify")
                 exit_code, payload = _capture_json_report(
@@ -1076,9 +1484,12 @@ class DashboardCoordinator:
                     exit_code=exit_code,
                     checked_at=checked_at,
                 )
-                with self._lock:
-                    repo = self._repo_states[job.repo_name]
-                    self._repo_states[job.repo_name] = replace(repo, release_verify=command_state)
+                self._set_command_result(
+                    job,
+                    field_name="release_verify",
+                    command_state=command_state,
+                    updated_at=checked_at,
+                )
             case "build":
                 self._set_command_running(job.repo_name, "build", "build")
                 exit_code, payload = _capture_json_report(
@@ -1088,33 +1499,65 @@ class DashboardCoordinator:
                 )
                 checked_at = _now_utc()
                 command_state = _simple_results_command_state("build", payload, exit_code=exit_code, checked_at=checked_at)
-                with self._lock:
-                    repo = self._repo_states[job.repo_name]
-                    self._repo_states[job.repo_name] = replace(repo, build=command_state)
+                self._set_command_result(job, field_name="build", command_state=command_state, updated_at=checked_at)
             case "difftool":
                 result = open_repo_in_difftool(self.workspace_root, self._repo_states[job.repo_name].path)
-                self._set_last_action_message(job.repo_name, result.message)
+                finished_at = _now_utc()
+                self._set_last_action_message(job.repo_name, result.message, updated_at=finished_at)
+                self._record_action_history(
+                    job,
+                    status="success" if result.ok else "error",
+                    message=result.message,
+                    started_at=None,
+                    finished_at=finished_at,
+                )
             case "commit":
                 result = commit_repo_target(self.workspace_root, job.repo_name)
-                self._set_last_action_message(job.repo_name, result.message)
+                finished_at = _now_utc()
+                self._set_last_action_message(job.repo_name, result.message, updated_at=finished_at)
+                self._record_action_history(
+                    job,
+                    status="success" if result.ok else "error",
+                    message=result.message,
+                    started_at=None,
+                    finished_at=finished_at,
+                )
                 self.request_refresh()
             case "push":
                 result = push_repo_target(self.workspace_root, job.repo_name)
-                self._set_last_action_message(job.repo_name, result.message)
+                finished_at = _now_utc()
+                self._set_last_action_message(job.repo_name, result.message, updated_at=finished_at)
+                self._record_action_history(
+                    job,
+                    status="success" if result.ok else "error",
+                    message=result.message,
+                    started_at=None,
+                    finished_at=finished_at,
+                )
                 self.request_refresh()
             case _:
-                self._set_last_action_message(job.repo_name, f"{job.kind}: unsupported job")
+                finished_at = _now_utc()
+                message = f"{job.kind}: unsupported job"
+                self._set_last_action_message(job.repo_name, message, updated_at=finished_at)
+                self._record_action_history(
+                    job,
+                    status="error",
+                    message=message,
+                    started_at=None,
+                    finished_at=finished_at,
+                )
 
     def _write_state_file(self) -> None:
         snapshot = self.snapshot()
         self.paths.root.mkdir(parents=True, exist_ok=True)
         self.paths.dashboard_state_file.write_text(
-            json.dumps(snapshot.to_json(), indent=2) + "\n",
+            json.dumps(_dashboard_summary_payload(snapshot), indent=2) + "\n",
             encoding="utf-8",
         )
 
 
 __all__ = [
+    "BackupStatusState",
     "DashboardCoordinator",
     "DashboardRepoState",
     "DashboardWorkspaceState",

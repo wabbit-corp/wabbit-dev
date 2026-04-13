@@ -23,6 +23,7 @@ from dev.config import Config, load_config
 from dev.dashboard_process import ensure_dashboard_server
 from dev.repo_resolution import ResolvedRepoTarget, configured_repo_targets
 from dev.repo_status import RepoStatusRecord, collect_repo_status_record, refresh_remote_tracking
+from dev.service_db import load_backup_repo_summaries, note_backup_attempt, record_backup_run, update_backup_repo_summary
 from dev.tasks.backup import push_resolved_repo_backup, service_backup_due
 from dev.service_actions import commit_repo_target, open_repo_in_difftool, push_repo_target
 from dev.service_support import (
@@ -71,7 +72,6 @@ class DirtyRepoMenuApp(NSObject):
         self._last_error: str | None = None
         self._busy_repo_actions: dict[str, str] = {}
         self._last_action_message: str | None = None
-        self._backup_attempted_at_by_repo: dict[str, datetime] = {}
         self._tracking_attempted_at_by_repo: dict[str, datetime] = {}
         self._tracking_refreshed_at_by_repo: dict[str, datetime] = {}
         self._last_tracking_fetch_attempt_at: datetime | None = None
@@ -201,21 +201,24 @@ class DirtyRepoMenuApp(NSObject):
     ) -> None:
         with self._snapshot_lock:
             busy_repo_actions = dict(self._busy_repo_actions)
-            backup_attempted_at_by_repo = dict(self._backup_attempted_at_by_repo)
 
         if any(action_kind == "backup" for action_kind in busy_repo_actions.values()):
             return
 
         now = datetime.now(UTC)
+        backup_summary_by_repo = {
+            summary.repo_name: summary for summary in load_backup_repo_summaries(self.paths)
+        }
         due_pairs: list[tuple[ResolvedRepoTarget, RepoStatusRecord]] = []
         for target, repo_status in repo_status_pairs:
             if target.name in busy_repo_actions:
                 continue
+            summary = backup_summary_by_repo.get(target.name)
             if service_backup_due(
                 config,
                 target,
                 repo_status,
-                last_attempted_at=backup_attempted_at_by_repo.get(target.name),
+                last_attempted_at=summary.last_attempted_at if summary is not None else None,
                 now=now,
             ):
                 due_pairs.append((target, repo_status))
@@ -238,19 +241,20 @@ class DirtyRepoMenuApp(NSObject):
                 return
             if selected_target.name in self._busy_repo_actions:
                 return
+            started_at = datetime.now(UTC)
             self._busy_repo_actions[selected_target.name] = "backup"
-            self._backup_attempted_at_by_repo[selected_target.name] = datetime.now(UTC)
             self._last_action_message = f"{selected_target.name}: backup started"
+        note_backup_attempt(self.paths, selected_target.name, selected_target.path.resolve(), attempted_at=started_at)
 
         worker = threading.Thread(
             target=self._run_service_backup,
-            args=(selected_target,),
+            args=(selected_target, started_at),
             name=f"dev-menubar-backup-{selected_target.name}",
             daemon=True,
         )
         worker.start()
 
-    def _run_service_backup(self, target: ResolvedRepoTarget) -> None:
+    def _run_service_backup(self, target: ResolvedRepoTarget, started_at: datetime) -> None:
         try:
             config = load_config(self.workspace_root)
             results = push_resolved_repo_backup(
@@ -260,11 +264,69 @@ class DirtyRepoMenuApp(NSObject):
                 reason="service",
                 dry_run=False,
             )
+            finished_at = datetime.now(UTC)
+            if results:
+                summary_status = "success" if all(result.ok for result in results) else "error"
+                summary_message = "; ".join(result.message for result in results)
+                first_result = results[0] if len(results) == 1 else None
+                for result in results:
+                    record_backup_run(
+                        self.paths,
+                        repo_name=target.name,
+                        repo_path=target.path.resolve(),
+                        backup_target_name=result.backup_target_name,
+                        action=result.action,
+                        reason="service",
+                        ok=result.ok,
+                        message=result.message,
+                        snapshot_id=result.snapshot_id,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                    )
+                update_backup_repo_summary(
+                    self.paths,
+                    repo_name=target.name,
+                    repo_path=target.path.resolve(),
+                    last_attempted_at=started_at,
+                    last_finished_at=finished_at,
+                    last_success_at=finished_at if summary_status == "success" else None,
+                    last_status=summary_status,
+                    last_message=summary_message,
+                    last_backup_target_name=first_result.backup_target_name if first_result is not None else None,
+                    last_snapshot_id=first_result.snapshot_id if first_result is not None else None,
+                )
             if not results:
                 result_message = f"{target.name}: backup skipped"
             else:
                 result_message = "; ".join(result.message for result in results)
         except Exception as ex:
+            finished_at = datetime.now(UTC)
+            error_message = str(ex)
+            record_backup_run(
+                self.paths,
+                repo_name=target.name,
+                repo_path=target.path.resolve(),
+                backup_target_name="",
+                action="push",
+                reason="service",
+                ok=False,
+                message=error_message,
+                snapshot_id=None,
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+            update_backup_repo_summary(
+                self.paths,
+                repo_name=target.name,
+                repo_path=target.path.resolve(),
+                last_attempted_at=started_at,
+                last_finished_at=finished_at,
+                last_success_at=None,
+                last_status="error",
+                last_message=error_message,
+                last_backup_target_name=None,
+                last_snapshot_id=None,
+            )
             result_message = f"{target.name}: backup failed ({ex})"
 
         with self._snapshot_lock:

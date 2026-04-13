@@ -207,6 +207,7 @@ def test_load_monitor_snapshot_accepts_legacy_repo_entries_without_tracking_fiel
 def test_service_paths_for_workspace_include_dashboard_artifacts(tmp_path: Path) -> None:
     paths = service_paths_for_workspace(tmp_path / "workspace")
 
+    assert paths.database_file.name == "service.db"
     assert paths.dashboard_pid_file.name == "dashboard.pid.json"
     assert paths.dashboard_stdout_log.name == "dashboard.stdout.log"
     assert paths.dashboard_stderr_log.name == "dashboard.stderr.log"
@@ -242,6 +243,34 @@ def test_load_dashboard_snapshot_summary_reads_dashboard_state(tmp_path: Path) -
     assert summary.dirty_repo_count == 2
     assert summary.publishable_repo_count == 3
     assert summary.repo_count == 2
+
+
+def test_load_dashboard_snapshot_summary_reads_compact_dashboard_state(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    paths = service_paths_for_workspace(workspace_root)
+    paths.root.mkdir(parents=True, exist_ok=True)
+    paths.dashboard_state_file.write_text(
+        json.dumps(
+            {
+                "workspaceRoot": str(workspace_root),
+                "workspaceName": workspace_root.name,
+                "updatedAt": "2026-04-12T18:10:00+00:00",
+                "dirtyRepoCount": 5,
+                "publishableRepoCount": 8,
+                "repoCount": 21,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = load_dashboard_snapshot_summary(paths)
+
+    assert summary is not None
+    assert summary.workspace_name == "workspace"
+    assert summary.dirty_repo_count == 5
+    assert summary.publishable_repo_count == 8
+    assert summary.repo_count == 21
 
 
 def test_repo_check_spacing_seconds_spreads_interval_across_repo_count() -> None:
