@@ -295,12 +295,15 @@ def test_gradle_jvm_subproject_template_supports_intellij_platform_gradle_plugin
     content = template_path.read_text(encoding="utf-8")
 
     assert "use_intellij_platform_gradle_plugin_v2" in content
-    assert "intellij-platform-library" in content
     assert "uses_intellij_platform_dependencies" in content
-    assert 'id("org.jetbrains.intellij.platform{% if features[\'intellij-platform-library\'].modulePlugin %}.module{% endif %}")' in content
+    assert "uses_intellij_sdk_archive_dependencies" in content
     assert "intellijPlatform {" in content
     assert 'intellijIdea("{{ intellij_platform_idea_version }}")' in content
     assert "testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)" in content
+    assert 'intellijSdkArchive("com.jetbrains.intellij.idea:ideaIC:{{ intellij_sdk_archive_version }}@zip")' in content
+    assert 'maven("https://www.jetbrains.com/intellij-repository/releases")' in content
+    assert 'maven("https://cache-redirector.jetbrains.com/intellij-dependencies")' in content
+    assert "val extractIntellijSdk by tasks.registering(Sync::class)" in content
     assert "untilBuild = provider { null }" in content
 
 

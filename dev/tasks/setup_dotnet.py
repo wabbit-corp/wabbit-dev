@@ -240,8 +240,9 @@ def _package_metadata_items(project: DotnetProject, project_file: Path) -> list[
     readme_path = repo_root / "README.md"
     if readme_path.is_file():
         relative_readme = Path(os.path.relpath(readme_path, project_file.parent)).as_posix()
+        package_root = "\\"
         metadata_items.append(
-            f'    <None Include="{_xml_escape(relative_readme)}" Pack="true" PackagePath="\\\\" />'
+            f'    <None Include="{_xml_escape(relative_readme)}" Pack="true" PackagePath="{_xml_escape(package_root)}" />'
         )
 
     license_path = repo_root / "LICENSE.md"
@@ -292,6 +293,8 @@ def _render_project_xml(ctx: DotnetSetupContext, project: DotnetProject) -> str:
     if repository_url is not None:
         property_lines.append(f"    <RepositoryUrl>{_xml_escape(repository_url)}</RepositoryUrl>")
         property_lines.append("    <RepositoryType>git</RepositoryType>")
+    if (project.effective_repo_root / "README.md").is_file():
+        property_lines.append("    <PackageReadmeFile>README.md</PackageReadmeFile>")
     spdx_expression = _should_emit_spdx_expression(project.license)
     if spdx_expression is not None:
         property_lines.append(f"    <PackageLicenseExpression>{_xml_escape(spdx_expression)}</PackageLicenseExpression>")

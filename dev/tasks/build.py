@@ -169,6 +169,7 @@ def _pack_dotnet_project_to_local_feed(
         "Debug",
         "--nologo",
         "--no-build",
+        "-p:BuildProjectReferences=false",
         "--output",
         str(feed_path),
     ]

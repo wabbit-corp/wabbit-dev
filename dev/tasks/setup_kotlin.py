@@ -78,11 +78,14 @@ BUILTIN_GRADLE_PLUGIN_IDS_BY_FEATURE: dict[str, tuple[str, ...]] = {
     "kmp-compose": ("org.jetbrains.compose", "org.jetbrains.kotlin.plugin.compose"),
     "shadow-jar": ("com.gradleup.shadow",),
     "intellij-plugin": ("org.jetbrains.intellij", "org.jetbrains.intellij.platform"),
-    "intellij-platform-library": ("org.jetbrains.intellij.platform.module",),
     "paper-plugin": ("io.papermc.paperweight.userdev", "net.minecrell.plugin-yml.bukkit"),
 }
 
 DEFAULT_INTELLIJ_BUNDLED_PLUGIN = "com.intellij.java"
+INTELLIJ_PLATFORM_LIBRARY_PLUGIN_LIB_DIRS: dict[str, str] = {
+    "com.intellij.java": "plugins/java/lib",
+    "org.jetbrains.kotlin": "plugins/Kotlin/lib",
+}
 
 
 def _parse_intellij_platform_version(version: str | None) -> tuple[int, int] | None:
@@ -117,6 +120,17 @@ def _effective_intellij_platform_library_bundled_plugins(
     return feature.bundledPlugins or [DEFAULT_INTELLIJ_BUNDLED_PLUGIN]
 
 
+def _effective_intellij_platform_library_plugin_lib_dirs(
+    feature: IntellijPlatformLibrary,
+) -> list[str]:
+    result: list[str] = []
+    for plugin_id in _effective_intellij_platform_library_bundled_plugins(feature):
+        plugin_lib_dir = INTELLIJ_PLATFORM_LIBRARY_PLUGIN_LIB_DIRS.get(plugin_id)
+        if plugin_lib_dir is not None and plugin_lib_dir not in result:
+            result.append(plugin_lib_dir)
+    return result
+
+
 def _intellij_platform_dependency_context(features: Mapping[str, object]) -> dict[str, object]:
     intellij_plugin_feature = features.get("intellij-plugin")
     if isinstance(intellij_plugin_feature, IntellijPlugin) and _uses_intellij_platform_gradle_plugin_v2(
@@ -124,24 +138,33 @@ def _intellij_platform_dependency_context(features: Mapping[str, object]) -> dic
     ):
         return {
             "uses_intellij_platform_dependencies": True,
+            "uses_intellij_sdk_archive_dependencies": False,
             "intellij_platform_idea_version": intellij_plugin_feature.ideaVersion or "2025.3",
             "intellij_platform_bundled_plugins": _effective_intellij_bundled_plugins(intellij_plugin_feature),
+            "intellij_sdk_archive_version": "2025.3",
+            "intellij_sdk_archive_plugin_lib_dirs": [],
         }
 
     intellij_platform_library_feature = features.get("intellij-platform-library")
     if isinstance(intellij_platform_library_feature, IntellijPlatformLibrary):
         return {
-            "uses_intellij_platform_dependencies": True,
-            "intellij_platform_idea_version": intellij_platform_library_feature.ideaVersion or "2025.3",
-            "intellij_platform_bundled_plugins": _effective_intellij_platform_library_bundled_plugins(
+            "uses_intellij_platform_dependencies": False,
+            "uses_intellij_sdk_archive_dependencies": True,
+            "intellij_platform_idea_version": "2025.3",
+            "intellij_platform_bundled_plugins": [DEFAULT_INTELLIJ_BUNDLED_PLUGIN],
+            "intellij_sdk_archive_version": intellij_platform_library_feature.ideaVersion or "2025.3",
+            "intellij_sdk_archive_plugin_lib_dirs": _effective_intellij_platform_library_plugin_lib_dirs(
                 intellij_platform_library_feature
             ),
         }
 
     return {
         "uses_intellij_platform_dependencies": False,
+        "uses_intellij_sdk_archive_dependencies": False,
         "intellij_platform_idea_version": "2025.3",
         "intellij_platform_bundled_plugins": [DEFAULT_INTELLIJ_BUNDLED_PLUGIN],
+        "intellij_sdk_archive_version": "2025.3",
+        "intellij_sdk_archive_plugin_lib_dirs": [],
     }
 
 
@@ -1031,6 +1054,21 @@ def _android_kmp_library_target(project: GradleProject) -> GradleTargetSpec | No
     return None
 
 
+def _android_kmp_library_manifest_text() -> str:
+    return "<manifest />\n"
+
+
+def _seed_android_kmp_library_manifest_if_missing(project: GradleProject) -> None:
+    target = _android_kmp_library_target(project)
+    if target is None:
+        return
+    manifest_path = target.manifest_path or "src/androidMain/AndroidManifest.xml"
+    dev.io.write_text_file_if_missing(
+        project.path / manifest_path,
+        _android_kmp_library_manifest_text(),
+    )
+
+
 def _github_repo_url(repo_full_name: str) -> str:
     return f"{GITHUB_SOURCE_ROOT}/{repo_full_name}"
 
@@ -1752,9 +1790,25 @@ def read_optional_inline_gradle_build_script(
 
 
 def java_version_for_features(default_java_version: int, features: Mapping[str, object]) -> int:
-    # IntelliJ 2023.2 platform runtime is Java 17; targeting higher bytecode is invalid.
-    if "intellij-plugin" in features or "intellij-platform-library" in features:
+    intellij_plugin_feature = features.get("intellij-plugin")
+    if isinstance(intellij_plugin_feature, IntellijPlugin):
+        parsed_version = _parse_intellij_platform_version(intellij_plugin_feature.ideaVersion or "2025.3")
+        if parsed_version is not None and parsed_version >= (2024, 2):
+            return 21
+        since_build = (intellij_plugin_feature.sinceBuild or "").strip()
+        if since_build.isdigit() and int(since_build) >= 242:
+            return 21
         return 17
+
+    intellij_platform_library_feature = features.get("intellij-platform-library")
+    if isinstance(intellij_platform_library_feature, IntellijPlatformLibrary):
+        parsed_version = _parse_intellij_platform_version(intellij_platform_library_feature.ideaVersion or "2025.3")
+        if parsed_version is not None and parsed_version >= (2024, 2):
+            return 21
+        return 17
+
+    if "intellij-plugin" in features or "intellij-platform-library" in features:
+        return 21
     return default_java_version
 
 
@@ -1926,6 +1980,7 @@ def setup_gradle_project(ctx: GradleSetupContext, project: GradleProject, intera
 
         android_application_target = _android_application_target(project)
         android_kmp_library_target = _android_kmp_library_target(project)
+        _seed_android_kmp_library_manifest_if_missing(project)
 
         inline_extra_build = read_optional_inline_gradle_build_script(
             project.path,

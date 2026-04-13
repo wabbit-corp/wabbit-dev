@@ -15,7 +15,7 @@ from pathlib import Path
 from defusedxml import ElementTree as ET
 
 from dev.checks.base import Issue, IssueType, Severity
-from dev.config import Project, PythonProject
+from dev.config import Project, PythonProject, find_workspace_root
 from dev.json_utils import as_dict, as_list
 
 DEFAULT_EXCLUDE_CSV = ".venv,.git,__pycache__,.mypy_cache,.pytest_cache"
@@ -2260,9 +2260,16 @@ def _has_import_linter_contracts(pyproject_path: Path | None) -> bool:
     return contracts is not None and len(contracts) > 0
 
 
+def _python_qa_venv_root(repo_root: Path) -> Path:
+    workspace_root = find_workspace_root(repo_root)
+    if workspace_root is not None:
+        return workspace_root / ".venv"
+    return repo_root / ".venv"
+
+
 def _new_state(repo_root: Path) -> PythonQaRepoState:
     env = os.environ.copy()
-    venv = repo_root / ".venv"
+    venv = _python_qa_venv_root(repo_root)
     python = venv / "bin" / "python"
     bin_dir = venv / "bin"
     pyproject_config = _resolve_existing(repo_root / "pyproject.toml")

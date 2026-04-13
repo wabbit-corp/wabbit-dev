@@ -322,6 +322,7 @@ def test_build_json_output_reports_dotnet_project(
                 "Debug",
                 "--nologo",
                 "--no-build",
+                "-p:BuildProjectReferences=false",
                 "--output",
                 str((tmp_path / ".nuget-local-feed").resolve()),
             ],

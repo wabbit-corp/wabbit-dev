@@ -1367,6 +1367,20 @@ def _validate_intellij_platform_library_feature(
             feature.ideaVersion,
             f"{project_name}.intellij-platform-library.ideaVersion",
         )
+    unsupported_plugin_ids = sorted(
+        {
+            plugin_id
+            for plugin_id in feature.bundledPlugins or []
+            if plugin_id not in {"com.intellij.java", "org.jetbrains.kotlin"}
+        }
+    )
+    if unsupported_plugin_ids:
+        supported_text = ", ".join(sorted({"com.intellij.java", "org.jetbrains.kotlin"}))
+        unsupported_text = ", ".join(unsupported_plugin_ids)
+        raise ValueError(
+            f"{project_name}.intellij-platform-library.bundledPlugins contains unsupported entries "
+            f"({unsupported_text}); supported values are {supported_text}"
+        )
 
 
 SUPPORTED_GRADLE_BUILD_MODELS: tuple[str, ...] = (

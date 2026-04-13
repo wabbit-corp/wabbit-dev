@@ -13,12 +13,33 @@ def test_java_version_for_features_uses_global_default_without_intellij_plugin()
     assert java_version_for_features(21, {"jvm-kotlin-library": object()}) == 21
 
 
-def test_java_version_for_features_forces_17_for_intellij_plugin() -> None:
-    assert java_version_for_features(21, {"intellij-plugin": object()}) == 17
+def test_java_version_for_features_defaults_intellij_plugin_targets_to_21() -> None:
+    assert java_version_for_features(17, {"intellij-plugin": object()}) == 21
 
 
-def test_java_version_for_features_forces_17_for_intellij_platform_library() -> None:
-    assert java_version_for_features(21, {"intellij-platform-library": object()}) == 17
+def test_java_version_for_features_defaults_intellij_platform_library_targets_to_21() -> None:
+    assert java_version_for_features(17, {"intellij-platform-library": object()}) == 21
+
+
+def test_java_version_for_features_keeps_older_intellij_targets_on_17() -> None:
+    assert (
+        java_version_for_features(
+            21,
+            {
+                "intellij-plugin": IntellijPlugin(pluginName="Demo", ideaVersion="2023.2", sinceBuild="232"),
+            },
+        )
+        == 17
+    )
+    assert (
+        java_version_for_features(
+            21,
+            {
+                "intellij-platform-library": IntellijPlatformLibrary(ideaVersion="2023.2"),
+            },
+        )
+        == 17
+    )
 
 
 def test_kotlin_jvm_target_for_version_handles_legacy_java_8_name() -> None:

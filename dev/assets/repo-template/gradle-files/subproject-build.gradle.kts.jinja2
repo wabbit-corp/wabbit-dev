@@ -10,6 +10,9 @@
 {% if 'kotlin' in features %}
 import org.jetbrains.dokka.gradle.DokkaExtension
 import org.jetbrains.dokka.gradle.engine.plugins.DokkaHtmlPluginParameters
+{% if uses_intellij_sdk_archive_dependencies -%}
+import org.gradle.api.tasks.Sync
+{% endif -%}
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 {% endif %}
@@ -78,6 +81,10 @@ repositories {
         defaultRepositories()
     }
     {% endif %}
+    {% if uses_intellij_sdk_archive_dependencies %}
+    maven("https://www.jetbrains.com/intellij-repository/releases")
+    maven("https://cache-redirector.jetbrains.com/intellij-dependencies")
+    {% endif %}
     {% for repo in repositories %}
     maven("{{ repo.url }}")
     {%- endfor %}
@@ -131,8 +138,6 @@ plugins {
     {% else %}
     id("org.jetbrains.intellij")
     {% endif %}
-    {% elif 'intellij-platform-library' in features %}
-    id("org.jetbrains.intellij.platform{% if features['intellij-platform-library'].modulePlugin %}.module{% endif %}")
     {% endif %}
     {% for plugin in extra_gradle_plugins %}
     id("{{ plugin.plugin_id }}")
@@ -209,6 +214,23 @@ if (localPublishRequested) {
 }
 {% endif %}
 
+{% if uses_intellij_sdk_archive_dependencies %}
+val intellijSdkArchive by configurations.creating
+val extractedIntellijSdkDir = layout.buildDirectory.dir("intellij-sdk/ideaIC-{{ intellij_sdk_archive_version }}")
+val extractIntellijSdk by tasks.registering(Sync::class) {
+    from({ zipTree(intellijSdkArchive.singleFile) })
+    into(extractedIntellijSdkDir)
+    includeEmptyDirs = false
+}
+val intellijSdkClasspath =
+    files(
+        extractedIntellijSdkDir.map { it.dir("lib") }{% for plugin_lib_dir in intellij_sdk_archive_plugin_lib_dirs %},
+        extractedIntellijSdkDir.map { it.dir("{{ plugin_lib_dir }}") }{% endfor %}
+    ).builtBy(extractIntellijSdk).asFileTree.matching {
+        include("**/*.jar")
+    }
+{% endif %}
+
 dependencies {
     {% for lib in project_dependencies %}
     {{ lib }}
@@ -237,6 +259,11 @@ dependencies {
     {% if 'kotlin' in features -%}
         testImplementation(kotlin("test"))
     {%- endif %}
+    {% if uses_intellij_sdk_archive_dependencies %}
+    intellijSdkArchive("com.jetbrains.intellij.idea:ideaIC:{{ intellij_sdk_archive_version }}@zip")
+    compileOnly(intellijSdkClasspath)
+    testImplementation(intellijSdkClasspath)
+    {% endif %}
     {% if uses_intellij_platform_dependencies -%}
         intellijPlatform {
             intellijIdea("{{ intellij_platform_idea_version }}") {
@@ -364,6 +391,9 @@ tasks.register("assertSnapshotVersion") {
 tasks {
     withType<Test> {
         jvmArgs("-ea")
+        {% if uses_intellij_sdk_archive_dependencies %}
+        dependsOn(extractIntellijSdk)
+        {% endif %}
         {% if is_kotlin_compiler_plugin_project and uses_repo_kotlin_version %}
         systemProperty("kotlinVersion", kotlinVersion)
         {% endif %}
@@ -385,6 +415,9 @@ tasks {
     }
     {% if 'kotlin' in features %}
     withType<KotlinCompile> {
+        {% if uses_intellij_sdk_archive_dependencies %}
+        dependsOn(extractIntellijSdk)
+        {% endif %}
         {% if is_kotlin_compiler_gradle_plugin_project %}
         dependsOn(generateCompilerGradlePluginVersion)
         {% endif %}

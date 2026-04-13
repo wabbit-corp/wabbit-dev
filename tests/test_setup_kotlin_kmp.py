@@ -562,6 +562,46 @@ def test_setup_kmp_template_conditionals_include_android_and_compose_only_when_f
     assert "COMPOSE" in feature_text
 
 
+def test_setup_gradle_project_seeds_missing_android_kmp_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "kmp-android-lib", platforms=["jvm", "android"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.targets = [
+        GradleTargetSpec(kind="jvm"),
+        GradleTargetSpec(kind="android-kmp-library", namespace="one.wabbit.demo", compile_sdk=34, min_sdk=26),
+    ]
+    ctx = _make_context(tmp_path, jvm_template="JVM_TEMPLATE", kmp_template="KMP_TEMPLATE")
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    manifest_path = project.path / "src" / "androidMain" / "AndroidManifest.xml"
+    assert manifest_path.read_text(encoding="utf-8") == "<manifest />\n"
+
+
+def test_setup_gradle_project_preserves_existing_android_kmp_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_setup_side_effects(monkeypatch)
+    project = _make_project(tmp_path / "kmp-android-lib", platforms=["jvm", "android"])
+    project.path.mkdir(parents=True, exist_ok=True)
+    project.targets = [
+        GradleTargetSpec(kind="jvm"),
+        GradleTargetSpec(kind="android-kmp-library", namespace="one.wabbit.demo", compile_sdk=34, min_sdk=26),
+    ]
+    manifest_path = project.path / "src" / "androidMain" / "AndroidManifest.xml"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text('<manifest package="one.wabbit.custom" />\n', encoding="utf-8")
+    ctx = _make_context(tmp_path, jvm_template="JVM_TEMPLATE", kmp_template="KMP_TEMPLATE")
+
+    setup_gradle_project(ctx, project, interactive=False)
+
+    assert manifest_path.read_text(encoding="utf-8") == '<manifest package="one.wabbit.custom" />\n'
+
+
 def test_setup_gradle_project_always_renders_context_parameters_flag(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1610,9 +1650,12 @@ def test_setup_gradle_project_renders_intellij_platform_library_defaults(
     setup_gradle_project(ctx, project, interactive=False)
 
     build_text = (project.path / "build.gradle.kts").read_text(encoding="utf-8")
-    assert 'id("org.jetbrains.intellij.platform.module")' in build_text
-    assert 'intellijIdea("2025.3")' in build_text
-    assert '"org.jetbrains.kotlin"' in build_text
+    assert 'id("org.jetbrains.intellij.platform.module")' not in build_text
+    assert 'id("org.jetbrains.intellij.platform")' not in build_text
+    assert 'maven("https://www.jetbrains.com/intellij-repository/releases")' in build_text
+    assert 'maven("https://cache-redirector.jetbrains.com/intellij-dependencies")' in build_text
+    assert 'intellijSdkArchive("com.jetbrains.intellij.idea:ideaIC:2025.3@zip")' in build_text
+    assert 'extractedIntellijSdkDir.map { it.dir("plugins/Kotlin/lib") }' in build_text
     assert "pluginConfiguration {" not in build_text
     assert "targetCompatibility = JavaVersion.toVersion(17)" in build_text
 

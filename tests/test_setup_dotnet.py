@@ -90,6 +90,8 @@ def test_setup_dotnet_project_preserves_fsharp_compile_order_and_writes_repo_roo
     assert project_text.index('Compile Include="Prelude.fs"') < project_text.index('Compile Include="Program.fs"')
     assert "<Version>0.1.0</Version>" in project_text
     assert "<PackageId>alpha</PackageId>" in project_text
+    assert "<PackageReadmeFile>README.md</PackageReadmeFile>" in project_text
+    assert 'None Include="../../README.md" Pack="true" PackagePath="\\"' in project_text
 
     assert (project_path / "global.json").is_file()
     assert (project_path / "NuGet.config").is_file()

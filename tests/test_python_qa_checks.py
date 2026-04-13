@@ -43,6 +43,30 @@ def test_state_without_local_config_files_has_no_config_paths(tmp_path: Path) ->
     assert state.pyright_config is None
 
 
+def test_state_uses_workspace_root_venv_when_root_clj_is_above_repo(tmp_path: Path) -> None:
+    workspace_root = tmp_path
+    repo_root = workspace_root / "python-easytime"
+    repo_root.mkdir()
+    (workspace_root / "root.clj").write_text('(workspace "demo")\n', encoding="utf-8")
+
+    state = qa._get_state(repo_root)
+
+    assert state.venv == workspace_root / ".venv"
+    assert state.python == workspace_root / ".venv" / "bin" / "python"
+    assert state.bin_dir == workspace_root / ".venv" / "bin"
+
+
+def test_state_falls_back_to_repo_root_venv_without_workspace_root(tmp_path: Path) -> None:
+    repo_root = tmp_path / "python-easytime"
+    repo_root.mkdir()
+
+    state = qa._get_state(repo_root)
+
+    assert state.venv == repo_root / ".venv"
+    assert state.python == repo_root / ".venv" / "bin" / "python"
+    assert state.bin_dir == repo_root / ".venv" / "bin"
+
+
 def test_coverage_report_skips_when_pytest_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
     python_bin = tmp_path / ".venv" / "bin" / "python"
