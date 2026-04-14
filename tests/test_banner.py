@@ -7,6 +7,7 @@ import pytest
 from PIL import Image, ImageFont, PngImagePlugin
 
 from dev.banner import create_banner
+from dev.setup_plan import SetupPlan
 from dev.tasks.setup_common import CANONICAL_BANNER_RELATIVE_PATH, LEGACY_BANNER_RELATIVE_PATH, write_banner
 
 
@@ -130,7 +131,7 @@ def test_write_banner_writes_canonical_and_legacy_paths(tmp_path: Path, monkeypa
 
     project = SimpleNamespace(name="demo", path=tmp_path / "project")
     project.path.mkdir(parents=True)
-    ctx = SimpleNamespace(repo_template=repo_template)
+    ctx = SimpleNamespace(repo_template=repo_template, setup_plan=SetupPlan())
 
     write_banner(ctx, project)
 

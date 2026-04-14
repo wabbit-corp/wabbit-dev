@@ -10,7 +10,7 @@ import sys
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from contextlib import nullcontext, redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import jinja2
@@ -55,6 +55,7 @@ from dev.messages import ask, error, info, warning
 from dev.project_layout import cleanup_misplaced_legal_files, project_uses_managed_legal_files
 from dev.repo_metadata import build_repo_metadata_plan
 from dev.repo_resolution import inferred_project_targets
+from dev.setup_plan import SetupPlan, SetupPlanCategory, SetupPlanKind, SetupPlanOwnership
 from dev.tasks import setup_common, setup_dotnet, setup_kotlin, setup_python
 from dev.tasks.setup_common import RepoSetupMode, clean_text, render_template
 from dev.template_assets import repo_template_root
@@ -65,12 +66,6 @@ LOCAL_ONLY_SETUP_FILENAMES = frozenset({"settings.local.gradle.kts"})
 WORKSPACE_LOCAL_GRADLE_ROOT_FILENAMES = frozenset({"build.gradle.kts", "settings.gradle.kts"})
 DOTNET_PROJECT_FILE_SUFFIXES = frozenset({".fsproj", ".csproj", ".vbproj"})
 _SETUP_AUTO_COMMIT_GUIDANCE_FILENAMES = frozenset({"AGENTS.md", "kotlin-conventions.md", "python-conventions.md"})
-_SETUP_AUTO_COMMIT_GENERATED_PATHS = frozenset(
-    {
-        str(setup_common.LEGACY_BANNER_RELATIVE_PATH).replace("\\", "/"),
-        str(setup_common.CANONICAL_BANNER_RELATIVE_PATH).replace("\\", "/"),
-    }
-)
 _SETUP_AUTO_COMMIT_BUILD_FILENAMES = frozenset(
     {
         "build.gradle.kts",
@@ -176,6 +171,7 @@ class RepoSetupContext:
     python_build_executable_template: jinja2.Template
 
     mode: RepoSetupMode
+    setup_plan: SetupPlan = field(default_factory=SetupPlan)
 
 
 @dataclass(frozen=True)
@@ -437,9 +433,24 @@ def _write_repo_root_wabbit_legal_documents(
     repo_root_path = repo_projects[0].effective_repo_root
     managed_repo_projects = [project for project in repo_projects if project_uses_managed_legal_files(project)]
     if not managed_repo_projects:
-        dev.io.delete_if_exists(repo_root_path / "LICENSE.md")
-        dev.io.delete_if_exists(repo_root_path / "LICENSES")
-        dev.io.delete_if_exists(repo_root_path / "NOTICE.md")
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root_path,
+            path=repo_root_path / "LICENSE.md",
+            category=SetupPlanCategory.LEGAL,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root_path,
+            path=repo_root_path / "LICENSES",
+            category=SetupPlanCategory.LEGAL,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root_path,
+            path=repo_root_path / "NOTICE.md",
+            category=SetupPlanCategory.LEGAL,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
         cleanup_misplaced_legal_files(repo_root_path, repo_projects)
         return
 
@@ -471,9 +482,24 @@ def _write_repo_root_wabbit_legal_documents(
 
     repo_root_project = dataclasses.replace(representative_project, path=repo_root_path)
     setup_common.write_wabbit_legal_documents(ctx, repo_root_project)
-    dev.io.delete_if_exists(repo_root_path / "LICENSE.md")
-    dev.io.delete_if_exists(repo_root_path / "LICENSES")
-    dev.io.delete_if_exists(repo_root_path / "NOTICE.md")
+    ctx.setup_plan.delete_path(
+        repo_root=repo_root_path,
+        path=repo_root_path / "LICENSE.md",
+        category=SetupPlanCategory.LEGAL,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
+    ctx.setup_plan.delete_path(
+        repo_root=repo_root_path,
+        path=repo_root_path / "LICENSES",
+        category=SetupPlanCategory.LEGAL,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
+    ctx.setup_plan.delete_path(
+        repo_root=repo_root_path,
+        path=repo_root_path / "NOTICE.md",
+        category=SetupPlanCategory.LEGAL,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
     cleanup_misplaced_legal_files(repo_root_path, repo_projects)
 
 
@@ -494,6 +520,13 @@ def _write_repo_agents_files(ctx: RepoSetupContext, projects: list[Project]) -> 
         )
         if not repo_projects:
             continue
+        ctx.setup_plan.record(
+            kind=SetupPlanKind.REPLACE_TEXT,
+            repo_root=repo_root,
+            path=repo_root / "AGENTS.md",
+            category=SetupPlanCategory.GUIDANCE,
+            ownership=SetupPlanOwnership.MANAGED_BLOCK,
+        )
         if dev.agents_md.write_repo_agents_file(ctx.config, repo_root, repo_projects):
             written_paths.append(str((repo_root / "AGENTS.md").resolve()))
     return written_paths
@@ -502,6 +535,22 @@ def _write_repo_agents_files(ctx: RepoSetupContext, projects: list[Project]) -> 
 def _delete_if_setup_managed(path: Path) -> None:
     if path.is_file() and is_setup_managed_file(path):
         dev.io.delete_if_exists(path)
+
+
+def _planned_delete_if_setup_managed(
+    ctx: RepoSetupContext,
+    *,
+    repo_root: Path,
+    path: Path,
+    category: SetupPlanCategory,
+) -> None:
+    if path.is_file() and is_setup_managed_file(path):
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root,
+            path=path,
+            category=category,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
 
 
 def _managed_hash_comment(text: str, *, body_lines: list[str]) -> str:
@@ -558,10 +607,21 @@ def _write_repo_convention_files(ctx: RepoSetupContext, repo_root: Path, repo_pr
                 "Put repo-specific guidance in AGENTS.md rather than editing this file directly.",
             ],
         )
-        dev.io.write_text_file(repo_root / "kotlin-conventions.md", kotlin_conventions_text)
+        ctx.setup_plan.replace_text(
+            repo_root=repo_root,
+            path=repo_root / "kotlin-conventions.md",
+            content=kotlin_conventions_text,
+            category=SetupPlanCategory.GUIDANCE,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
         wrote_any = True
     else:
-        _delete_if_setup_managed(repo_root / "kotlin-conventions.md")
+        _planned_delete_if_setup_managed(
+            ctx,
+            repo_root=repo_root,
+            path=repo_root / "kotlin-conventions.md",
+            category=SetupPlanCategory.GUIDANCE,
+        )
 
     if _repo_uses_python(repo_projects):
         python_conventions_text = _managed_html_comment(
@@ -573,10 +633,21 @@ def _write_repo_convention_files(ctx: RepoSetupContext, repo_root: Path, repo_pr
                 "Put repo-specific guidance in AGENTS.md rather than editing this file directly.",
             ],
         )
-        dev.io.write_text_file(repo_root / "python-conventions.md", python_conventions_text)
+        ctx.setup_plan.replace_text(
+            repo_root=repo_root,
+            path=repo_root / "python-conventions.md",
+            content=python_conventions_text,
+            category=SetupPlanCategory.GUIDANCE,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
         wrote_any = True
     else:
-        _delete_if_setup_managed(repo_root / "python-conventions.md")
+        _planned_delete_if_setup_managed(
+            ctx,
+            repo_root=repo_root,
+            path=repo_root / "python-conventions.md",
+            category=SetupPlanCategory.GUIDANCE,
+        )
 
     return wrote_any
 
@@ -603,9 +674,12 @@ def _write_repo_metadata_files(ctx: RepoSetupContext, projects: list[Project]) -
 
         wrote_any = False
         repo_root.mkdir(parents=True, exist_ok=True)
-        dev.io.write_text_file(
-            repo_root / ".gitignore",
-            merged_gitignore_text(repo_root, _repo_root_gitignore_text(ctx, repo_projects)),
+        ctx.setup_plan.replace_text(
+            repo_root=repo_root,
+            path=repo_root / ".gitignore",
+            content=merged_gitignore_text(repo_root, _repo_root_gitignore_text(ctx, repo_projects)),
+            category=SetupPlanCategory.METADATA,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
         )
         wrote_any = True
         if _write_repo_convention_files(ctx, repo_root, repo_projects):
@@ -620,7 +694,13 @@ def _write_repo_metadata_files(ctx: RepoSetupContext, projects: list[Project]) -
                     "Direct edits to this file will be overwritten the next time setup runs.",
                 ],
             )
-            dev.io.write_text_file(repo_root / ".editorconfig", editorconfig_text)
+            ctx.setup_plan.replace_text(
+                repo_root=repo_root,
+                path=repo_root / ".editorconfig",
+                content=editorconfig_text,
+                category=SetupPlanCategory.METADATA,
+                ownership=SetupPlanOwnership.MANAGED_FILE,
+            )
             wrote_any = True
 
         github_root = repo_root / ".github"
@@ -640,10 +720,21 @@ def _write_repo_metadata_files(ctx: RepoSetupContext, projects: list[Project]) -
                         "Direct edits to this file will be overwritten the next time setup runs.",
                     ],
                 )
-                dev.io.write_text_file(github_root / "CODEOWNERS", codeowners_text)
+                ctx.setup_plan.replace_text(
+                    repo_root=repo_root,
+                    path=github_root / "CODEOWNERS",
+                    content=codeowners_text,
+                    category=SetupPlanCategory.METADATA,
+                    ownership=SetupPlanOwnership.MANAGED_FILE,
+                )
                 wrote_any = True
             else:
-                _delete_if_setup_managed(github_root / "CODEOWNERS")
+                _planned_delete_if_setup_managed(
+                    ctx,
+                    repo_root=repo_root,
+                    path=github_root / "CODEOWNERS",
+                    category=SetupPlanCategory.METADATA,
+                )
 
             security_text = _managed_html_comment(
                 render_template(
@@ -658,7 +749,13 @@ def _write_repo_metadata_files(ctx: RepoSetupContext, projects: list[Project]) -
                     "Direct edits to this file will be overwritten the next time setup runs.",
                 ],
             )
-            dev.io.write_text_file(github_root / "SECURITY.md", security_text)
+            ctx.setup_plan.replace_text(
+                repo_root=repo_root,
+                path=github_root / "SECURITY.md",
+                content=security_text,
+                category=SetupPlanCategory.METADATA,
+                ownership=SetupPlanOwnership.MANAGED_FILE,
+            )
 
             pull_request_text = _managed_html_comment(
                 render_template(ctx.github_pull_request_template),
@@ -669,7 +766,13 @@ def _write_repo_metadata_files(ctx: RepoSetupContext, projects: list[Project]) -
                     "Direct edits to this file will be overwritten the next time setup runs.",
                 ],
             )
-            dev.io.write_text_file(github_root / "pull_request_template.md", pull_request_text)
+            ctx.setup_plan.replace_text(
+                repo_root=repo_root,
+                path=github_root / "pull_request_template.md",
+                content=pull_request_text,
+                category=SetupPlanCategory.METADATA,
+                ownership=SetupPlanOwnership.MANAGED_FILE,
+            )
 
             issue_root = github_root / "ISSUE_TEMPLATE"
             bug_report_text = _managed_hash_comment(
@@ -681,7 +784,13 @@ def _write_repo_metadata_files(ctx: RepoSetupContext, projects: list[Project]) -
                     "Direct edits to this file will be overwritten the next time setup runs.",
                 ],
             )
-            dev.io.write_text_file(issue_root / "bug_report.yml", bug_report_text)
+            ctx.setup_plan.replace_text(
+                repo_root=repo_root,
+                path=issue_root / "bug_report.yml",
+                content=bug_report_text,
+                category=SetupPlanCategory.METADATA,
+                ownership=SetupPlanOwnership.MANAGED_FILE,
+            )
 
             feature_request_text = _managed_hash_comment(
                 render_template(ctx.github_issue_feature_template, contact_email=contact_email),
@@ -692,14 +801,45 @@ def _write_repo_metadata_files(ctx: RepoSetupContext, projects: list[Project]) -
                     "Direct edits to this file will be overwritten the next time setup runs.",
                 ],
             )
-            dev.io.write_text_file(issue_root / "feature_request.yml", feature_request_text)
+            ctx.setup_plan.replace_text(
+                repo_root=repo_root,
+                path=issue_root / "feature_request.yml",
+                content=feature_request_text,
+                category=SetupPlanCategory.METADATA,
+                ownership=SetupPlanOwnership.MANAGED_FILE,
+            )
             wrote_any = True
         else:
-            _delete_if_setup_managed(github_root / "CODEOWNERS")
-            _delete_if_setup_managed(github_root / "SECURITY.md")
-            _delete_if_setup_managed(github_root / "pull_request_template.md")
-            _delete_if_setup_managed(github_root / "ISSUE_TEMPLATE" / "bug_report.yml")
-            _delete_if_setup_managed(github_root / "ISSUE_TEMPLATE" / "feature_request.yml")
+            _planned_delete_if_setup_managed(
+                ctx,
+                repo_root=repo_root,
+                path=github_root / "CODEOWNERS",
+                category=SetupPlanCategory.METADATA,
+            )
+            _planned_delete_if_setup_managed(
+                ctx,
+                repo_root=repo_root,
+                path=github_root / "SECURITY.md",
+                category=SetupPlanCategory.METADATA,
+            )
+            _planned_delete_if_setup_managed(
+                ctx,
+                repo_root=repo_root,
+                path=github_root / "pull_request_template.md",
+                category=SetupPlanCategory.METADATA,
+            )
+            _planned_delete_if_setup_managed(
+                ctx,
+                repo_root=repo_root,
+                path=github_root / "ISSUE_TEMPLATE" / "bug_report.yml",
+                category=SetupPlanCategory.METADATA,
+            )
+            _planned_delete_if_setup_managed(
+                ctx,
+                repo_root=repo_root,
+                path=github_root / "ISSUE_TEMPLATE" / "feature_request.yml",
+                category=SetupPlanCategory.METADATA,
+            )
 
         if wrote_any:
             written_roots.append(str(repo_root))
@@ -994,7 +1134,12 @@ def _write_gradle_local_overlay(
         seed_projects=seed_projects,
     )
     if not plugin_included_builds and not included_builds:
-        dev.io.delete_if_exists(overlay_path)
+        ctx.setup_plan.delete_path(
+            repo_root=root_path,
+            path=overlay_path,
+            category=SetupPlanCategory.BUILD,
+            ownership=SetupPlanOwnership.LOCAL_ONLY,
+        )
         return
 
     overlay_text = render_template(
@@ -1002,11 +1147,22 @@ def _write_gradle_local_overlay(
         plugin_included_builds=plugin_included_builds,
         included_builds=included_builds,
     )
-    dev.io.write_text_file(overlay_path, stamp_managed_text(setup_kotlin.clean_gradle_build_text(overlay_text)))
+    ctx.setup_plan.replace_text(
+        repo_root=root_path,
+        path=overlay_path,
+        content=stamp_managed_text(setup_kotlin.clean_gradle_build_text(overlay_text)),
+        category=SetupPlanCategory.BUILD,
+        ownership=SetupPlanOwnership.LOCAL_ONLY,
+    )
 
 
-def _delete_gradle_local_overlay(*, root_path: Path) -> None:
-    dev.io.delete_if_exists(root_path / "settings.local.gradle.kts")
+def _delete_gradle_local_overlay(ctx: RepoSetupContext, *, root_path: Path) -> None:
+    ctx.setup_plan.delete_path(
+        repo_root=root_path,
+        path=root_path / "settings.local.gradle.kts",
+        category=SetupPlanCategory.BUILD,
+        ownership=SetupPlanOwnership.LOCAL_ONLY,
+    )
 
 
 def _write_gradle_root_files(
@@ -1762,13 +1918,17 @@ def _is_local_setup_only_path(
     *,
     repo_root: Path,
     workspace_root: Path,
+    planned_local_only_paths: frozenset[str],
 ) -> bool:
-    path = repo_root / relative_path
+    normalized_path = relative_path.replace("\\", "/")
+    if normalized_path in planned_local_only_paths:
+        return True
+    path = repo_root / normalized_path
     path_name = path.name
 
     if path_name in LOCAL_ONLY_SETUP_FILENAMES:
         return True
-    if repo_root == workspace_root and relative_path in WORKSPACE_LOCAL_GRADLE_ROOT_FILENAMES:
+    if repo_root == workspace_root and normalized_path in WORKSPACE_LOCAL_GRADLE_ROOT_FILENAMES:
         return True
     if path_name == "NuGet.config":
         return _nuget_config_uses_workspace_local_feed(path, workspace_root=workspace_root)
@@ -1784,6 +1944,7 @@ def _is_setup_auto_commit_allowed_path(
     repo_root: Path,
     workspace_root: Path,
     preexisting_managed_paths: frozenset[str],
+    planned_generated_paths: frozenset[str],
 ) -> bool:
     normalized_path = relative_path.replace("\\", "/")
     if Path(normalized_path).name == ".gitignore":
@@ -1792,7 +1953,7 @@ def _is_setup_auto_commit_allowed_path(
         return True
     if Path(normalized_path).name == "AGENTS.md":
         return _is_setup_auto_commit_allowed_agents_change(repo, repo_root=repo_root, relative_path=normalized_path)
-    if normalized_path in _SETUP_AUTO_COMMIT_GENERATED_PATHS:
+    if normalized_path in planned_generated_paths:
         return True
     if normalized_path in preexisting_managed_paths:
         return True
@@ -1889,6 +2050,7 @@ def _auto_commit_setup_candidate(
     *,
     mode: RepoSetupMode,
     workspace_root: Path,
+    setup_plan: SetupPlan | None = None,
 ) -> SetupAutoCommitRepoResult:
     representative_project = candidate.representative_project
     representative_project_id = representative_project.project_id
@@ -1905,6 +2067,9 @@ def _auto_commit_setup_candidate(
         )
 
     try:
+        active_setup_plan = SetupPlan() if setup_plan is None else setup_plan
+        planned_local_only_paths = active_setup_plan.local_only_paths_for_repo(candidate.repo_root)
+        planned_generated_paths = active_setup_plan.planned_paths_for_repo(candidate.repo_root, include_local_only=True)
         try:
             branch_name = repo.active_branch.name
         except TypeError:
@@ -1962,6 +2127,7 @@ def _auto_commit_setup_candidate(
                     path_text,
                     repo_root=candidate.repo_root,
                     workspace_root=workspace_root,
+                    planned_local_only_paths=planned_local_only_paths,
                 ):
                     if path_text not in local_only_paths:
                         local_only_paths.append(path_text)
@@ -1972,6 +2138,7 @@ def _auto_commit_setup_candidate(
                     repo_root=candidate.repo_root,
                     workspace_root=workspace_root,
                     preexisting_managed_paths=candidate.preexisting_managed_paths,
+                    planned_generated_paths=planned_generated_paths,
                 ):
                     continue
                 if path_text not in disallowed_paths:
@@ -2044,12 +2211,15 @@ def _auto_commit_setup_repos(
     *,
     mode: RepoSetupMode,
     workspace_root: Path,
+    setup_plan: SetupPlan | None = None,
 ) -> tuple[SetupAutoCommitRepoResult, ...]:
+    active_setup_plan = SetupPlan() if setup_plan is None else setup_plan
     return tuple(
         _auto_commit_setup_candidate(
             candidate,
             mode=mode,
             workspace_root=workspace_root,
+            setup_plan=active_setup_plan,
         )
         for candidate in candidates
     )
@@ -2504,13 +2674,14 @@ def setup(
                 str(overlay_root.resolve()) for overlay_root in sorted(overlay_roots)
             ]
             for overlay_root in sorted(overlay_roots):
-                _delete_gradle_local_overlay(root_path=overlay_root)
+                _delete_gradle_local_overlay(ctx, root_path=overlay_root)
 
         if commit_if_setup_only:
             auto_commit_results = _auto_commit_setup_repos(
                 auto_commit_candidates,
                 mode=mode,
                 workspace_root=workspace_root,
+                setup_plan=ctx.setup_plan,
             )
             payload["autoCommit"]["repos"] = [result.to_json() for result in auto_commit_results]
             for result in auto_commit_results:

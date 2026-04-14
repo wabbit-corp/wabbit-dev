@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,6 +9,7 @@ import jinja2
 import dev.io
 from dev.config import OwnershipType
 from dev.licenses import load_license_texts
+from dev.setup_plan import SetupPlan
 from dev.tasks.setup_common import write_wabbit_legal_files
 from dev.template_assets import repo_template_root
 
@@ -39,6 +40,7 @@ class _FakeContext:
     cla_explanations: jinja2.Template
     contributor_privacy_policy: jinja2.Template
     repo_template: Path
+    setup_plan: SetupPlan = field(default_factory=SetupPlan)
 
 
 def _workspace_template_root() -> Path:

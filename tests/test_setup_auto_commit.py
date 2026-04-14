@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from dev.generated_files import SETUP_GENERATED_MARKER
+from dev.setup_plan import SetupPlan, SetupPlanCategory, SetupPlanKind, SetupPlanOwnership
 from dev.tasks.setup_common import RepoSetupMode
 
 
@@ -164,6 +165,22 @@ def test_auto_commit_setup_only_commits_generated_banner_paths(tmp_path: Path) -
     (repo_root / ".meta").mkdir(parents=True, exist_ok=True)
     (repo_root / ".meta" / "github-project-banner.png").write_bytes(b"new-banner")
     banner_path.write_bytes(b"new-banner")
+    setup_plan = SetupPlan()
+    setup_plan.record(
+        kind=SetupPlanKind.REPLACE_FILE,
+        repo_root=repo_root,
+        path=repo_root / ".meta" / "github-project-banner.png",
+        category=SetupPlanCategory.ASSET,
+        ownership=SetupPlanOwnership.GENERATED_ASSET,
+    )
+    setup_plan.record(
+        kind=SetupPlanKind.COPY_FILE,
+        repo_root=repo_root,
+        path=banner_path,
+        category=SetupPlanCategory.ASSET,
+        ownership=SetupPlanOwnership.GENERATED_ASSET,
+        source_path=repo_root / ".meta" / "github-project-banner.png",
+    )
 
     candidates = setup_module._collect_setup_auto_commit_candidates(
         [_demo_project(repo_root)],
@@ -174,6 +191,7 @@ def test_auto_commit_setup_only_commits_generated_banner_paths(tmp_path: Path) -
         candidates,
         mode=RepoSetupMode.LOCAL,
         workspace_root=repo_root,
+        setup_plan=setup_plan,
     )
 
     assert len(results) == 1

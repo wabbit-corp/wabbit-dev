@@ -18,6 +18,7 @@ from dev.config import (
     Project,
     PurescriptProject,
     PythonProject,
+    project_repo_root,
 )
 from dev.generated_files import prepend_generated_comment
 from dev.licenses import (
@@ -34,6 +35,7 @@ from dev.project_layout import (
     project_preserves_root_legal_files,
     project_uses_managed_legal_files,
 )
+from dev.setup_plan import SetupPlan, SetupPlanCategory, SetupPlanOwnership
 
 
 class RepoSetupMode(Enum):
@@ -63,6 +65,9 @@ class CommonSetupContext(Protocol):
 
     @property
     def repo_template(self) -> Path: ...
+
+    @property
+    def setup_plan(self) -> SetupPlan: ...
 
 
 CANONICAL_BANNER_RELATIVE_PATH = Path(".meta") / "github-project-banner.png"
@@ -266,12 +271,28 @@ def _legacy_root_legal_paths(project: Project) -> list[Path]:
     ]
 
 
-def _cleanup_legacy_root_legal_paths(project: Project) -> None:
+def _planned_repo_root(project: Project) -> Path:
+    return project_repo_root(project).resolve()
+
+
+def _cleanup_legacy_root_legal_paths(ctx: CommonSetupContext, project: Project) -> None:
+    repo_root = _planned_repo_root(project)
     for path in _legacy_root_legal_paths(project):
-        dev.io.delete_if_exists(path)
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root,
+            path=path,
+            category=SetupPlanCategory.LEGAL,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
 
 
-def _cleanup_test_license_outputs(project: Project, *, keep_license: str | None = None) -> None:
+def _cleanup_test_license_outputs(
+    ctx: CommonSetupContext,
+    project: Project,
+    *,
+    keep_license: str | None = None,
+) -> None:
+    repo_root = _planned_repo_root(project)
     keep_paths: set[Path] = set()
     if keep_license is not None:
         keep_paths.add(_extra_license_path(project, keep_license))
@@ -286,20 +307,43 @@ def _cleanup_test_license_outputs(project: Project, *, keep_license: str | None 
         }:
             if candidate_path in keep_paths:
                 continue
-            dev.io.delete_if_exists(candidate_path)
+            ctx.setup_plan.delete_path(
+                repo_root=repo_root,
+                path=candidate_path,
+                category=SetupPlanCategory.LEGAL,
+                ownership=SetupPlanOwnership.MANAGED_FILE,
+            )
     licenses_dir = _extra_license_dir(project)
     if licenses_dir.is_dir() and not any(licenses_dir.iterdir()):
-        dev.io.delete_if_exists(licenses_dir)
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root,
+            path=licenses_dir,
+            category=SetupPlanCategory.LEGAL,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
 
 
-def _cleanup_test_license_copies(project: Project) -> None:
+def _cleanup_test_license_copies(ctx: CommonSetupContext, project: Project) -> None:
+    repo_root = _planned_repo_root(project)
     for path in expected_test_license_copy_paths(project):
-        dev.io.delete_if_exists(path)
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root,
+            path=path,
+            category=SetupPlanCategory.LEGAL,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
 
 
-def _write_test_license_copies(project: Project, rendered_test_license_text: str) -> None:
+def _write_test_license_copies(ctx: CommonSetupContext, project: Project, rendered_test_license_text: str) -> None:
+    repo_root = _planned_repo_root(project)
     for root in discover_test_license_roots(project):
-        dev.io.write_text_file(root / "LICENSE.md", rendered_test_license_text)
+        ctx.setup_plan.replace_text(
+            repo_root=repo_root,
+            path=root / "LICENSE.md",
+            content=rendered_test_license_text,
+            category=SetupPlanCategory.LEGAL,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
 
 
 def _render_license_notice_file(
@@ -329,21 +373,37 @@ def write_wabbit_legal_documents(ctx: CommonSetupContext, project: Project) -> N
     legal_template_context = _wabbit_legal_template_context(ctx, project)
     if not legal_template_context:
         return
+    repo_root = _planned_repo_root(project)
 
-    dev.io.write_text_file(
-        _cla_path(project),
-        render_template(ctx.cla, **legal_template_context),
+    ctx.setup_plan.replace_text(
+        repo_root=repo_root,
+        path=_cla_path(project),
+        content=render_template(ctx.cla, **legal_template_context),
+        category=SetupPlanCategory.LEGAL,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
-    dev.io.write_text_file(
-        _cla_explanations_path(project),
-        render_template(ctx.cla_explanations, **legal_template_context),
+    ctx.setup_plan.replace_text(
+        repo_root=repo_root,
+        path=_cla_explanations_path(project),
+        content=render_template(ctx.cla_explanations, **legal_template_context),
+        category=SetupPlanCategory.LEGAL,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
-    dev.io.write_text_file(
-        _contributor_privacy_path(project),
-        render_template(ctx.contributor_privacy_policy, **legal_template_context),
+    ctx.setup_plan.replace_text(
+        repo_root=repo_root,
+        path=_contributor_privacy_path(project),
+        content=render_template(ctx.contributor_privacy_policy, **legal_template_context),
+        category=SetupPlanCategory.LEGAL,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
-    dev.io.write_text_file(_code_of_conduct_path(project), render_template(ctx.coc, **legal_template_context))
-    _cleanup_legacy_root_legal_paths(project)
+    ctx.setup_plan.replace_text(
+        repo_root=repo_root,
+        path=_code_of_conduct_path(project),
+        content=render_template(ctx.coc, **legal_template_context),
+        category=SetupPlanCategory.LEGAL,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
+    _cleanup_legacy_root_legal_paths(ctx, project)
 
 
 def write_wabbit_legal_files(
@@ -358,18 +418,29 @@ def write_wabbit_legal_files(
 
     if not project_uses_managed_legal_files(project):
         if project.path == project.effective_repo_root:
-            dev.io.delete_if_exists(_license_notice_path(project))
-            _cleanup_test_license_outputs(project)
+            ctx.setup_plan.delete_path(
+                repo_root=_planned_repo_root(project),
+                path=_license_notice_path(project),
+                category=SetupPlanCategory.LEGAL,
+                ownership=SetupPlanOwnership.MANAGED_FILE,
+            )
+            _cleanup_test_license_outputs(ctx, project)
             if not project_preserves_root_legal_files(project):
-                dev.io.delete_if_exists(project.path / "LICENSE.md")
-                _cleanup_legacy_root_legal_paths(project)
+                ctx.setup_plan.delete_path(
+                    repo_root=_planned_repo_root(project),
+                    path=project.path / "LICENSE.md",
+                    category=SetupPlanCategory.LEGAL,
+                    ownership=SetupPlanOwnership.MANAGED_FILE,
+                )
+                _cleanup_legacy_root_legal_paths(ctx, project)
                 cleanup_misplaced_legal_files(project.path, [project])
-        _cleanup_test_license_copies(project)
+        _cleanup_test_license_copies(ctx, project)
         return
 
     project_license = canonicalize_license_key(project.license)
     test_license = canonicalize_license_key(project.test_license)
     write_root_legal_files = project.path == project.effective_repo_root
+    repo_root = _planned_repo_root(project)
     if project_license is not None and write_root_legal_files:
         license_text = _resolve_license_text(ctx.licenses, project_license)
         if license_text is None:
@@ -379,7 +450,13 @@ def write_wabbit_legal_files(
             return
 
         rendered_license_text = render_project_license(license_text, project)
-        dev.io.write_text_file(project.path / "LICENSE.md", rendered_license_text)
+        ctx.setup_plan.replace_text(
+            repo_root=repo_root,
+            path=project.path / "LICENSE.md",
+            content=rendered_license_text,
+            category=SetupPlanCategory.LEGAL,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
         if test_license is not None:
             test_license_text = _resolve_license_text(ctx.licenses, test_license)
             if test_license_text is None:
@@ -387,26 +464,50 @@ def write_wabbit_legal_files(
                 error(f"Unknown test license key: {test_license}. Supported keys: {supported}")
                 write_wabbit_legal_documents(ctx, project)
                 return
-            _cleanup_test_license_outputs(project, keep_license=test_license)
+            _cleanup_test_license_outputs(ctx, project, keep_license=test_license)
             rendered_test_license_text = render_project_license(test_license_text, project)
             test_license_path = _extra_license_path(project, test_license)
-            dev.io.write_text_file(test_license_path, rendered_test_license_text)
-            dev.io.write_text_file(
-                _license_notice_path(project),
-                _render_license_notice_file(
+            ctx.setup_plan.replace_text(
+                repo_root=repo_root,
+                path=test_license_path,
+                content=rendered_test_license_text,
+                category=SetupPlanCategory.LEGAL,
+                ownership=SetupPlanOwnership.MANAGED_FILE,
+            )
+            ctx.setup_plan.replace_text(
+                repo_root=repo_root,
+                path=_license_notice_path(project),
+                content=_render_license_notice_file(
                     project=project,
                     primary_license_reference=cla_primary_license_reference(project_license),
                     test_license_reference=_license_reference_label(ctx.licenses, test_license),
                     test_license_path=test_license_path,
                 ),
+                category=SetupPlanCategory.LEGAL,
+                ownership=SetupPlanOwnership.MANAGED_FILE,
             )
         else:
-            dev.io.delete_if_exists(_license_notice_path(project))
-            _cleanup_test_license_outputs(project)
+            ctx.setup_plan.delete_path(
+                repo_root=repo_root,
+                path=_license_notice_path(project),
+                category=SetupPlanCategory.LEGAL,
+                ownership=SetupPlanOwnership.MANAGED_FILE,
+            )
+            _cleanup_test_license_outputs(ctx, project)
     elif write_root_legal_files:
-        dev.io.delete_if_exists(project.path / "LICENSE.md")
-        dev.io.delete_if_exists(_license_notice_path(project))
-        _cleanup_test_license_outputs(project)
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root,
+            path=project.path / "LICENSE.md",
+            category=SetupPlanCategory.LEGAL,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root,
+            path=_license_notice_path(project),
+            category=SetupPlanCategory.LEGAL,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
+        _cleanup_test_license_outputs(ctx, project)
 
     if test_license is not None and write_test_license_copies:
         test_license_text = _resolve_license_text(ctx.licenses, test_license)
@@ -414,9 +515,9 @@ def write_wabbit_legal_files(
             supported = ", ".join(sorted(ctx.licenses))
             error(f"Unknown test license key: {test_license}. Supported keys: {supported}")
             return
-        _write_test_license_copies(project, render_project_license(test_license_text, project))
+        _write_test_license_copies(ctx, project, render_project_license(test_license_text, project))
     elif write_test_license_copies:
-        _cleanup_test_license_copies(project)
+        _cleanup_test_license_copies(ctx, project)
 
     if write_root_legal_files:
         write_wabbit_legal_documents(ctx, project)
@@ -426,18 +527,31 @@ def write_wabbit_legal_files(
 
 def write_banner(ctx: CommonSetupContext, project: Project) -> None:
     canonical_output_path = project.path / CANONICAL_BANNER_RELATIVE_PATH
-    create_banner(
-        image_path=ctx.repo_template / "banner4c.png",
-        font_path=str(ctx.repo_template / "CooperHewitt-Light.otf"),
-        main_text=project.name,
-        subtitle_text=None,
-        background_color=(0, 0, 0, 0),
-        output_path=str(canonical_output_path),
-        font_size=60,
-        subtitle_font_size=None,
-        padding=40,
+    repo_root = _planned_repo_root(project)
+    ctx.setup_plan.replace_file(
+        repo_root=repo_root,
+        path=canonical_output_path,
+        category=SetupPlanCategory.ASSET,
+        ownership=SetupPlanOwnership.GENERATED_ASSET,
+        apply=lambda: create_banner(
+            image_path=ctx.repo_template / "banner4c.png",
+            font_path=str(ctx.repo_template / "CooperHewitt-Light.otf"),
+            main_text=project.name,
+            subtitle_text=None,
+            background_color=(0, 0, 0, 0),
+            output_path=str(canonical_output_path),
+            font_size=60,
+            subtitle_font_size=None,
+            padding=40,
+        ),
     )
-    dev.io.copy(canonical_output_path, project.path / LEGACY_BANNER_RELATIVE_PATH)
+    ctx.setup_plan.copy_file(
+        repo_root=repo_root,
+        source_path=canonical_output_path,
+        destination_path=project.path / LEGACY_BANNER_RELATIVE_PATH,
+        category=SetupPlanCategory.ASSET,
+        ownership=SetupPlanOwnership.GENERATED_ASSET,
+    )
 
 
 __all__ = [
