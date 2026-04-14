@@ -78,6 +78,43 @@ def test_sync_intellij_plugin_xml_updates_metadata_and_preserves_actions(tmp_pat
     assert '<action id="ApplyDiffAction" class="one.wabbit.diffpaste.ApplyDiffAction" />' in plugin_xml
 
 
+def test_sync_intellij_plugin_xml_prefers_standard_repo_changelog_entry(tmp_path: Path) -> None:
+    project = _make_gradle_project(tmp_path)
+    (project.effective_repo_root / "CHANGELOG.md").write_text(
+        "\n".join(
+            [
+                "# Changelog",
+                "",
+                "## 0.0.1 - 2026-04-13",
+                "",
+                "Initial public release.",
+                "",
+                "- Adds structured IDE edits.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    feature = IntellijPlugin(
+        pluginName="DiffPaste",
+        pluginId="one.wabbit.diffpaste",
+        sinceBuild="232",
+        untilBuild=None,
+        vendorName="Wabbit Consulting Corporation",
+        vendorEmail="wabbit@wabbit.one",
+        vendorUrl="https://wabbit.one",
+        pluginDescription="Applies clipboard diff patches directly to your open file.",
+        pluginChangeNotes="Stale manual notes.",
+        depends=["com.intellij.modules.platform"],
+    )
+
+    _sync_intellij_plugin_xml(project, feature, "Example Co")
+
+    plugin_xml_path = project.path / "src" / "main" / "resources" / "META-INF" / "plugin.xml"
+    plugin_xml = plugin_xml_path.read_text(encoding="utf-8")
+    assert "<change-notes>Initial public release.\n\n- Adds structured IDE edits.</change-notes>" in plugin_xml
+
+
 def test_sync_intellij_plugin_xml_uses_default_vendor_name_when_missing(tmp_path: Path) -> None:
     project = _make_gradle_project(tmp_path)
     feature = IntellijPlugin(

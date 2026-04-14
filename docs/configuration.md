@@ -443,6 +443,10 @@ Important feature fields:
 | `kmp-compose` | optional `:publicResClass`, `:resClassPackage` |
 | `kmp-jvm-runs` | `:entries` list of `taskName`, `mainClass`, `description`, and optional `jvmArgs` |
 
+For `intellij-plugin`, release change notes are standardized and generated from the repo-root `CHANGELOG.md`.
+Use a section headed exactly `## <version> - YYYY-MM-DD` for the current project version.
+`:pluginChangeNotes` is only a setup fallback while older repos migrate; the validator expects the changelog section.
+
 ## Example Configuration
 
 ```clojure

@@ -14,6 +14,7 @@ import jinja2
 
 import dev.io
 import dev.repo_docs
+from dev.changelog import resolve_intellij_change_notes
 from dev.config import (
     Config,
     DataProject,
@@ -1911,7 +1912,15 @@ def _sync_intellij_plugin_xml(project: GradleProject, feature: IntellijPlugin, d
 
     change_notes_element = _find_child(root, "change-notes")
     existing_change_notes = _normalize_xml_text(change_notes_element.text if change_notes_element is not None else None)
-    plugin_change_notes = _normalize_xml_text(feature.pluginChangeNotes) or existing_change_notes or ""
+    plugin_change_notes = (
+        resolve_intellij_change_notes(
+            repo_root=project.effective_repo_root,
+            project_version=str(project.version) if project.version is not None else None,
+            configured_change_notes=feature.pluginChangeNotes,
+        )
+        or existing_change_notes
+        or ""
+    )
     _upsert_child(root, "change-notes", plugin_change_notes)
 
     depends_values = feature.depends or _existing_depends(root)

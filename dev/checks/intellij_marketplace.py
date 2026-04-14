@@ -5,6 +5,12 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import urlparse
 
+from dev.changelog import (
+    find_markdown_changelog,
+    markdown_changelog_section_for_version,
+    resolve_intellij_change_notes,
+    resolve_repo_changelog_change_notes,
+)
 from dev.check_fixers import can_regenerate_with_setup, rerun_setup_for_project
 from dev.checks.base import Issue, IssueType, ProjectCheck
 from dev.config import GradleProject, IntellijPlugin, Project
@@ -157,7 +163,13 @@ def _expected_xml_fields(project: GradleProject, feature: IntellijPlugin) -> dic
         "vendorEmail": _non_empty_trimmed(feature.vendorEmail),
         "vendorUrl": _non_empty_trimmed(feature.vendorUrl),
         "description": _non_empty_trimmed(feature.pluginDescription) or _non_empty_trimmed(project.description),
-        "changeNotes": _non_empty_trimmed(feature.pluginChangeNotes),
+        "changeNotes": _non_empty_trimmed(
+            resolve_intellij_change_notes(
+                repo_root=project.effective_repo_root,
+                project_version=str(version) if version is not None else None,
+                configured_change_notes=feature.pluginChangeNotes,
+            )
+        ),
         "sinceBuild": _non_empty_trimmed(feature.sinceBuild) or "232",
         "untilBuild": _non_empty_trimmed(feature.untilBuild),
     }
@@ -237,6 +249,32 @@ def _is_40_by_40(width: float | None, height: float | None) -> bool:
     return abs(width - 40.0) < 0.001 and abs(height - 40.0) < 0.001
 
 
+def _standard_change_notes_reason(project: GradleProject) -> str:
+    version = project.version
+    if version is None:
+        return "missing and project version is not set"
+
+    changelog_path = find_markdown_changelog(project.effective_repo_root)
+    expected_heading = f"## {version} - YYYY-MM-DD"
+    if changelog_path is None:
+        return f"missing; expected repo-root CHANGELOG.md with a section headed {expected_heading!r}"
+
+    try:
+        changelog_text = changelog_path.read_text(encoding="utf-8")
+    except OSError as ex:
+        return f"missing; could not read {changelog_path.name}: {ex}"
+
+    section = markdown_changelog_section_for_version(changelog_text, str(version))
+    if section is None:
+        return f"missing; expected {changelog_path.name} section headed {expected_heading!r}"
+
+    rendered = resolve_repo_changelog_change_notes(repo_root=project.effective_repo_root, project_version=str(version))
+    if rendered is None:
+        return f"missing; {changelog_path.name} section {expected_heading!r} has no body"
+
+    return "missing"
+
+
 class IntellijMarketplaceMetadataCheck(ProjectCheck):
     order = 236
 
@@ -307,9 +345,20 @@ class IntellijMarketplaceMetadataCheck(ProjectCheck):
                 _metadata_issue(location, field="pluginDescription", reason="contains placeholder text")
             )
 
-        change_notes = _non_empty_trimmed(feature.pluginChangeNotes)
+        change_notes = _non_empty_trimmed(
+            resolve_repo_changelog_change_notes(
+                repo_root=gradle_project.effective_repo_root,
+                project_version=str(gradle_project.version) if gradle_project.version is not None else None,
+            )
+        )
         if change_notes is None:
-            issues.append(_metadata_issue(location, field="pluginChangeNotes", reason="missing"))
+            issues.append(
+                _metadata_issue(
+                    location,
+                    field="pluginChangeNotes",
+                    reason=_standard_change_notes_reason(gradle_project),
+                )
+            )
         elif _contains_placeholder(change_notes, CHANGE_NOTES_PLACEHOLDERS):
             issues.append(
                 _metadata_issue(location, field="pluginChangeNotes", reason="contains placeholder text")

@@ -38,8 +38,14 @@ def _load_from_temp_root(
         os.chdir(cwd)
 
 
-def _intellij_project_root_clj(*, repo: str | None = "wabbit-corp/demo-ij", plugin_name: str = "Demo Tool") -> str:
+def _intellij_project_root_clj(
+    *,
+    repo: str | None = "wabbit-corp/demo-ij",
+    plugin_name: str = "Demo Tool",
+    plugin_change_notes: str | None = "Initial release.",
+) -> str:
     repo_form = f':repo "{repo}" ' if repo is not None else ""
+    change_notes_form = "" if plugin_change_notes is None else f':pluginChangeNotes "{plugin_change_notes}" '
     return "\n".join(
         [
             '(default-maven-project-group "one.wabbit")',
@@ -56,7 +62,7 @@ def _intellij_project_root_clj(*, repo: str | None = "wabbit-corp/demo-ij", plug
             ':vendorEmail "wabbit@wabbit.one" '
             ':vendorUrl "https://wabbit.one" '
             ':pluginDescription "Applies structured edits inside the IDE." '
-            ':pluginChangeNotes "Initial release." '
+            f"{change_notes_form}"
             ':depends ["com.intellij.modules.platform"])]'
             ")",
             "",
@@ -65,9 +71,24 @@ def _intellij_project_root_clj(*, repo: str | None = "wabbit-corp/demo-ij", plug
 
 
 def test_intellij_marketplace_metadata_check_accepts_valid_plugin_metadata(tmp_path: Path) -> None:
-    config = _load_from_temp_root(tmp_path, _intellij_project_root_clj())
+    config = _load_from_temp_root(tmp_path, _intellij_project_root_clj(plugin_change_notes=None))
     project = config.defined_projects["demo-ij"]
     project.path.mkdir(parents=True, exist_ok=True)
+    (project.effective_repo_root / "CHANGELOG.md").write_text(
+        "\n".join(
+            [
+                "# Changelog",
+                "",
+                "## 0.1.0 - 2026-04-13",
+                "",
+                "Initial public release.",
+                "",
+                "- Adds structured IDE edits.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     issues = IntellijMarketplaceMetadataCheck().check(project.path, project)
 
@@ -80,7 +101,7 @@ def test_intellij_marketplace_metadata_check_reports_invalid_fields(tmp_path: Pa
         _intellij_project_root_clj(repo=None, plugin_name="Demo Plugin")
         .replace(':vendorEmail "wabbit@wabbit.one" ', "")
         .replace(':vendorUrl "https://wabbit.one" ', ':vendorUrl "notaurl" ')
-        .replace(':pluginChangeNotes "Initial release." ', ':pluginChangeNotes "Add change notes here" '),
+        .replace(':pluginChangeNotes "Initial release." ', ""),
     )
     project = config.defined_projects["demo-ij"]
     project.path.mkdir(parents=True, exist_ok=True)
@@ -98,7 +119,10 @@ def test_intellij_marketplace_metadata_check_reports_invalid_fields(tmp_path: Pa
     assert ("pluginName", "must not contain the reserved term 'plugin'") in reasons
     assert ("vendorEmail", "missing") in reasons
     assert ("vendorUrl", "invalid URL 'notaurl'") in reasons
-    assert ("pluginChangeNotes", "contains placeholder text") in reasons
+    assert (
+        "pluginChangeNotes",
+        "missing; expected repo-root CHANGELOG.md with a section headed '## 0.1.0 - YYYY-MM-DD'",
+    ) in reasons
 
 
 def test_intellij_plugin_xml_assets_check_reports_missing_managed_files(tmp_path: Path) -> None:
