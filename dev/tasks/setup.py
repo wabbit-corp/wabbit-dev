@@ -873,12 +873,15 @@ def setup_dotnet_project(ctx: RepoSetupContext, project: DotnetProject, interact
 
 def setup_purescript_project(ctx: RepoSetupContext, project: PurescriptProject, interactive: bool = True) -> None:
     del interactive
-    dev.io.write_text_file(
-        project.path / ".gitignore",
-        merged_gitignore_text(
+    ctx.setup_plan.replace_text(
+        repo_root=project.effective_repo_root,
+        path=project.path / ".gitignore",
+        content=merged_gitignore_text(
             project.path,
             render_template(ctx.gitignore_template) + "\n" + render_template(ctx.purescript_gitignore_template),
         ),
+        category=SetupPlanCategory.METADATA,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
     _write_wabbit_legal_files(ctx, project)
     _write_banner(ctx, project)
@@ -1203,9 +1206,12 @@ def _write_gradle_root_files(
             inline_extra_build_imports=inline_extra_build.imports,
             inline_extra_build_script=inline_extra_build.body,
         )
-        dev.io.write_text_file(
-            root_path / "build.gradle.kts",
-            stamp_managed_text(setup_kotlin.clean_gradle_build_text(build_text)),
+        ctx.setup_plan.replace_text(
+            repo_root=root_path,
+            path=root_path / "build.gradle.kts",
+            content=stamp_managed_text(setup_kotlin.clean_gradle_build_text(build_text)),
+            category=SetupPlanCategory.BUILD,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
         )
 
     settings_text = render_template(
@@ -1226,15 +1232,19 @@ def _write_gradle_root_files(
             if included_project.path.resolve() != root_path.resolve()
         ],
     )
-    dev.io.write_text_file(
-        root_path / "settings.gradle.kts",
-        stamp_managed_text(setup_kotlin.clean_gradle_build_text(settings_text)),
+    ctx.setup_plan.replace_text(
+        repo_root=root_path,
+        path=root_path / "settings.gradle.kts",
+        content=stamp_managed_text(setup_kotlin.clean_gradle_build_text(settings_text)),
+        category=SetupPlanCategory.BUILD,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
 
     if write_wrapper:
-        dev.io.write_text_file(
-            root_path / "gradle.properties",
-            stamp_managed_text(
+        ctx.setup_plan.replace_text(
+            repo_root=root_path,
+            path=root_path / "gradle.properties",
+            content=stamp_managed_text(
                 setup_common.clean_text(
                     render_template(
                         ctx.gradle_properties_template,
@@ -1248,21 +1258,46 @@ def _write_gradle_root_files(
                     )
                 )
             ),
+            category=SetupPlanCategory.BUILD,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
         )
-        dev.io.copy(ctx.repo_template / "gradle-files" / "gradlew", root_path / "gradlew")
-        dev.io.copy(ctx.repo_template / "gradle-files" / "gradlew.bat", root_path / "gradlew.bat")
-        setup_kotlin.mark_executable(root_path / "gradlew")
-        dev.io.copy(
-            ctx.repo_template / "gradle-files" / "scripts" / "build_pages_markdown_site.py",
-            root_path / "scripts" / "build_pages_markdown_site.py",
+        ctx.setup_plan.replace_file(
+            repo_root=root_path,
+            path=root_path / "gradlew",
+            category=SetupPlanCategory.BUILD,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+            apply=lambda: (
+                dev.io.copy(ctx.repo_template / "gradle-files" / "gradlew", root_path / "gradlew"),
+                setup_kotlin.mark_executable(root_path / "gradlew"),
+            ),
         )
-        dev.io.copy(
-            ctx.repo_template / "gradle-files" / "gradle" / "wrapper" / "gradle-wrapper.jar",
-            root_path / "gradle" / "wrapper" / "gradle-wrapper.jar",
+        ctx.setup_plan.copy_file(
+            repo_root=root_path,
+            source_path=ctx.repo_template / "gradle-files" / "gradlew.bat",
+            destination_path=root_path / "gradlew.bat",
+            category=SetupPlanCategory.BUILD,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
         )
-        dev.io.copy(
-            ctx.repo_template / "gradle-files" / "gradle" / "wrapper" / "gradle-wrapper.properties",
-            root_path / "gradle" / "wrapper" / "gradle-wrapper.properties",
+        ctx.setup_plan.copy_file(
+            repo_root=root_path,
+            source_path=ctx.repo_template / "gradle-files" / "scripts" / "build_pages_markdown_site.py",
+            destination_path=root_path / "scripts" / "build_pages_markdown_site.py",
+            category=SetupPlanCategory.DOCS,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
+        ctx.setup_plan.copy_file(
+            repo_root=root_path,
+            source_path=ctx.repo_template / "gradle-files" / "gradle" / "wrapper" / "gradle-wrapper.jar",
+            destination_path=root_path / "gradle" / "wrapper" / "gradle-wrapper.jar",
+            category=SetupPlanCategory.BUILD,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
+        ctx.setup_plan.copy_file(
+            repo_root=root_path,
+            source_path=ctx.repo_template / "gradle-files" / "gradle" / "wrapper" / "gradle-wrapper.properties",
+            destination_path=root_path / "gradle" / "wrapper" / "gradle-wrapper.properties",
+            category=SetupPlanCategory.BUILD,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
         )
 
 
@@ -1345,11 +1380,26 @@ def _write_repo_docs_bundle(
 
     if not plan.needs_repo_workflows or github_repo is None:
         if _file_has_prefix(docs_quality_path, REPO_DOCS_WORKFLOW_MARKER):
-            dev.io.delete_if_exists(docs_quality_path)
+            ctx.setup_plan.delete_path(
+                repo_root=root_path,
+                path=docs_quality_path,
+                category=SetupPlanCategory.WORKFLOW,
+                ownership=SetupPlanOwnership.MANAGED_FILE,
+            )
         if _file_has_prefix(docs_deploy_path, REPO_DOCS_WORKFLOW_MARKER):
-            dev.io.delete_if_exists(docs_deploy_path)
+            ctx.setup_plan.delete_path(
+                repo_root=root_path,
+                path=docs_deploy_path,
+                category=SetupPlanCategory.WORKFLOW,
+                ownership=SetupPlanOwnership.MANAGED_FILE,
+            )
         if _file_has_prefix(builder_script_path, "# Generated by app-wabbit-dev setup. Do not edit by hand."):
-            dev.io.delete_if_exists(builder_script_path)
+            ctx.setup_plan.delete_path(
+                repo_root=root_path,
+                path=builder_script_path,
+                category=SetupPlanCategory.DOCS,
+                ownership=SetupPlanOwnership.MANAGED_FILE,
+            )
         return None
 
     repo_docs_context = _repo_docs_context(
@@ -1360,27 +1410,44 @@ def _write_repo_docs_bundle(
         plan=plan,
     )
 
-    dev.io.write_text_file(
-        docs_quality_path,
-        clean_text(render_template(ctx.repo_docs_quality_workflow_template, **repo_docs_context)),
+    ctx.setup_plan.replace_text(
+        repo_root=root_path,
+        path=docs_quality_path,
+        content=clean_text(render_template(ctx.repo_docs_quality_workflow_template, **repo_docs_context)),
+        category=SetupPlanCategory.WORKFLOW,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
-    dev.io.write_text_file(
-        docs_deploy_path,
-        clean_text(render_template(ctx.repo_docs_deploy_workflow_template, **repo_docs_context)),
+    ctx.setup_plan.replace_text(
+        repo_root=root_path,
+        path=docs_deploy_path,
+        content=clean_text(render_template(ctx.repo_docs_deploy_workflow_template, **repo_docs_context)),
+        category=SetupPlanCategory.WORKFLOW,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
-    dev.io.write_text_file(
-        builder_script_path,
-        stamp_managed_text(
+    ctx.setup_plan.replace_text(
+        repo_root=root_path,
+        path=builder_script_path,
+        content=stamp_managed_text(
             clean_text(render_template(ctx.repo_docs_builder_script_template, **repo_docs_context)),
             comment_prefix="#",
         ),
+        category=SetupPlanCategory.DOCS,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
     if any(entry.kind == "repo-markdown-site" for entry in plan.entries):
-        dev.io.copy(
-            ctx.repo_template / "gradle-files" / "scripts" / "build_pages_markdown_site.py",
-            root_path / "scripts" / "build_pages_markdown_site.py",
+        ctx.setup_plan.copy_file(
+            repo_root=root_path,
+            source_path=ctx.repo_template / "gradle-files" / "scripts" / "build_pages_markdown_site.py",
+            destination_path=root_path / "scripts" / "build_pages_markdown_site.py",
+            category=SetupPlanCategory.DOCS,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
         )
-    dev.io.delete_if_exists(legacy_pages_path)
+    ctx.setup_plan.delete_path(
+        repo_root=root_path,
+        path=legacy_pages_path,
+        category=SetupPlanCategory.WORKFLOW,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
     return str(root_path.resolve())
 
 
