@@ -64,6 +64,23 @@ LOGGER = logging.getLogger(__name__)
 LOCAL_ONLY_SETUP_FILENAMES = frozenset({"settings.local.gradle.kts"})
 WORKSPACE_LOCAL_GRADLE_ROOT_FILENAMES = frozenset({"build.gradle.kts", "settings.gradle.kts"})
 DOTNET_PROJECT_FILE_SUFFIXES = frozenset({".fsproj", ".csproj", ".vbproj"})
+_SETUP_AUTO_COMMIT_GUIDANCE_FILENAMES = frozenset({"AGENTS.md", "kotlin-conventions.md", "python-conventions.md"})
+_SETUP_AUTO_COMMIT_BUILD_FILENAMES = frozenset(
+    {
+        "build.gradle.kts",
+        "settings.gradle.kts",
+        "settings.local.gradle.kts",
+        "gradle.properties",
+        "gradlew",
+        "gradlew.bat",
+        "global.json",
+        "NuGet.config",
+        "Directory.Build.props",
+        "pyproject.toml",
+        "pyrightconfig.json",
+        "mypy.ini",
+    }
+)
 _AUTO_COMMIT_AGENTS_BLOCK_PLACEHOLDER = "__APP_WABBIT_DEV_MANAGED_FACTS__"
 _AUTO_COMMIT_AGENTS_STARTER_TEXT = (
     "# AGENTS\n\n"
@@ -1825,24 +1842,47 @@ def _is_setup_auto_commit_allowed_agents_change(repo: Repo, *, repo_root: Path, 
     return normalized_previous == normalized_current
 
 
+def _is_setup_auto_commit_build_path(relative_path: str) -> bool:
+    normalized_path = relative_path.replace("\\", "/")
+    if normalized_path == CONFIG_FILE:
+        return True
+    path = Path(normalized_path)
+    if path.suffix in DOTNET_PROJECT_FILE_SUFFIXES:
+        return True
+    return path.name in _SETUP_AUTO_COMMIT_BUILD_FILENAMES
+
+
+def _is_setup_auto_commit_guidance_path(relative_path: str) -> bool:
+    return Path(relative_path.replace("\\", "/")).name in _SETUP_AUTO_COMMIT_GUIDANCE_FILENAMES
+
+
+def _setup_auto_commit_message(changed_paths: Sequence[str]) -> str:
+    if any(_is_setup_auto_commit_build_path(path_text) for path_text in changed_paths):
+        return ensure_semver_impact_line("chore: update generated build configuration")
+    if changed_paths and all(_is_setup_auto_commit_guidance_path(path_text) for path_text in changed_paths):
+        return ensure_semver_impact_line("chore: refresh generated repo guidance")
+    return ensure_semver_impact_line("chore: refresh setup-managed files")
+
+
+def _commit_setup_only_changes(
+    repo: Repo,
+    *,
+    changed_paths: Sequence[str],
+) -> None:
+    commit_message = _setup_auto_commit_message(changed_paths)
+    repo.git.add(all=True)
+    _require_commit_policy_passes(repo, commit_message)
+    repo.index.commit(commit_message)
+
+
 def _auto_commit_setup_candidate(
     candidate: SetupAutoCommitRepoCandidate,
     *,
     mode: RepoSetupMode,
     workspace_root: Path,
-    openai_key: str | None,
 ) -> SetupAutoCommitRepoResult:
     representative_project = candidate.representative_project
     representative_project_id = representative_project.project_id
-
-    if openai_key is None:
-        return SetupAutoCommitRepoResult(
-            repo_root=candidate.repo_root,
-            representative_project_id=representative_project_id,
-            status="skipped",
-            message="OpenAI key is required to generate the auto-commit message.",
-            changed_paths=(),
-        )
 
     try:
         repo = Repo(candidate.repo_root)
@@ -1946,13 +1986,7 @@ def _auto_commit_setup_candidate(
                 changed_paths=tuple(disallowed_paths),
             )
 
-        commit_repo_changes(
-            representative_project,
-            repo,
-            openai_key=openai_key,
-            interactive=False,
-            add_files=False,
-        )
+        _commit_setup_only_changes(repo, changed_paths=changed_paths)
 
         remaining_diffs = [
             diff_item
@@ -2001,14 +2035,12 @@ def _auto_commit_setup_repos(
     *,
     mode: RepoSetupMode,
     workspace_root: Path,
-    openai_key: str | None,
 ) -> tuple[SetupAutoCommitRepoResult, ...]:
     return tuple(
         _auto_commit_setup_candidate(
             candidate,
             mode=mode,
             workspace_root=workspace_root,
-            openai_key=openai_key,
         )
         for candidate in candidates
     )
@@ -2470,7 +2502,6 @@ def setup(
                 auto_commit_candidates,
                 mode=mode,
                 workspace_root=workspace_root,
-                openai_key=config.openai_key,
             )
             payload["autoCommit"]["repos"] = [result.to_json() for result in auto_commit_results]
             for result in auto_commit_results:

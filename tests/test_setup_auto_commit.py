@@ -4,8 +4,6 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from dev.generated_files import SETUP_GENERATED_MARKER
 from dev.tasks.setup_common import RepoSetupMode
 
@@ -14,6 +12,10 @@ def _git(repo: Path, *args: str) -> str:
     completed = subprocess.run(("git", *args), cwd=repo, text=True, capture_output=True, check=False)
     assert completed.returncode == 0, completed.stderr
     return completed.stdout
+
+
+def _last_commit_message(repo: Path) -> str:
+    return _git(repo, "log", "-1", "--pretty=%B").strip()
 
 
 def _init_repo(repo: Path) -> None:
@@ -41,10 +43,7 @@ def _demo_project(repo_root: Path) -> SimpleNamespace:
     )
 
 
-def test_auto_commit_setup_only_commits_allowed_tracked_changes(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_auto_commit_setup_only_commits_allowed_tracked_changes(tmp_path: Path) -> None:
     import dev.tasks.setup as setup_module
 
     repo_root = tmp_path / "repo"
@@ -64,22 +63,6 @@ def test_auto_commit_setup_only_commits_allowed_tracked_changes(
         encoding="utf-8",
     )
 
-    commit_calls: list[str] = []
-
-    def fake_commit_repo_changes(
-        project: SimpleNamespace,
-        repo,
-        openai_key: str | None = None,
-        interactive: bool = True,
-        add_files: bool = True,
-    ) -> None:
-        del openai_key, interactive, add_files
-        commit_calls.append(project.name)
-        repo.git.add(all=True)
-        repo.index.commit("Refresh setup-managed files\n\nSemver Impact: NONE")
-
-    monkeypatch.setattr(setup_module, "commit_repo_changes", fake_commit_repo_changes)
-
     candidates = setup_module._collect_setup_auto_commit_candidates(
         [_demo_project(repo_root)],
         workspace_root=repo_root,
@@ -89,20 +72,16 @@ def test_auto_commit_setup_only_commits_allowed_tracked_changes(
         candidates,
         mode=RepoSetupMode.PROD,
         workspace_root=repo_root,
-        openai_key="test-openai-key",
     )
 
-    assert commit_calls == ["demo"]
     assert len(results) == 1
     assert results[0].status == "committed"
     assert set(results[0].changed_paths) == {"build.gradle.kts", "root.clj"}
     assert _git(repo_root, "status", "--short").strip() == ""
+    assert _last_commit_message(repo_root) == "chore: update generated build configuration\n\nSemver Impact: NONE"
 
 
-def test_auto_commit_setup_only_skips_when_untracked_files_exist(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_auto_commit_setup_only_skips_when_untracked_files_exist(tmp_path: Path) -> None:
     import dev.tasks.setup as setup_module
 
     repo_root = tmp_path / "repo"
@@ -120,20 +99,6 @@ def test_auto_commit_setup_only_skips_when_untracked_files_exist(
     )
     (repo_root / "notes.txt").write_text("draft\n", encoding="utf-8")
 
-    commit_calls: list[str] = []
-
-    def fake_commit_repo_changes(
-        project: SimpleNamespace,
-        repo,
-        openai_key: str | None = None,
-        interactive: bool = True,
-        add_files: bool = True,
-    ) -> None:
-        del project, repo, openai_key, interactive, add_files
-        commit_calls.append("called")
-
-    monkeypatch.setattr(setup_module, "commit_repo_changes", fake_commit_repo_changes)
-
     candidates = setup_module._collect_setup_auto_commit_candidates(
         [_demo_project(repo_root)],
         workspace_root=repo_root,
@@ -143,20 +108,15 @@ def test_auto_commit_setup_only_skips_when_untracked_files_exist(
         candidates,
         mode=RepoSetupMode.PROD,
         workspace_root=repo_root,
-        openai_key="test-openai-key",
     )
 
-    assert commit_calls == []
     assert len(results) == 1
     assert results[0].status == "skipped"
     assert results[0].message == "Repo has changes outside the setup-only auto-commit scope."
     assert results[0].changed_paths == ("notes.txt",)
 
 
-def test_auto_commit_setup_only_commits_allowed_untracked_managed_files(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_auto_commit_setup_only_commits_allowed_untracked_managed_files(tmp_path: Path) -> None:
     import dev.tasks.setup as setup_module
 
     repo_root = tmp_path / "repo"
@@ -173,22 +133,6 @@ def test_auto_commit_setup_only_commits_allowed_untracked_managed_files(
         encoding="utf-8",
     )
 
-    commit_calls: list[str] = []
-
-    def fake_commit_repo_changes(
-        project: SimpleNamespace,
-        repo,
-        openai_key: str | None = None,
-        interactive: bool = True,
-        add_files: bool = True,
-    ) -> None:
-        del openai_key, interactive, add_files
-        commit_calls.append(project.name)
-        repo.git.add(all=True)
-        repo.index.commit("Refresh setup-managed files\n\nSemver Impact: NONE")
-
-    monkeypatch.setattr(setup_module, "commit_repo_changes", fake_commit_repo_changes)
-
     candidates = setup_module._collect_setup_auto_commit_candidates(
         [_demo_project(repo_root)],
         workspace_root=repo_root,
@@ -198,20 +142,16 @@ def test_auto_commit_setup_only_commits_allowed_untracked_managed_files(
         candidates,
         mode=RepoSetupMode.LOCAL,
         workspace_root=repo_root,
-        openai_key="test-openai-key",
     )
 
-    assert commit_calls == ["demo"]
     assert len(results) == 1
     assert results[0].status == "committed"
     assert results[0].changed_paths == ("kotlin-conventions.md",)
     assert _git(repo_root, "status", "--short").strip() == ""
+    assert _last_commit_message(repo_root) == "chore: refresh generated repo guidance\n\nSemver Impact: NONE"
 
 
-def test_auto_commit_setup_only_commits_agents_managed_block_updates(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_auto_commit_setup_only_commits_agents_managed_block_updates(tmp_path: Path) -> None:
     import dev.agents_md as agents_md
     import dev.tasks.setup as setup_module
 
@@ -257,22 +197,6 @@ def test_auto_commit_setup_only_commits_agents_managed_block_updates(
         encoding="utf-8",
     )
 
-    commit_calls: list[str] = []
-
-    def fake_commit_repo_changes(
-        project: SimpleNamespace,
-        repo,
-        openai_key: str | None = None,
-        interactive: bool = True,
-        add_files: bool = True,
-    ) -> None:
-        del openai_key, interactive, add_files
-        commit_calls.append(project.name)
-        repo.git.add(all=True)
-        repo.index.commit("Refresh setup-managed files\n\nSemver Impact: NONE")
-
-    monkeypatch.setattr(setup_module, "commit_repo_changes", fake_commit_repo_changes)
-
     candidates = setup_module._collect_setup_auto_commit_candidates(
         [_demo_project(repo_root)],
         workspace_root=repo_root,
@@ -282,20 +206,16 @@ def test_auto_commit_setup_only_commits_agents_managed_block_updates(
         candidates,
         mode=RepoSetupMode.LOCAL,
         workspace_root=repo_root,
-        openai_key="test-openai-key",
     )
 
-    assert commit_calls == ["demo"]
     assert len(results) == 1
     assert results[0].status == "committed"
     assert results[0].changed_paths == ("AGENTS.md",)
     assert _git(repo_root, "status", "--short").strip() == ""
+    assert _last_commit_message(repo_root) == "chore: refresh generated repo guidance\n\nSemver Impact: NONE"
 
 
-def test_auto_commit_setup_only_skips_nonmanaged_tracked_changes(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_auto_commit_setup_only_skips_nonmanaged_tracked_changes(tmp_path: Path) -> None:
     import dev.tasks.setup as setup_module
 
     repo_root = tmp_path / "repo"
@@ -310,20 +230,6 @@ def test_auto_commit_setup_only_skips_nonmanaged_tracked_changes(
 
     (repo_root / "README.md").write_text("# Demo\n\nUpdated.\n", encoding="utf-8")
 
-    commit_calls: list[str] = []
-
-    def fake_commit_repo_changes(
-        project: SimpleNamespace,
-        repo,
-        openai_key: str | None = None,
-        interactive: bool = True,
-        add_files: bool = True,
-    ) -> None:
-        del project, repo, openai_key, interactive, add_files
-        commit_calls.append("called")
-
-    monkeypatch.setattr(setup_module, "commit_repo_changes", fake_commit_repo_changes)
-
     candidates = setup_module._collect_setup_auto_commit_candidates(
         [_demo_project(repo_root)],
         workspace_root=repo_root,
@@ -333,10 +239,8 @@ def test_auto_commit_setup_only_skips_nonmanaged_tracked_changes(
         candidates,
         mode=RepoSetupMode.PROD,
         workspace_root=repo_root,
-        openai_key="test-openai-key",
     )
 
-    assert commit_calls == []
     assert len(results) == 1
     assert results[0].status == "skipped"
     assert results[0].message == "Repo has changes outside the setup-only auto-commit scope."
@@ -345,7 +249,6 @@ def test_auto_commit_setup_only_skips_nonmanaged_tracked_changes(
 
 def test_auto_commit_setup_only_allows_local_mode_for_canonical_managed_changes(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import dev.tasks.setup as setup_module
 
@@ -364,22 +267,6 @@ def test_auto_commit_setup_only_allows_local_mode_for_canonical_managed_changes(
         encoding="utf-8",
     )
 
-    commit_calls: list[str] = []
-
-    def fake_commit_repo_changes(
-        project: SimpleNamespace,
-        repo,
-        openai_key: str | None = None,
-        interactive: bool = True,
-        add_files: bool = True,
-    ) -> None:
-        del openai_key, interactive, add_files
-        commit_calls.append(project.name)
-        repo.git.add(all=True)
-        repo.index.commit("Refresh setup-managed files\n\nSemver Impact: NONE")
-
-    monkeypatch.setattr(setup_module, "commit_repo_changes", fake_commit_repo_changes)
-
     candidates = setup_module._collect_setup_auto_commit_candidates(
         [_demo_project(repo_root)],
         workspace_root=workspace_root,
@@ -389,18 +276,16 @@ def test_auto_commit_setup_only_allows_local_mode_for_canonical_managed_changes(
         candidates,
         mode=RepoSetupMode.LOCAL,
         workspace_root=workspace_root,
-        openai_key="test-openai-key",
     )
 
-    assert commit_calls == ["demo"]
     assert len(results) == 1
     assert results[0].status == "committed"
     assert results[0].changed_paths == ("build.gradle.kts",)
+    assert _last_commit_message(repo_root) == "chore: update generated build configuration\n\nSemver Impact: NONE"
 
 
 def test_auto_commit_setup_only_skips_local_mode_nuget_config_changes(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import dev.tasks.setup as setup_module
 
@@ -426,20 +311,6 @@ def test_auto_commit_setup_only_skips_local_mode_nuget_config_changes(
         encoding="utf-8",
     )
 
-    commit_calls: list[str] = []
-
-    def fake_commit_repo_changes(
-        project: SimpleNamespace,
-        repo,
-        openai_key: str | None = None,
-        interactive: bool = True,
-        add_files: bool = True,
-    ) -> None:
-        del project, repo, openai_key, interactive, add_files
-        commit_calls.append("called")
-
-    monkeypatch.setattr(setup_module, "commit_repo_changes", fake_commit_repo_changes)
-
     candidates = setup_module._collect_setup_auto_commit_candidates(
         [_demo_project(repo_root)],
         workspace_root=workspace_root,
@@ -449,10 +320,8 @@ def test_auto_commit_setup_only_skips_local_mode_nuget_config_changes(
         candidates,
         mode=RepoSetupMode.LOCAL,
         workspace_root=workspace_root,
-        openai_key="test-openai-key",
     )
 
-    assert commit_calls == []
     assert len(results) == 1
     assert results[0].status == "skipped"
     assert results[0].message == "Repo has local-only setup changes after setup."
@@ -461,7 +330,6 @@ def test_auto_commit_setup_only_skips_local_mode_nuget_config_changes(
 
 def test_auto_commit_setup_only_skips_local_mode_cross_repo_dotnet_project_references(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import dev.tasks.setup as setup_module
 
@@ -490,20 +358,6 @@ def test_auto_commit_setup_only_skips_local_mode_cross_repo_dotnet_project_refer
         encoding="utf-8",
     )
 
-    commit_calls: list[str] = []
-
-    def fake_commit_repo_changes(
-        project: SimpleNamespace,
-        repo,
-        openai_key: str | None = None,
-        interactive: bool = True,
-        add_files: bool = True,
-    ) -> None:
-        del project, repo, openai_key, interactive, add_files
-        commit_calls.append("called")
-
-    monkeypatch.setattr(setup_module, "commit_repo_changes", fake_commit_repo_changes)
-
     candidates = setup_module._collect_setup_auto_commit_candidates(
         [_demo_project(repo_root)],
         workspace_root=workspace_root,
@@ -513,10 +367,8 @@ def test_auto_commit_setup_only_skips_local_mode_cross_repo_dotnet_project_refer
         candidates,
         mode=RepoSetupMode.LOCAL,
         workspace_root=workspace_root,
-        openai_key="test-openai-key",
     )
 
-    assert commit_calls == []
     assert len(results) == 1
     assert results[0].status == "skipped"
     assert results[0].message == "Repo has local-only setup changes after setup."
