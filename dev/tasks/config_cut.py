@@ -80,6 +80,11 @@ class ConfigSourceIndex:
     library_group_entries: dict[str, list[int]]
     default_gradle_plugin_entries: list[int]
     default_maven_project_group_entries: list[int]
+    default_company_email_entries: list[int]
+    default_company_legal_name_entries: list[int]
+    default_company_short_name_entries: list[int]
+    code_owner_entries: list[int]
+    git_user_entries: list[int]
     jvm_version_entries: list[int]
     jvm_defaults_entries: list[int]
     python_defaults_entries: list[int]
@@ -189,6 +194,11 @@ def _build_source_index(source_text: str) -> ConfigSourceIndex:
     library_group_entries: dict[str, list[int]] = defaultdict(list)
     default_gradle_plugin_entries: list[int] = []
     default_maven_project_group_entries: list[int] = []
+    default_company_email_entries: list[int] = []
+    default_company_legal_name_entries: list[int] = []
+    default_company_short_name_entries: list[int] = []
+    code_owner_entries: list[int] = []
+    git_user_entries: list[int] = []
     jvm_version_entries: list[int] = []
     jvm_defaults_entries: list[int] = []
     python_defaults_entries: list[int] = []
@@ -209,6 +219,16 @@ def _build_source_index(source_text: str) -> ConfigSourceIndex:
                 default_gradle_plugin_entries.append(entry.index)
             case config_typed.DefaultMavenProjectGroupCommand():
                 default_maven_project_group_entries.append(entry.index)
+            case config_typed.DefaultCompanyEmailCommand():
+                default_company_email_entries.append(entry.index)
+            case config_typed.DefaultCompanyLegalNameCommand():
+                default_company_legal_name_entries.append(entry.index)
+            case config_typed.DefaultCompanyShortNameCommand():
+                default_company_short_name_entries.append(entry.index)
+            case config_typed.CodeOwnerCommand():
+                code_owner_entries.append(entry.index)
+            case config_typed.GitUserCommand():
+                git_user_entries.append(entry.index)
             case config_typed.JvmVersionCommand():
                 jvm_version_entries.append(entry.index)
             case config_typed.JvmDefaultsCommand():
@@ -299,6 +319,11 @@ def _build_source_index(source_text: str) -> ConfigSourceIndex:
         library_group_entries=dict(library_group_entries),
         default_gradle_plugin_entries=default_gradle_plugin_entries,
         default_maven_project_group_entries=default_maven_project_group_entries,
+        default_company_email_entries=default_company_email_entries,
+        default_company_legal_name_entries=default_company_legal_name_entries,
+        default_company_short_name_entries=default_company_short_name_entries,
+        code_owner_entries=code_owner_entries,
+        git_user_entries=git_user_entries,
         jvm_version_entries=jvm_version_entries,
         jvm_defaults_entries=jvm_defaults_entries,
         python_defaults_entries=python_defaults_entries,
@@ -510,6 +535,15 @@ def config_cut(output_path: str, requested_targets: Sequence[str] | None = None)
             return
         include_entry(indices[position - 1])
 
+    def include_last_optional(indices: list[int]) -> None:
+        if not indices:
+            return
+        include_entry(indices[-1])
+
+    def include_all(indices: list[int]) -> None:
+        for index in indices:
+            include_entry(index)
+
     def include_define(name: str, before_index: int) -> None:
         indices = source_index.define_entries.get(name)
         if not indices:
@@ -540,6 +574,35 @@ def config_cut(output_path: str, requested_targets: Sequence[str] | None = None)
                     include_maven_repo(repo_name, consumer_index, allow_after=True)
             case _:
                 raise TypeError("Plugin entry must decode to DefineKotlinPluginCommand")
+
+    def include_final_plugin_definitions() -> None:
+        for indices in source_index.plugin_entries.values():
+            plugin_index = indices[-1]
+            include_entry(plugin_index)
+            plugin_entry = source_index.entry_by_index[plugin_index]
+            match plugin_entry.command:
+                case config_typed.DefineKotlinPluginCommand(repo=repo_name):
+                    if repo_name is not None:
+                        include_maven_repo(repo_name, plugin_index, allow_after=True)
+                case _:
+                    raise TypeError("Plugin entry must decode to DefineKotlinPluginCommand")
+
+    def include_final_library_definitions() -> None:
+        for indices in source_index.library_entries.values():
+            library_index = indices[-1]
+            include_entry(library_index)
+            library_entry = source_index.entry_by_index[library_index]
+            match library_entry.command:
+                case config_typed.DefineMavenLibraryCommand(maven_urn=maven_urn, repo=repo_name):
+                    match maven_urn.version:
+                        case config_typed.VarName(name=var_name):
+                            include_define(var_name, library_index)
+                        case config_typed.Const():
+                            pass
+                    if repo_name is not None:
+                        include_maven_repo(repo_name, library_index, allow_after=True)
+                case _:
+                    raise TypeError("Library entry must decode to DefineMavenLibraryCommand")
 
     def include_gradle_dependency_reference(reference: str, *, before_index: int, project_index: int) -> None:
         if reference.startswith(":") or reference.startswith(".") or reference.startswith("/") or reference.startswith("npm:"):
@@ -678,6 +741,24 @@ def config_cut(output_path: str, requested_targets: Sequence[str] | None = None)
         if project_entry.repo_id is not None:
             selected_projects_by_repo[project_entry.repo_id].add(project_id)
         include_project_support(project_entry)
+
+    has_gradle_project = False
+    for project_id in selected_project_ids:
+        project_entry = source_index.project_entries[project_id]
+        match project_entry.command:
+            case config_typed.GradleProjectCommand():
+                has_gradle_project = True
+            case _:
+                continue
+    if has_gradle_project:
+        include_final_plugin_definitions()
+        include_final_library_definitions()
+
+    include_last_optional(source_index.default_company_email_entries)
+    include_last_optional(source_index.default_company_legal_name_entries)
+    include_last_optional(source_index.default_company_short_name_entries)
+    include_all(source_index.code_owner_entries)
+    include_last_optional(source_index.git_user_entries)
 
     rendered_entries: list[tuple[int, str]] = []
     for index in sorted(included_entry_indices):

@@ -160,3 +160,100 @@ def test_config_cut_includes_local_plugin_project_dependencies(tmp_path: Path) -
 
     subset_config = _load_subset_config(subset_path)
     assert set(subset_config.defined_projects) == {"app", "plugin"}
+
+
+def test_config_cut_preserves_workspace_defaults_needed_by_setup(tmp_path: Path) -> None:
+    from dev.tasks.config_cut import config_cut
+
+    workspace_root = tmp_path / "workspace"
+    _write_workspace(
+        workspace_root,
+        "\n".join(
+            [
+                '(python "pkg" :version "0.1.0")',
+                '(default-company-email "legal@example.com")',
+                '(default-company-legal-name "Old Legal Co")',
+                '(default-company-legal-name "Example Legal Co")',
+                '(default-company-short-name "Example Co")',
+                '(code-owner "Owner One" "owner1@example.com")',
+                '(code-owner "Owner Two" "owner2@example.com")',
+                '(git-user "Example Dev" "dev@example.com")',
+                "",
+            ]
+        ),
+    )
+
+    cwd = Path.cwd()
+    os.chdir(workspace_root)
+    try:
+        subset_path = workspace_root / "workspace-defaults-subset.clj"
+        selected = config_cut(str(subset_path), ["pkg"])
+    finally:
+        os.chdir(cwd)
+
+    assert selected == ["pkg"]
+    subset_text = subset_path.read_text(encoding="utf-8")
+    assert '(default-company-email "legal@example.com")' in subset_text
+    assert '(default-company-legal-name "Old Legal Co")' not in subset_text
+    assert '(default-company-legal-name "Example Legal Co")' in subset_text
+    assert '(default-company-short-name "Example Co")' in subset_text
+    assert '(code-owner "Owner One" "owner1@example.com")' in subset_text
+    assert '(code-owner "Owner Two" "owner2@example.com")' in subset_text
+    assert '(git-user "Example Dev" "dev@example.com")' in subset_text
+
+    subset_config = _load_subset_config(subset_path)
+    assert subset_config.default_company_email == "legal@example.com"
+    assert subset_config.default_company_legal_name == "Example Legal Co"
+    assert subset_config.default_company_short_name == "Example Co"
+    assert subset_config.default_git_user_name == "Example Dev"
+    assert subset_config.default_git_user_email == "dev@example.com"
+    assert len(subset_config.default_code_owners) == 2
+
+
+def test_config_cut_includes_ambient_gradle_plugin_definitions_needed_by_setup(tmp_path: Path) -> None:
+    from dev.tasks.config_cut import config_cut
+
+    workspace_root = tmp_path / "workspace"
+    _write_workspace(
+        workspace_root,
+        "\n".join(
+            [
+                '(define kotlinx-serialization-version "1.9.0")',
+                '(define-kotlin-plugin "kotlin-jvm" "org.jetbrains.kotlin.jvm:2.3.10")',
+                '(define-kotlin-plugin "shadow" "com.gradleup.shadow:8.3.0")',
+                '(define-maven-library "kotlinx-serialization-core" "org.jetbrains.kotlinx:kotlinx-serialization-core:${kotlinx-serialization-version}")',
+                '(default-maven-project-group "one.wabbit")',
+                '('
+                'gradle "demo" '
+                ':version "0.1.0" '
+                ':features [(jvm-kotlin-library)])',
+                "",
+            ]
+        ),
+    )
+
+    cwd = Path.cwd()
+    os.chdir(workspace_root)
+    try:
+        subset_path = workspace_root / "gradle-plugins-subset.clj"
+        selected = config_cut(str(subset_path), ["demo"])
+    finally:
+        os.chdir(cwd)
+
+    assert selected == ["demo"]
+    subset_text = subset_path.read_text(encoding="utf-8")
+    assert '(define kotlinx-serialization-version "1.9.0")' in subset_text
+    assert '(define-kotlin-plugin "kotlin-jvm" "org.jetbrains.kotlin.jvm:2.3.10")' in subset_text
+    assert '(define-kotlin-plugin "shadow" "com.gradleup.shadow:8.3.0")' in subset_text
+    assert (
+        '(define-maven-library "kotlinx-serialization-core" '
+        '"org.jetbrains.kotlinx:kotlinx-serialization-core:${kotlinx-serialization-version}")'
+    ) in subset_text
+
+    subset_config = _load_subset_config(subset_path)
+    assert subset_config.plugins["kotlin-jvm"].version == "2.3.10"
+    assert subset_config.plugins["shadow"].version == "8.3.0"
+    assert (
+        subset_config.libraries["kotlinx-serialization-core"].maven_urn.__str__()
+        == "org.jetbrains.kotlinx:kotlinx-serialization-core:1.9.0"
+    )

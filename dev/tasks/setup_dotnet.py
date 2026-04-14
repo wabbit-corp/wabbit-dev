@@ -497,7 +497,7 @@ def _release_bundle_projects_json(projects: Sequence[DotnetProject], *, root_pat
         {
             "projectId": project.project_id or project.name,
             "assetSlug": (project.project_id or project.name).replace("/", "-"),
-            "sourceDir": str((root_path / "artifacts" / "packages" / (project.project_id or project.name).replace("/", "-")).resolve()),
+            "sourceDir": f"artifacts/packages/{(project.project_id or project.name).replace('/', '-')}",
             "archivePrefix": "packages",
             "bundleKind": "dotnet-nuget",
         }
