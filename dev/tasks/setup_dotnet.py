@@ -29,6 +29,7 @@ from dev.dotnet import (
 from dev.generated_files import is_setup_managed_file, prepend_generated_comment
 from dev.gitignore_files import merged_gitignore_text
 from dev.licenses import canonicalize_license_key
+from dev.setup_plan import SetupPlan, SetupPlanCategory, SetupPlanOwnership
 from dev.tasks.setup_common import RepoSetupMode, clean_text, render_template, write_banner, write_wabbit_legal_files
 
 _F_SHARP_PROJECT_TYPE_GUID = "{F2A71F9B-5D33-465A-A702-920D77279786}"
@@ -72,6 +73,7 @@ _MANAGED_DOTNET_ITEM_NAMES: frozenset[str] = frozenset({"Compile", "PackageRefer
 
 class DotnetSetupContext(Protocol):
     config: Config
+    setup_plan: SetupPlan
     default_company_legal_name: str | None
     default_git_user_name: str | None
     gitignore_template: jinja2.Template
@@ -88,6 +90,10 @@ class DotnetSetupContext(Protocol):
     python_docs_development_template: jinja2.Template
     python_contributing_template: jinja2.Template
     mode: RepoSetupMode
+
+
+def _setup_repo_root(project: Project) -> Path:
+    return project.effective_repo_root.resolve()
 
 
 def _xml_escape(value: str) -> str:
@@ -382,6 +388,7 @@ def _render_project_xml(ctx: DotnetSetupContext, project: DotnetProject) -> str:
 
 
 def _write_dotnet_docs(ctx: DotnetSetupContext, project: DotnetProject) -> None:
+    repo_root = _setup_repo_root(project)
     site_url = dev.repo_docs.repo_docs_site_url(ctx.config, project)
     repository_url = _repo_url(project)
     repository_name = project.github_repo
@@ -405,34 +412,62 @@ def _write_dotnet_docs(ctx: DotnetSetupContext, project: DotnetProject) -> None:
     )
     mkdocs_path = project.path / "mkdocs.yml"
     if not mkdocs_path.exists() or is_setup_managed_file(mkdocs_path):
-        dev.io.write_text_file(mkdocs_path, managed_mkdocs_text)
+        ctx.setup_plan.replace_text(
+            repo_root=repo_root,
+            path=mkdocs_path,
+            content=managed_mkdocs_text,
+            category=SetupPlanCategory.DOCS,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
 
-    dev.io.write_text_file_if_missing(
-        project.path / "docs" / "index.md",
-        clean_text(
+    ctx.setup_plan.ensure_text_if_missing(
+        repo_root=repo_root,
+        path=project.path / "docs" / "index.md",
+        content=clean_text(
             render_template(
                 ctx.python_docs_index_template,
                 project_name=project.name,
                 project_description=project.description or "",
             )
         ),
+        category=SetupPlanCategory.DOCS,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
-    dev.io.write_text_file_if_missing(
-        project.path / "docs" / "installation.md",
-        clean_text(render_template(ctx.python_docs_installation_template, package_name=project.name)),
+    ctx.setup_plan.ensure_text_if_missing(
+        repo_root=repo_root,
+        path=project.path / "docs" / "installation.md",
+        content=clean_text(render_template(ctx.python_docs_installation_template, package_name=project.name)),
+        category=SetupPlanCategory.DOCS,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
-    dev.io.write_text_file_if_missing(
-        project.path / "docs" / "development.md",
-        clean_text(render_template(ctx.python_docs_development_template, project_name=project.name)),
+    ctx.setup_plan.ensure_text_if_missing(
+        repo_root=repo_root,
+        path=project.path / "docs" / "development.md",
+        content=clean_text(render_template(ctx.python_docs_development_template, project_name=project.name)),
+        category=SetupPlanCategory.DOCS,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
-    dev.io.write_text_file_if_missing(
-        project.path / "CONTRIBUTING.md",
-        clean_text(render_template(ctx.python_contributing_template, project_name=project.name)),
+    ctx.setup_plan.ensure_text_if_missing(
+        repo_root=repo_root,
+        path=project.path / "CONTRIBUTING.md",
+        content=clean_text(render_template(ctx.python_contributing_template, project_name=project.name)),
+        category=SetupPlanCategory.GUIDANCE,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
 
     if dev.repo_docs.repo_docs_workflows_owned_by_repo(ctx.config, project):
-        dev.io.delete_if_exists(project.path / ".github" / "workflows" / "docs-quality.yml")
-        dev.io.delete_if_exists(project.path / ".github" / "workflows" / "docs-deploy.yml")
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root,
+            path=project.path / ".github" / "workflows" / "docs-quality.yml",
+            category=SetupPlanCategory.WORKFLOW,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root,
+            path=project.path / ".github" / "workflows" / "docs-deploy.yml",
+            category=SetupPlanCategory.WORKFLOW,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
         return
 
     docs_workflow_context = {
@@ -441,13 +476,19 @@ def _write_dotnet_docs(ctx: DotnetSetupContext, project: DotnetProject) -> None:
         "has_docs_links_script": (project.path / "scripts" / "check_docs_links.py").is_file(),
         "has_docs_snippets_test": (project.path / "tests" / "test_docs_snippets.py").is_file(),
     }
-    dev.io.write_text_file(
-        project.path / ".github" / "workflows" / "docs-quality.yml",
-        clean_text(render_template(ctx.dotnet_docs_quality_workflow_template, **docs_workflow_context)),
+    ctx.setup_plan.replace_text(
+        repo_root=repo_root,
+        path=project.path / ".github" / "workflows" / "docs-quality.yml",
+        content=clean_text(render_template(ctx.dotnet_docs_quality_workflow_template, **docs_workflow_context)),
+        category=SetupPlanCategory.WORKFLOW,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
-    dev.io.write_text_file(
-        project.path / ".github" / "workflows" / "docs-deploy.yml",
-        clean_text(render_template(ctx.dotnet_docs_deploy_workflow_template, **docs_workflow_context)),
+    ctx.setup_plan.replace_text(
+        repo_root=repo_root,
+        path=project.path / ".github" / "workflows" / "docs-deploy.yml",
+        content=clean_text(render_template(ctx.dotnet_docs_deploy_workflow_template, **docs_workflow_context)),
+        category=SetupPlanCategory.WORKFLOW,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
 
 
@@ -476,7 +517,12 @@ def _write_release_workflow(
     workflow_path = root_path / ".github" / "workflows" / "release-publish.yml"
     publish_projects = [project for project in projects if project.publish and project.packable]
     if github_repo is None or not publish_projects:
-        dev.io.delete_if_exists(workflow_path)
+        ctx.setup_plan.delete_path(
+            repo_root=root_path,
+            path=workflow_path,
+            category=SetupPlanCategory.WORKFLOW,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
         return
 
     release_projects = [
@@ -487,9 +533,10 @@ def _write_release_workflow(
         }
         for project in publish_projects
     ]
-    dev.io.write_text_file(
-        workflow_path,
-        clean_text(
+    ctx.setup_plan.replace_text(
+        repo_root=root_path,
+        path=workflow_path,
+        content=clean_text(
             render_template(
                 ctx.dotnet_release_publish_workflow_template,
                 dotnet_version=_DEFAULT_DOTNET_SDK_VERSION,
@@ -498,6 +545,8 @@ def _write_release_workflow(
                 release_bundle_projects_json=_release_bundle_projects_json(publish_projects, root_path=root_path),
             )
         ),
+        category=SetupPlanCategory.WORKFLOW,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
 
 
@@ -574,7 +623,13 @@ def _write_repo_root_files(
     generated_gitignore = clean_text(
         render_template(ctx.gitignore_template) + "\n" + render_template(ctx.dotnet_gitignore_template)
     )
-    dev.io.write_text_file(root_path / ".gitignore", merged_gitignore_text(root_path, generated_gitignore))
+    ctx.setup_plan.replace_text(
+        repo_root=root_path,
+        path=root_path / ".gitignore",
+        content=merged_gitignore_text(root_path, generated_gitignore),
+        category=SetupPlanCategory.METADATA,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
 
     global_json = clean_text(
         render_template(
@@ -582,7 +637,13 @@ def _write_repo_root_files(
             dotnet_sdk_version=repo_definition.dotnet_sdk_version or _DEFAULT_DOTNET_SDK_VERSION,
         )
     )
-    dev.io.write_text_file(root_path / "global.json", global_json)
+    ctx.setup_plan.replace_text(
+        repo_root=root_path,
+        path=root_path / "global.json",
+        content=global_json,
+        category=SetupPlanCategory.BUILD,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
 
     local_feed_path: str | None
     if ctx.mode == RepoSetupMode.LOCAL:
@@ -601,7 +662,15 @@ def _write_repo_root_files(
             "  dev setup <project-or-repo>",
         ],
     )
-    dev.io.write_text_file(root_path / "NuGet.config", nuget_config_text)
+    ctx.setup_plan.replace_text(
+        repo_root=root_path,
+        path=root_path / "NuGet.config",
+        content=nuget_config_text,
+        category=SetupPlanCategory.BUILD,
+        ownership=(
+            SetupPlanOwnership.LOCAL_ONLY if ctx.mode == RepoSetupMode.LOCAL else SetupPlanOwnership.MANAGED_FILE
+        ),
+    )
 
     directory_build_props = _generated_xml(
         render_template(
@@ -616,11 +685,23 @@ def _write_repo_root_files(
             "  dev setup <project-or-repo>",
         ],
     )
-    dev.io.write_text_file(root_path / "Directory.Build.props", directory_build_props)
+    ctx.setup_plan.replace_text(
+        repo_root=root_path,
+        path=root_path / "Directory.Build.props",
+        content=directory_build_props,
+        category=SetupPlanCategory.BUILD,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
 
     solution_name = repo_definition.solution_name or repo_definition.repo_id
     solution_path = root_path / f"{solution_name}.sln"
-    dev.io.write_text_file(solution_path, _render_solution_text(repo_definition, projects))
+    ctx.setup_plan.replace_text(
+        repo_root=root_path,
+        path=solution_path,
+        content=_render_solution_text(repo_definition, projects),
+        category=SetupPlanCategory.BUILD,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
 
 
 def setup_dotnet_repo_root(
@@ -641,13 +722,25 @@ def setup_dotnet_project(ctx: DotnetSetupContext, project: DotnetProject) -> Non
     generated_gitignore = clean_text(
         render_template(ctx.gitignore_template) + "\n" + render_template(ctx.dotnet_gitignore_template)
     )
-    dev.io.write_text_file(project.path / ".gitignore", merged_gitignore_text(project.path, generated_gitignore))
+    ctx.setup_plan.replace_text(
+        repo_root=_setup_repo_root(project),
+        path=project.path / ".gitignore",
+        content=merged_gitignore_text(project.path, generated_gitignore),
+        category=SetupPlanCategory.METADATA,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
 
     write_wabbit_legal_files(ctx, project)
     write_banner(ctx, project)
 
     project_file_path = dotnet_project_file(project)
-    dev.io.write_text_file(project_file_path, _render_project_xml(ctx, project))
+    ctx.setup_plan.replace_text(
+        repo_root=_setup_repo_root(project),
+        path=project_file_path,
+        content=_render_project_xml(ctx, project),
+        category=SetupPlanCategory.BUILD,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
 
     if project.docs_enabled and project.docs_system == "mkdocs":
         _write_dotnet_docs(ctx, project)

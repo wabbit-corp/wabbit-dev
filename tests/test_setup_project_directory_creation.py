@@ -11,6 +11,7 @@ import jinja2
 import pytest
 from git import Repo
 
+from dev.setup_plan import SetupPlan
 from dev.template_assets import repo_template_path, repo_template_root
 
 if TYPE_CHECKING:
@@ -1211,7 +1212,7 @@ def test_targeted_prod_setup_omits_cross_repo_gradle_projects_from_root_settings
         return ["jeeves/api", "kotlin-dotenv-parser", "jeeves/server"]
 
     def fake_create_repo_setup_context(_config: Config, mode: object) -> object:
-        return SimpleNamespace(config=config, mode=mode)
+        return SimpleNamespace(config=config, mode=mode, setup_plan=SetupPlan())
 
     monkeypatch.setattr(setup_module, "load_config", fake_load_config)
     monkeypatch.setattr(setup_module, "toposort_projects", fake_toposort_projects)
@@ -1288,7 +1289,9 @@ def test_setup_prod_removes_stale_gradle_local_overlay_from_selected_repo_root(
     monkeypatch.setattr(setup_module, "load_config", lambda: config)
     monkeypatch.setattr(setup_module, "toposort_projects", lambda _projects, target_project=None: ["kotlin-web-common"])
     monkeypatch.setattr(
-        setup_module, "create_repo_setup_context", lambda _config, mode: SimpleNamespace(config=config, mode=mode)
+        setup_module,
+        "create_repo_setup_context",
+        lambda _config, mode: SimpleNamespace(config=config, mode=mode, setup_plan=SetupPlan()),
     )
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
@@ -1353,7 +1356,7 @@ def test_setup_treats_empty_projects_list_as_all_projects(tmp_path: Path, monkey
     monkeypatch.setattr(
         setup_module,
         "create_repo_setup_context",
-        lambda _config, mode: SimpleNamespace(config=config, mode=mode),
+        lambda _config, mode: SimpleNamespace(config=config, mode=mode, setup_plan=SetupPlan()),
     )
     monkeypatch.setattr(setup_module, "_write_repo_metadata_files", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
@@ -1466,7 +1469,7 @@ def test_setup_writes_repo_root_legal_docs_for_repo_managed_gradle_projects(
     monkeypatch.setattr(
         setup_module,
         "create_repo_setup_context",
-        lambda _config, mode: SimpleNamespace(config=config, mode=mode),
+        lambda _config, mode: SimpleNamespace(config=config, mode=mode, setup_plan=SetupPlan()),
     )
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
@@ -1565,7 +1568,7 @@ def test_setup_writes_repo_root_license_when_repo_managed_gradle_project_license
     monkeypatch.setattr(
         setup_module,
         "create_repo_setup_context",
-        lambda _config, mode: SimpleNamespace(config=config, mode=mode),
+        lambda _config, mode: SimpleNamespace(config=config, mode=mode, setup_plan=SetupPlan()),
     )
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
@@ -1667,7 +1670,7 @@ def test_setup_repo_root_license_keeps_shared_test_license_when_some_repo_projec
     monkeypatch.setattr(
         setup_module,
         "create_repo_setup_context",
-        lambda _config, mode: SimpleNamespace(config=config, mode=mode),
+        lambda _config, mode: SimpleNamespace(config=config, mode=mode, setup_plan=SetupPlan()),
     )
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "setup_project", lambda *_args, **_kwargs: None)
@@ -1708,6 +1711,7 @@ def test_cleanup_test_license_outputs_keeps_current_canonical_license_file(tmp_p
     legacy.write_text("legacy\n", encoding="utf-8")
 
     setup_common_module._cleanup_test_license_outputs(
+        SimpleNamespace(setup_plan=SetupPlan()),
         project,
         keep_license="LicenseRef-Wabbit-Public-Test-License-1.1",
     )
@@ -1756,7 +1760,7 @@ def test_setup_does_not_commit_or_push_changes(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(
         setup_module,
         "create_repo_setup_context",
-        lambda _config, mode: SimpleNamespace(config=config, mode=mode),
+        lambda _config, mode: SimpleNamespace(config=config, mode=mode, setup_plan=SetupPlan()),
     )
     monkeypatch.setattr(setup_module, "_write_gradle_root_files", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(setup_module, "_write_gradle_local_overlay", lambda *_args, **_kwargs: None)
@@ -1827,7 +1831,7 @@ def test_targeted_local_setup_does_not_write_workspace_root_files(
     monkeypatch.setattr(
         setup_module,
         "create_repo_setup_context",
-        lambda _config, mode: SimpleNamespace(config=config, mode=mode),
+        lambda _config, mode: SimpleNamespace(config=config, mode=mode, setup_plan=SetupPlan()),
     )
     monkeypatch.setattr(
         setup_module,

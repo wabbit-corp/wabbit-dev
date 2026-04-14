@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import jinja2
 from mu.parser import parse
 
+from dev.setup_plan import SetupPlan
+
 
 def test_setup_dotnet_project_preserves_fsharp_compile_order_and_writes_repo_root(tmp_path: Path) -> None:
     import dev.tasks.setup_dotnet as setup_dotnet
@@ -77,6 +79,7 @@ def test_setup_dotnet_project_preserves_fsharp_compile_order_and_writes_repo_roo
         python_docs_development_template=jinja2.Template(""),
         python_contributing_template=jinja2.Template(""),
         mode=RepoSetupMode.LOCAL,
+        setup_plan=SetupPlan(),
     )
 
     setup_dotnet.write_wabbit_legal_files = lambda _ctx, _project: None
@@ -172,6 +175,7 @@ def test_setup_dotnet_project_is_idempotent_for_managed_package_metadata(tmp_pat
         python_docs_development_template=jinja2.Template(""),
         python_contributing_template=jinja2.Template(""),
         mode=RepoSetupMode.LOCAL,
+        setup_plan=SetupPlan(),
     )
 
     setup_dotnet.write_wabbit_legal_files = lambda _ctx, _project: None
@@ -308,6 +312,7 @@ def test_setup_dotnet_test_project_uses_relative_project_reference_for_sibling_l
         python_docs_development_template=jinja2.Template(""),
         python_contributing_template=jinja2.Template(""),
         mode=RepoSetupMode.LOCAL,
+        setup_plan=SetupPlan(),
     )
 
     setup_dotnet.write_wabbit_legal_files = lambda _ctx, _project: None
@@ -434,6 +439,7 @@ def test_setup_dotnet_local_mode_uses_cross_repo_project_reference_when_dependen
         python_docs_development_template=jinja2.Template(""),
         python_contributing_template=jinja2.Template(""),
         mode=RepoSetupMode.LOCAL,
+        setup_plan=SetupPlan(),
     )
 
     setup_dotnet.write_wabbit_legal_files = lambda _ctx, _project: None
@@ -529,6 +535,7 @@ def test_setup_dotnet_project_preserves_unmanaged_xml_sections(tmp_path: Path) -
         python_docs_development_template=jinja2.Template(""),
         python_contributing_template=jinja2.Template(""),
         mode=RepoSetupMode.LOCAL,
+        setup_plan=SetupPlan(),
     )
 
     setup_dotnet.write_wabbit_legal_files = lambda _ctx, _project: None

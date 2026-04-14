@@ -99,6 +99,8 @@ class SetupPlan:
         category: SetupPlanCategory,
         ownership: SetupPlanOwnership,
     ) -> bool:
+        if not dev.io.write_text_file_if_missing(path, content):
+            return False
         self.record(
             kind=SetupPlanKind.ENSURE_TEXT_IF_MISSING,
             repo_root=repo_root,
@@ -106,7 +108,7 @@ class SetupPlan:
             category=category,
             ownership=ownership,
         )
-        return dev.io.write_text_file_if_missing(path, content)
+        return True
 
     def replace_file(
         self,
@@ -153,6 +155,8 @@ class SetupPlan:
         category: SetupPlanCategory,
         ownership: SetupPlanOwnership,
     ) -> None:
+        if not path.exists():
+            return
         self.record(
             kind=SetupPlanKind.DELETE_PATH,
             repo_root=repo_root,
@@ -171,6 +175,8 @@ class SetupPlan:
         category: SetupPlanCategory,
         ownership: SetupPlanOwnership,
     ) -> bool:
+        if not dev.io.merge_word_list_file(path, words):
+            return False
         self.record(
             kind=SetupPlanKind.MERGE_WORD_LIST,
             repo_root=repo_root,
@@ -178,7 +184,7 @@ class SetupPlan:
             category=category,
             ownership=ownership,
         )
-        return dev.io.merge_word_list_file(path, words)
+        return True
 
     def planned_paths_for_repo(
         self,

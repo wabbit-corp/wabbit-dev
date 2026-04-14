@@ -27,6 +27,7 @@ from dev.python_sdist_policy import (
     python_sdist_exclude_patterns,
     python_sdist_include_entries,
 )
+from dev.setup_plan import SetupPlan, SetupPlanCategory, SetupPlanOwnership
 from dev.tasks.setup_common import (
     clean_text,
     render_template,
@@ -43,6 +44,7 @@ _YAML_TOP_LEVEL_KEY_RE = re.compile(r"^([A-Za-z0-9_-]+)\s*:")
 class PythonSetupContext(Protocol):
     config: Config
     repo_template: Path
+    setup_plan: SetupPlan
     licenses: dict[str, str]
     coc: jinja2.Template
     cla: jinja2.Template
@@ -62,6 +64,10 @@ class PythonSetupContext(Protocol):
     python_release_publish_workflow_template: jinja2.Template
     python_codespell_ignore_words_template: jinja2.Template
     python_build_executable_template: jinja2.Template
+
+
+def _setup_repo_root(project: PythonProject) -> Path:
+    return project.effective_repo_root.resolve()
 
 
 def _github_repo_url(repo_full_name: str) -> str:
@@ -908,6 +914,7 @@ def _append_mkdocs_extra_yaml(project_path: Path, base_text: str) -> str:
 
 
 def _write_python_docs_files(ctx: PythonSetupContext, project: PythonProject) -> None:
+    repo_root = _setup_repo_root(project)
     repository_url = _python_repository_url(project)
     repository_name = _python_repository_name(project)
     site_name = project.name
@@ -931,42 +938,60 @@ def _write_python_docs_files(ctx: PythonSetupContext, project: PythonProject) ->
     )
     mkdocs_path = project.path / "mkdocs.yml"
     if not mkdocs_path.exists() or is_setup_managed_file(mkdocs_path):
-        dev.io.write_text_file(mkdocs_path, managed_mkdocs_text)
+        ctx.setup_plan.replace_text(
+            repo_root=repo_root,
+            path=mkdocs_path,
+            content=managed_mkdocs_text,
+            category=SetupPlanCategory.DOCS,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
     elif (project.path / "mkdocs.extra.yml").is_file():
         warning(
             f"{mkdocs_path} is not managed by setup; mkdocs.extra.yml will be ignored until mkdocs.yml is regenerated"
         )
-    dev.io.write_text_file_if_missing(
-        project.path / "docs" / "index.md",
-        clean_text(
+    ctx.setup_plan.ensure_text_if_missing(
+        repo_root=repo_root,
+        path=project.path / "docs" / "index.md",
+        content=clean_text(
             render_template(
                 ctx.python_docs_index_template,
                 project_name=project.name,
                 project_description=project.description or "",
             )
         ),
+        category=SetupPlanCategory.DOCS,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
-    dev.io.write_text_file_if_missing(
-        project.path / "docs" / "installation.md",
-        clean_text(
+    ctx.setup_plan.ensure_text_if_missing(
+        repo_root=repo_root,
+        path=project.path / "docs" / "installation.md",
+        content=clean_text(
             render_template(
                 ctx.python_docs_installation_template,
                 package_name=project.name,
             )
         ),
+        category=SetupPlanCategory.DOCS,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
-    dev.io.write_text_file_if_missing(
-        project.path / "docs" / "development.md",
-        clean_text(
+    ctx.setup_plan.ensure_text_if_missing(
+        repo_root=repo_root,
+        path=project.path / "docs" / "development.md",
+        content=clean_text(
             render_template(
                 ctx.python_docs_development_template,
                 project_name=project.name,
             )
         ),
+        category=SetupPlanCategory.DOCS,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
-    dev.io.write_text_file_if_missing(
-        project.path / "CONTRIBUTING.md",
-        clean_text(render_template(ctx.python_contributing_template, project_name=project.name)),
+    ctx.setup_plan.ensure_text_if_missing(
+        repo_root=repo_root,
+        path=project.path / "CONTRIBUTING.md",
+        content=clean_text(render_template(ctx.python_contributing_template, project_name=project.name)),
+        category=SetupPlanCategory.GUIDANCE,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
 
     codespell_words = [
@@ -974,23 +999,42 @@ def _write_python_docs_files(ctx: PythonSetupContext, project: PythonProject) ->
         for line in render_template(ctx.python_codespell_ignore_words_template).splitlines()
         if line.strip() and not line.strip().startswith("#")
     ]
-    dev.io.merge_word_list_file(
-        project.path / ".codespell-ignore-words.txt",
-        codespell_words,
+    ctx.setup_plan.merge_word_list(
+        repo_root=repo_root,
+        path=project.path / ".codespell-ignore-words.txt",
+        words=codespell_words,
+        category=SetupPlanCategory.METADATA,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
 
     if not dev.repo_docs.repo_docs_workflows_owned_by_repo(ctx.config, project):
-        dev.io.write_text_file(
-            project.path / ".github" / "workflows" / "docs-quality.yml",
-            clean_text(render_template(ctx.python_docs_quality_workflow_template, **docs_workflow_context)),
+        ctx.setup_plan.replace_text(
+            repo_root=repo_root,
+            path=project.path / ".github" / "workflows" / "docs-quality.yml",
+            content=clean_text(render_template(ctx.python_docs_quality_workflow_template, **docs_workflow_context)),
+            category=SetupPlanCategory.WORKFLOW,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
         )
-        dev.io.write_text_file(
-            project.path / ".github" / "workflows" / "docs-deploy.yml",
-            clean_text(render_template(ctx.python_docs_deploy_workflow_template)),
+        ctx.setup_plan.replace_text(
+            repo_root=repo_root,
+            path=project.path / ".github" / "workflows" / "docs-deploy.yml",
+            content=clean_text(render_template(ctx.python_docs_deploy_workflow_template)),
+            category=SetupPlanCategory.WORKFLOW,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
         )
     else:
-        dev.io.delete_if_exists(project.path / ".github" / "workflows" / "docs-quality.yml")
-        dev.io.delete_if_exists(project.path / ".github" / "workflows" / "docs-deploy.yml")
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root,
+            path=project.path / ".github" / "workflows" / "docs-quality.yml",
+            category=SetupPlanCategory.WORKFLOW,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root,
+            path=project.path / ".github" / "workflows" / "docs-deploy.yml",
+            category=SetupPlanCategory.WORKFLOW,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
 
 
 def _write_python_application_files(ctx: PythonSetupContext, project: PythonProject) -> None:
@@ -998,42 +1042,57 @@ def _write_python_application_files(ctx: PythonSetupContext, project: PythonProj
     if application is None:
         return
 
-    dev.io.write_text_file(
-        project.path / "scripts" / "build_executable.py",
-        clean_text(
+    ctx.setup_plan.replace_text(
+        repo_root=_setup_repo_root(project),
+        path=project.path / "scripts" / "build_executable.py",
+        content=clean_text(
             render_template(
                 ctx.python_build_executable_template,
                 app_name=application.script,
                 entrypoint_path=application.path,
             )
         ),
+        category=SetupPlanCategory.BUILD,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
 
 
 def _write_python_release_workflow(ctx: PythonSetupContext, project: PythonProject) -> None:
     release_workflow_path = project.path / ".github" / "workflows" / "release-publish.yml"
     if _supports_python_release_workflow(project):
-        dev.io.write_text_file(
-            release_workflow_path,
-            clean_text(
+        ctx.setup_plan.replace_text(
+            repo_root=_setup_repo_root(project),
+            path=release_workflow_path,
+            content=clean_text(
                 render_template(
                     ctx.python_release_publish_workflow_template,
                     release_bundle_projects_json=_python_release_bundle_projects_json(project),
                 )
             ),
+            category=SetupPlanCategory.WORKFLOW,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
         )
         return
 
-    dev.io.delete_if_exists(release_workflow_path)
+    ctx.setup_plan.delete_path(
+        repo_root=_setup_repo_root(project),
+        path=release_workflow_path,
+        category=SetupPlanCategory.WORKFLOW,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
 
 
 def setup_python_project(ctx: PythonSetupContext, project: PythonProject, interactive: bool = True) -> None:
+    repo_root = _setup_repo_root(project)
     generated_gitignore = clean_text(
         render_template(ctx.gitignore_template) + "\n" + render_template(ctx.python_gitignore_template)
     )
-    dev.io.write_text_file(
-        project.path / ".gitignore",
-        merged_gitignore_text(project.path, generated_gitignore),
+    ctx.setup_plan.replace_text(
+        repo_root=repo_root,
+        path=project.path / ".gitignore",
+        content=merged_gitignore_text(project.path, generated_gitignore),
+        category=SetupPlanCategory.METADATA,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
 
     write_wabbit_legal_files(ctx, project)
@@ -1044,28 +1103,51 @@ def setup_python_project(ctx: PythonSetupContext, project: PythonProject, intera
         project.dependencies,
         interactive=interactive,
         project_name=project.name,
+        setup_plan=ctx.setup_plan,
+        repo_root=repo_root,
     )
     write_requirements_file(
         project.path / "requirements-dev.txt",
         _python_generated_dev_dependencies(project),
         interactive=interactive,
         project_name=project.name,
+        setup_plan=ctx.setup_plan,
+        repo_root=repo_root,
     )
 
     pyproject_path = project.path / "pyproject.toml"
     pyproject_text = _render_managed_pyproject_text(ctx, project)
-    dev.io.write_text_file(pyproject_path, pyproject_text)
+    ctx.setup_plan.replace_text(
+        repo_root=repo_root,
+        path=pyproject_path,
+        content=pyproject_text,
+        category=SetupPlanCategory.BUILD,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
 
-    dev.io.write_text_file_if_missing(
-        project.path / "pyrightconfig.json",
-        clean_text(render_python_pyrightconfig(ctx, project)),
+    ctx.setup_plan.ensure_text_if_missing(
+        repo_root=repo_root,
+        path=project.path / "pyrightconfig.json",
+        content=clean_text(render_python_pyrightconfig(ctx, project)),
+        category=SetupPlanCategory.BUILD,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
     )
 
     if project.docs_enabled and project.docs_system == "mkdocs":
         _write_python_docs_files(ctx, project)
     else:
-        dev.io.delete_if_exists(project.path / ".github" / "workflows" / "docs-quality.yml")
-        dev.io.delete_if_exists(project.path / ".github" / "workflows" / "docs-deploy.yml")
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root,
+            path=project.path / ".github" / "workflows" / "docs-quality.yml",
+            category=SetupPlanCategory.WORKFLOW,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
+        ctx.setup_plan.delete_path(
+            repo_root=repo_root,
+            path=project.path / ".github" / "workflows" / "docs-deploy.yml",
+            category=SetupPlanCategory.WORKFLOW,
+            ownership=SetupPlanOwnership.MANAGED_FILE,
+        )
     _write_python_release_workflow(ctx, project)
     _write_python_application_files(ctx, project)
 

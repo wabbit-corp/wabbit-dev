@@ -89,7 +89,15 @@ def clean_text(text: str) -> str:
     return text
 
 
-def write_requirements_file(path: Path, deps: list[str], *, interactive: bool, project_name: str) -> None:
+def write_requirements_file(
+    path: Path,
+    deps: list[str],
+    *,
+    interactive: bool,
+    project_name: str,
+    setup_plan: SetupPlan | None = None,
+    repo_root: Path | None = None,
+) -> None:
     del interactive
     if not deps:
         if path.exists():
@@ -106,7 +114,18 @@ def write_requirements_file(path: Path, deps: list[str], *, interactive: bool, p
             "Direct edits to this file will be overwritten the next time setup runs.",
         ],
     )
-    dev.io.write_text_file(path, clean_text(requirements_text))
+    cleaned_text = clean_text(requirements_text)
+    if setup_plan is None or repo_root is None:
+        dev.io.write_text_file(path, cleaned_text)
+        return
+
+    setup_plan.replace_text(
+        repo_root=repo_root,
+        path=path,
+        content=cleaned_text,
+        category=SetupPlanCategory.BUILD,
+        ownership=SetupPlanOwnership.MANAGED_FILE,
+    )
 
 
 def _legal_contact_email(ctx: CommonSetupContext) -> str:
