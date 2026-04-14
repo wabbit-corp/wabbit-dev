@@ -779,8 +779,20 @@ def _simple_results_command_state(
     )
 
 
-def _registry_status(current_version: str | None, registry_name: str, package: str, latest: str | None, versions: tuple[str, ...], diagnostics: tuple[str, ...]) -> RegistryStatusState:
+def _registry_status(
+    current_version: str | None,
+    registry_name: str,
+    package: str,
+    latest: str | None,
+    versions: tuple[str, ...],
+    verified: bool | None,
+    diagnostics: tuple[str, ...],
+) -> RegistryStatusState:
     if current_version is None:
+        status = "unknown"
+    elif verified is False:
+        status = "error"
+    elif verified is None:
         status = "unknown"
     elif current_version in versions:
         status = "ok"
@@ -822,6 +834,7 @@ def _release_project_state(report: ProjectVersionReport, *, checked_at: datetime
             registry.package,
             registry.latest,
             registry.versions,
+            registry.verified,
             tuple(f"{diagnostic.source}: {diagnostic.message}" for diagnostic in registry.diagnostics),
         )
         for registry in report.registries

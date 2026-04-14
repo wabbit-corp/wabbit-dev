@@ -5,6 +5,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dev.config import Config, DotnetProject, GradleProject, Project, PythonProject, load_config
 from dev.discoverability import require_project
@@ -49,6 +50,7 @@ class RegistrySnapshot:
     package: str
     latest: str | None
     versions: tuple[str, ...]
+    verified: bool | None = True
     diagnostics: tuple[VersionDiagnostic, ...] = ()
 
     def to_payload(self) -> JSONObject:
@@ -57,6 +59,7 @@ class RegistrySnapshot:
             "package": self.package,
             "latest": self.latest,
             "versions": list(self.versions),
+            "verified": self.verified,
         }
 
 
@@ -492,6 +495,105 @@ def _fetch_pypi_project_metadata(project_name: str) -> PyPiProjectMetadata:
     return PyPiProjectMetadata.parse(response.json())
 
 
+def _normalized_github_repo_id(url: str) -> str | None:
+    value = url.strip()
+    if not value:
+        return None
+    if value.startswith("git+"):
+        value = value[4:]
+    parsed = urlparse(value if "://" in value else f"https://{value}")
+    host = parsed.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if host != "github.com":
+        return None
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) < 2:
+        return None
+    owner = path_parts[0].strip().lower()
+    repo = path_parts[1].strip().removesuffix(".git").lower()
+    if not owner or not repo:
+        return None
+    return f"{owner}/{repo}"
+
+
+def _expected_python_repo_ids(project: PythonProject) -> tuple[str, ...]:
+    values: set[str] = set()
+    github_repo = project.github_repo
+    if github_repo is not None and github_repo.strip():
+        values.add(github_repo.strip().lower())
+    repository = project.repository
+    if repository is not None:
+        normalized = _normalized_github_repo_id(repository)
+        if normalized is not None:
+            values.add(normalized)
+    homepage = project.homepage
+    if homepage is not None:
+        normalized = _normalized_github_repo_id(homepage)
+        if normalized is not None:
+            values.add(normalized)
+    return tuple(sorted(values))
+
+
+def _pypi_candidate_repo_ids(metadata: PyPiProjectMetadata) -> tuple[str, ...]:
+    candidates: set[str] = set()
+    home_page = metadata.home_page
+    if home_page is not None:
+        normalized = _normalized_github_repo_id(home_page)
+        if normalized is not None:
+            candidates.add(normalized)
+    project_url = metadata.project_url
+    if project_url is not None:
+        normalized = _normalized_github_repo_id(project_url)
+        if normalized is not None:
+            candidates.add(normalized)
+    for value in metadata.project_urls.values():
+        normalized = _normalized_github_repo_id(value)
+        if normalized is not None:
+            candidates.add(normalized)
+    return tuple(sorted(candidates))
+
+
+def _pypi_registry_verification(
+    project: PythonProject,
+    metadata: PyPiProjectMetadata,
+) -> tuple[bool | None, tuple[VersionDiagnostic, ...]]:
+    expected_repo_ids = _expected_python_repo_ids(project)
+    if not expected_repo_ids:
+        return None, ()
+
+    candidate_repo_ids = _pypi_candidate_repo_ids(metadata)
+    if not candidate_repo_ids:
+        return (
+            None,
+            (
+                VersionDiagnostic(
+                    source="pypi",
+                    message=(
+                        f"could not verify PyPI package ownership for {project.name}: "
+                        f"expected GitHub repo {' or '.join(expected_repo_ids)}, but PyPI metadata exposes no GitHub repository URL"
+                    ),
+                ),
+            ),
+        )
+
+    if any(candidate in expected_repo_ids for candidate in candidate_repo_ids):
+        return True, ()
+
+    return (
+        False,
+        (
+            VersionDiagnostic(
+                source="pypi",
+                message=(
+                    f"PyPI package metadata points to {' or '.join(candidate_repo_ids)}, "
+                    f"expected {' or '.join(expected_repo_ids)}"
+                ),
+            ),
+        ),
+    )
+
+
 def _maven_central_registry(project: GradleProject) -> RegistrySnapshot:
     package = f"{project.group_name}:{project.effective_artifact_id}"
     try:
@@ -533,11 +635,14 @@ def _pypi_registry(project: PythonProject) -> RegistrySnapshot:
                 ),
             ),
         )
+    verified, verification_diagnostics = _pypi_registry_verification(project, metadata)
     return RegistrySnapshot(
         name="pypi",
         package=project.name,
         latest=metadata.latest_version,
         versions=tuple(metadata.releases),
+        verified=verified,
+        diagnostics=verification_diagnostics,
     )
 
 
@@ -757,6 +862,8 @@ def build_project_version_report(project_id: str, config: Config) -> ProjectVers
     publish_target, registries, registry_diagnostics = _registry_snapshots(project, config)
     diagnostics.extend(registry_diagnostics)
     for registry in registries:
+        if registry.name == "pypi" and registry.verified is not True:
+            continue
         for version in registry.versions:
             builder = builders.setdefault(version, _VersionBuilder(version=version))
             builder.registries.add(registry.name)

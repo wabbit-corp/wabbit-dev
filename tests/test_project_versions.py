@@ -155,7 +155,11 @@ def test_project_versions_json_merges_current_tags_and_pypi(
     monkeypatch.setattr(
         project_versions_task,
         "_fetch_pypi_project_metadata",
-        lambda project_name: PyPiProjectMetadata(latest_version="0.3.0", releases=["0.1.0", "0.3.0"]),
+        lambda project_name: PyPiProjectMetadata(
+            latest_version="0.3.0",
+            releases=["0.1.0", "0.3.0"],
+            project_urls={"Repository": "https://github.com/wabbit-corp/alpha"},
+        ),
     )
 
     result = project_versions_task.show_project_versions(["alpha"], config=config, json_output=True)
@@ -180,6 +184,71 @@ def test_project_versions_json_merges_current_tags_and_pypi(
     assert payload["gitState"]["unpushedCommits"] == 0
     assert payload["gitState"]["latestTag"]["tag"] == "v0.2.0"
     assert payload["gitState"]["latestTag"]["commitsAfter"] == 0
+
+
+def test_project_versions_json_marks_foreign_pypi_package_as_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import dev.tasks.project_versions as project_versions_task
+    from dev.config import Config
+    from dev.pypi import PyPiProjectMetadata
+
+    project_path = tmp_path / "alpha"
+    project_path.mkdir()
+    project = _make_python_project(project_path)
+    config = Config(raw=parse("()"))
+    config.defined_projects["alpha"] = project
+
+    def fake_run_git(repo_root: Path, args: list[str], loaded_config: Config) -> subprocess.CompletedProcess[str]:
+        del loaded_config
+        assert repo_root == project_path
+        match args:
+            case ["tag", "--list"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            case ["remote"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            case _:
+                git_state_result = _clean_git_state_result(args, [])
+                if git_state_result is not None:
+                    return git_state_result
+                raise AssertionError(f"unexpected git args: {args}")
+
+    monkeypatch.setattr(project_versions_task, "_run_git", fake_run_git)
+    monkeypatch.setattr(
+        project_versions_task,
+        "_fetch_pypi_project_metadata",
+        lambda project_name: PyPiProjectMetadata(
+            latest_version="0.4.0",
+            releases=["0.4.0"],
+            project_urls={"Repository": "https://github.com/foreign/alpha"},
+        ),
+    )
+
+    result = project_versions_task.show_project_versions(["alpha"], config=config, json_output=True)
+
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["registry"]["name"] == "pypi"
+    assert payload["registry"]["latest"] == "0.4.0"
+    assert payload["registry"]["verified"] is False
+    assert payload["versions"] == [
+        {
+            "version": "0.2.0",
+            "current": True,
+            "localTags": [],
+            "remoteTags": [],
+            "registries": [],
+            "sources": ["current"],
+        }
+    ]
+    diagnostics = {(entry["source"], entry["message"]) for entry in payload["diagnostics"]}
+    assert diagnostics == {
+        ("remote-tags", "repository has no git remotes"),
+        ("git-latest-tag", "no version-like tag is reachable from HEAD"),
+        ("pypi", "PyPI package metadata points to foreign/alpha, expected wabbit-corp/alpha"),
+    }
 
 
 def test_project_versions_json_adds_jitpack_for_gradle_libraries(
@@ -307,7 +376,11 @@ def test_project_versions_json_reports_unpublished_git_state(
     monkeypatch.setattr(
         project_versions_task,
         "_fetch_pypi_project_metadata",
-        lambda project_name: PyPiProjectMetadata(latest_version="0.2.0", releases=["0.2.0"]),
+        lambda project_name: PyPiProjectMetadata(
+            latest_version="0.2.0",
+            releases=["0.2.0"],
+            project_urls={"Repository": "https://github.com/wabbit-corp/alpha"},
+        ),
     )
 
     result = project_versions_task.show_project_versions(["alpha"], config=config, json_output=True)
