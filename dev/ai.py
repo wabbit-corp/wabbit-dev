@@ -82,7 +82,7 @@ Finally, at the end of the commit message, explicitly include a line stating the
      }
 """).strip()
 
-COMMITTING_MODEL = "gpt-5.3-codex"
+COMMITTING_MODEL = "gpt-5.4-mini"
 CHAT_MODEL = "gpt-5-chat-latest"
 README_PROMPT_TEMPLATE_ENV = jinja2.Environment(
     autoescape=False,
