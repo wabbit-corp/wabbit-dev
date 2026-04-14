@@ -172,7 +172,10 @@ def _should_preserve_item(item: ET.Element, managed_item_names: Collection[str])
     if item.attrib.get("Pack") != "true":
         return True
     package_path = item.attrib.get("PackagePath")
-    return package_path not in {"\\\\", "/", "LICENSE.md"}
+    if package_path is None:
+        return True
+    normalized_package_path = package_path.replace("\\", "/")
+    return normalized_package_path not in {"/", "LICENSE.md"}
 
 
 def _serialize_xml_element(element: ET.Element) -> str:

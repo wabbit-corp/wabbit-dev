@@ -64,6 +64,13 @@ LOGGER = logging.getLogger(__name__)
 LOCAL_ONLY_SETUP_FILENAMES = frozenset({"settings.local.gradle.kts"})
 WORKSPACE_LOCAL_GRADLE_ROOT_FILENAMES = frozenset({"build.gradle.kts", "settings.gradle.kts"})
 DOTNET_PROJECT_FILE_SUFFIXES = frozenset({".fsproj", ".csproj", ".vbproj"})
+_AUTO_COMMIT_AGENTS_BLOCK_PLACEHOLDER = "__APP_WABBIT_DEV_MANAGED_FACTS__"
+_AUTO_COMMIT_AGENTS_STARTER_TEXT = (
+    "# AGENTS\n\n"
+    "Add repo-specific instructions above or below the managed facts block. "
+    "Keep manual guidance outside the generated markers.\n\n"
+    f"{_AUTO_COMMIT_AGENTS_BLOCK_PLACEHOLDER}\n"
+)
 
 
 @dataclass
@@ -1750,6 +1757,7 @@ def _is_local_setup_only_path(
 def _is_setup_auto_commit_allowed_path(
     relative_path: str,
     *,
+    repo: Repo,
     repo_root: Path,
     workspace_root: Path,
     preexisting_managed_paths: frozenset[str],
@@ -1758,9 +1766,63 @@ def _is_setup_auto_commit_allowed_path(
         return True
     if repo_root == workspace_root and relative_path == CONFIG_FILE:
         return True
+    if Path(relative_path).name == "AGENTS.md":
+        return _is_setup_auto_commit_allowed_agents_change(repo, repo_root=repo_root, relative_path=relative_path)
     if relative_path in preexisting_managed_paths:
         return True
     return is_setup_managed_file(repo_root / relative_path)
+
+
+def _normalize_agents_auto_commit_text(text: str) -> str | None:
+    normalized_text = text.replace("\r\n", "\n").replace("\r", "\n")
+    has_begin = dev.agents_md.AGENTS_MANAGED_FACTS_BEGIN in normalized_text
+    has_end = dev.agents_md.AGENTS_MANAGED_FACTS_END in normalized_text
+    if has_begin != has_end:
+        return None
+    if not has_begin:
+        return None
+
+    pattern = re.compile(
+        re.escape(dev.agents_md.AGENTS_MANAGED_FACTS_BEGIN)
+        + r".*?"
+        + re.escape(dev.agents_md.AGENTS_MANAGED_FACTS_END),
+        re.DOTALL,
+    )
+    matches = list(pattern.finditer(normalized_text))
+    if len(matches) != 1:
+        return None
+    replaced = pattern.sub(_AUTO_COMMIT_AGENTS_BLOCK_PLACEHOLDER, normalized_text, count=1)
+    if not replaced.endswith("\n"):
+        replaced += "\n"
+    return replaced
+
+
+def _is_setup_generated_agents_starter(text: str) -> bool:
+    normalized = _normalize_agents_auto_commit_text(text)
+    if normalized is None:
+        return False
+    return normalized == _AUTO_COMMIT_AGENTS_STARTER_TEXT
+
+
+def _is_setup_auto_commit_allowed_agents_change(repo: Repo, *, repo_root: Path, relative_path: str) -> bool:
+    path = repo_root / relative_path
+    if not path.is_file():
+        return False
+    try:
+        current_text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+
+    try:
+        previous_text = repo.git.show(f"HEAD:{relative_path}")
+    except GitCommandError:
+        return _is_setup_generated_agents_starter(current_text)
+
+    normalized_previous = _normalize_agents_auto_commit_text(previous_text)
+    normalized_current = _normalize_agents_auto_commit_text(current_text)
+    if normalized_previous is None or normalized_current is None:
+        return False
+    return normalized_previous == normalized_current
 
 
 def _auto_commit_setup_candidate(
@@ -1834,15 +1896,6 @@ def _auto_commit_setup_candidate(
                 changed_paths=(),
             )
 
-        if any(diff_item.untracked for diff_item in final_diffs):
-            return SetupAutoCommitRepoResult(
-                repo_root=candidate.repo_root,
-                representative_project_id=representative_project_id,
-                status="skipped",
-                message="Repo has untracked files after setup.",
-                changed_paths=changed_paths,
-            )
-
         if any(diff_item.partial_staging_suspected for diff_item in final_diffs):
             return SetupAutoCommitRepoResult(
                 repo_root=candidate.repo_root,
@@ -1866,6 +1919,7 @@ def _auto_commit_setup_candidate(
                     continue
                 if _is_setup_auto_commit_allowed_path(
                     path_text,
+                    repo=repo,
                     repo_root=candidate.repo_root,
                     workspace_root=workspace_root,
                     preexisting_managed_paths=candidate.preexisting_managed_paths,

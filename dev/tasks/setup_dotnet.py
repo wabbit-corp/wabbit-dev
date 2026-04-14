@@ -49,6 +49,7 @@ _MANAGED_DOTNET_PROPERTY_NAMES: frozenset[str] = frozenset(
         "RootNamespace",
         "Version",
         "PackageId",
+        "PackageReadmeFile",
         "Description",
         "Authors",
         "PackageTags",
