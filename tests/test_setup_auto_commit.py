@@ -151,6 +151,38 @@ def test_auto_commit_setup_only_commits_allowed_untracked_managed_files(tmp_path
     assert _last_commit_message(repo_root) == "chore: refresh generated repo guidance\n\nSemver Impact: NONE"
 
 
+def test_auto_commit_setup_only_commits_generated_banner_paths(tmp_path: Path) -> None:
+    import dev.tasks.setup as setup_module
+
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    banner_path = repo_root / ".banner.png"
+    banner_path.write_bytes(b"old-banner")
+    _git(repo_root, "add", ".")
+    _git(repo_root, "commit", "-m", "Initial commit\n\nSemver Impact: NONE")
+
+    (repo_root / ".meta").mkdir(parents=True, exist_ok=True)
+    (repo_root / ".meta" / "github-project-banner.png").write_bytes(b"new-banner")
+    banner_path.write_bytes(b"new-banner")
+
+    candidates = setup_module._collect_setup_auto_commit_candidates(
+        [_demo_project(repo_root)],
+        workspace_root=repo_root,
+        include_workspace_root=False,
+    )
+    results = setup_module._auto_commit_setup_repos(
+        candidates,
+        mode=RepoSetupMode.LOCAL,
+        workspace_root=repo_root,
+    )
+
+    assert len(results) == 1
+    assert results[0].status == "committed"
+    assert set(results[0].changed_paths) == {".banner.png", ".meta/github-project-banner.png"}
+    assert _git(repo_root, "status", "--short").strip() == ""
+    assert _last_commit_message(repo_root) == "chore: refresh setup-managed files\n\nSemver Impact: NONE"
+
+
 def test_auto_commit_setup_only_commits_agents_managed_block_updates(tmp_path: Path) -> None:
     import dev.agents_md as agents_md
     import dev.tasks.setup as setup_module

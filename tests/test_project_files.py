@@ -12,6 +12,9 @@ from dev.checks.project_files import (
 )
 from dev.config import DataProject, OwnershipType
 
+_CANONICAL_BANNER = "![](./.meta/github-project-banner.png)"
+_LEGACY_BANNER = '<img src=".banner.png"/>'
+
 
 @dataclass
 class _FakeProject:
@@ -32,7 +35,7 @@ def test_generic_project_structure_check_does_not_require_repo_legal_files_in_su
     (project_path / "README.md").write_text(
         "\n".join(
             [
-                '<img src=".banner.png"/>',
+                _LEGACY_BANNER,
                 '<img src="https://img.shields.io/example"/>',
                 "## 🚀 Installation",
                 "## 🚀 Usage",
@@ -62,7 +65,7 @@ def test_generic_project_structure_check_marks_generated_repo_files_fixable_for_
     (repo_root / "README.md").write_text(
         "\n".join(
             [
-                '<img src=".banner.png"/>',
+                _CANONICAL_BANNER,
                 '<img src="https://img.shields.io/example"/>',
                 "## 🚀 Installation",
                 "## 🚀 Usage",
@@ -92,7 +95,7 @@ def test_generic_project_structure_check_does_not_require_license_or_cla_for_dat
     (repo_root / "README.md").write_text(
         "\n".join(
             [
-                '<img src=".banner.png"/>',
+                _CANONICAL_BANNER,
                 '<img src="https://img.shields.io/example"/>',
                 "## 🚀 Installation",
                 "## 🚀 Usage",
@@ -126,3 +129,31 @@ def test_generic_project_structure_check_does_not_require_license_or_cla_for_dat
     assert E_MISSING_LICENSE.id not in issue_ids
     assert E_MISSING_CLA.id not in issue_ids
     assert E_MISSING_CLA_SIMPLE.id not in issue_ids
+
+
+def test_generic_project_structure_check_accepts_legacy_banner_reference(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    (repo_root / "README.md").write_text(
+        "\n".join(
+            [
+                _LEGACY_BANNER,
+                '<img src="https://img.shields.io/example"/>',
+                "## 🚀 Installation",
+                "## 🚀 Usage",
+                "## Licensing",
+                "## Contributing",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (repo_root / ".gitignore").write_text("generated/\n", encoding="utf-8")
+
+    issues = GenericProjectStructureCheck().check(
+        repo_root,
+        _FakeProject(path=repo_root, repo_root=repo_root),
+    )
+
+    issue_ids = {issue.issue_type.id for issue in issues}
+    assert "E_README_NO_BANNER" not in issue_ids

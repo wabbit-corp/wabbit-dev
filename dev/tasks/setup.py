@@ -65,6 +65,12 @@ LOCAL_ONLY_SETUP_FILENAMES = frozenset({"settings.local.gradle.kts"})
 WORKSPACE_LOCAL_GRADLE_ROOT_FILENAMES = frozenset({"build.gradle.kts", "settings.gradle.kts"})
 DOTNET_PROJECT_FILE_SUFFIXES = frozenset({".fsproj", ".csproj", ".vbproj"})
 _SETUP_AUTO_COMMIT_GUIDANCE_FILENAMES = frozenset({"AGENTS.md", "kotlin-conventions.md", "python-conventions.md"})
+_SETUP_AUTO_COMMIT_GENERATED_PATHS = frozenset(
+    {
+        str(setup_common.LEGACY_BANNER_RELATIVE_PATH).replace("\\", "/"),
+        str(setup_common.CANONICAL_BANNER_RELATIVE_PATH).replace("\\", "/"),
+    }
+)
 _SETUP_AUTO_COMMIT_BUILD_FILENAMES = frozenset(
     {
         "build.gradle.kts",
@@ -1779,15 +1785,18 @@ def _is_setup_auto_commit_allowed_path(
     workspace_root: Path,
     preexisting_managed_paths: frozenset[str],
 ) -> bool:
-    if Path(relative_path).name == ".gitignore":
+    normalized_path = relative_path.replace("\\", "/")
+    if Path(normalized_path).name == ".gitignore":
         return True
-    if repo_root == workspace_root and relative_path == CONFIG_FILE:
+    if repo_root == workspace_root and normalized_path == CONFIG_FILE:
         return True
-    if Path(relative_path).name == "AGENTS.md":
-        return _is_setup_auto_commit_allowed_agents_change(repo, repo_root=repo_root, relative_path=relative_path)
-    if relative_path in preexisting_managed_paths:
+    if Path(normalized_path).name == "AGENTS.md":
+        return _is_setup_auto_commit_allowed_agents_change(repo, repo_root=repo_root, relative_path=normalized_path)
+    if normalized_path in _SETUP_AUTO_COMMIT_GENERATED_PATHS:
         return True
-    return is_setup_managed_file(repo_root / relative_path)
+    if normalized_path in preexisting_managed_paths:
+        return True
+    return is_setup_managed_file(repo_root / normalized_path)
 
 
 def _normalize_agents_auto_commit_text(text: str) -> str | None:

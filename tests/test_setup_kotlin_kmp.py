@@ -360,6 +360,7 @@ def test_setup_gradle_project_cleans_stale_standalone_legal_files_for_nested_rep
 
     stale_paths = [
         project.path / ".banner.png",
+        project.path / ".meta" / "github-project-banner.png",
         project.path / "LICENSE.md",
         project.path / "NOTICE.md",
         project.path / "legal" / "cla" / "v1.0.0" / "CLA.md",

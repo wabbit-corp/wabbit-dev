@@ -27,6 +27,7 @@
       in the project's README and metadata files.
 """
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -56,6 +57,17 @@ E_MISSING_CLA = IssueType("E_MISSING_CLA", "Missing CLA file")
 E_MISSING_CLA_SIMPLE = IssueType("E_MISSING_CLA_SIMPLE", "Missing CLA explanations file")
 E_MISSING_GITIGNORE = IssueType("E_MISSING_GITIGNORE", "Missing .gitignore file")
 
+_README_BANNER_PATTERNS = (
+    re.compile(r'!\[[^\]]*\]\(\./?\.meta/github-project-banner\.png\)'),
+    re.compile(r'<img\s+src=["\']\.?/?.meta/github-project-banner\.png["\']\s*/?>'),
+    re.compile(r'!\[[^\]]*\]\(\./?\.banner\.png\)'),
+    re.compile(r'<img\s+src=["\']\.?/?.banner\.png["\']\s*/?>'),
+)
+
+
+def _readme_has_project_banner(readme_content: str) -> bool:
+    return any(pattern.search(readme_content) is not None for pattern in _README_BANNER_PATTERNS)
+
 
 class GenericProjectStructureCheck(ProjectCheck):
     """
@@ -82,7 +94,7 @@ class GenericProjectStructureCheck(ProjectCheck):
             with open(readme_path, encoding="utf-8") as f:
                 readme_content = f.read()
 
-                if '<img src=".banner.png"/>' not in readme_content:
+                if not _readme_has_project_banner(readme_content):
                     issues.append(E_README_NO_BANNER.at(readme_path))
                 badges_marker = '<img src="https://img.shields.io'  # check:ignore E_HARDCODED_URL
                 if badges_marker not in readme_content:

@@ -47,7 +47,15 @@ from dev.gitignore_files import merged_gitignore_text
 from dev.generated_files import stamp_managed_text
 from dev.licenses import canonicalize_license_key, license_display_name, license_spdx_url
 from dev.messages import error, warning
-from dev.tasks.setup_common import RepoSetupMode, clean_text, render_template, write_banner, write_wabbit_legal_files
+from dev.tasks.setup_common import (
+    CANONICAL_BANNER_RELATIVE_PATH,
+    LEGACY_BANNER_RELATIVE_PATH,
+    RepoSetupMode,
+    clean_text,
+    render_template,
+    write_banner,
+    write_wabbit_legal_files,
+)
 
 ANDROID_GRADLE_PLUGIN_VERSION = "8.12.0"
 DEFAULT_COMPOSE_PLUGIN_VERSION = "1.9.1"
@@ -1698,7 +1706,8 @@ def _cleanup_nested_gradle_project_files(project: GradleProject) -> None:
     dev.io.delete_if_exists(project.path / "gradlew")
     dev.io.delete_if_exists(project.path / "gradlew.bat")
     dev.io.delete_if_exists(project.path / "gradle.properties")
-    dev.io.delete_if_exists(project.path / ".banner.png")
+    dev.io.delete_if_exists(project.path / LEGACY_BANNER_RELATIVE_PATH)
+    dev.io.delete_if_exists(project.path / CANONICAL_BANNER_RELATIVE_PATH)
     dev.io.delete_if_exists(project.path / "CLA.md")
     dev.io.delete_if_exists(project.path / "CLA_EXPLANATIONS.md")
     dev.io.delete_if_exists(project.path / "CONTRIBUTOR_PRIVACY.md")

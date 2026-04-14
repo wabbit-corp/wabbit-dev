@@ -65,6 +65,10 @@ class CommonSetupContext(Protocol):
     def repo_template(self) -> Path: ...
 
 
+CANONICAL_BANNER_RELATIVE_PATH = Path(".meta") / "github-project-banner.png"
+LEGACY_BANNER_RELATIVE_PATH = Path(".banner.png")
+
+
 def render_template(template: jinja2.Template, **kwargs: object) -> str:
     rendered = template.render(**kwargs)
     return rendered.rstrip() + "\n"
@@ -421,20 +425,24 @@ def write_wabbit_legal_files(
 
 
 def write_banner(ctx: CommonSetupContext, project: Project) -> None:
+    canonical_output_path = project.path / CANONICAL_BANNER_RELATIVE_PATH
     create_banner(
         image_path=ctx.repo_template / "banner4c.png",
         font_path=str(ctx.repo_template / "CooperHewitt-Light.otf"),
         main_text=project.name,
         subtitle_text=None,
         background_color=(0, 0, 0, 0),
-        output_path=str(project.path / ".banner.png"),
+        output_path=str(canonical_output_path),
         font_size=60,
         subtitle_font_size=None,
         padding=40,
     )
+    dev.io.copy(canonical_output_path, project.path / LEGACY_BANNER_RELATIVE_PATH)
 
 
 __all__ = [
+    "CANONICAL_BANNER_RELATIVE_PATH",
+    "LEGACY_BANNER_RELATIVE_PATH",
     "clean_text",
     "RepoSetupMode",
     "render_template",

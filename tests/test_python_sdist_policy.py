@@ -12,6 +12,8 @@ def test_python_sdist_policy_includes_standard_release_support_files(tmp_path: P
     (tmp_path / "CHANGELOG.md").write_text("# changelog\n", encoding="utf-8")
     (tmp_path / "mkdocs.yml").write_text("site_name: demo\n", encoding="utf-8")
     (tmp_path / "dev.py").write_text("print('demo')\n", encoding="utf-8")
+    (tmp_path / ".meta").mkdir()
+    (tmp_path / ".meta" / "github-project-banner.png").write_bytes(b"png")
     (tmp_path / ".banner.png").write_bytes(b"png")
     (tmp_path / ".checkignore").write_text("tmp\n", encoding="utf-8")
     (tmp_path / ".codespell-ignore-words.txt").write_text("codex\n", encoding="utf-8")
@@ -29,6 +31,7 @@ def test_python_sdist_policy_includes_standard_release_support_files(tmp_path: P
     assert "CHANGELOG.md" in include_paths
     assert "mkdocs.yml" in include_paths
     assert "dev.py" in include_paths
+    assert ".meta" in include_paths
     assert ".banner.png" in include_paths
     assert ".checkignore" in include_paths
     assert ".codespell-ignore-words.txt" in include_paths

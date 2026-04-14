@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image, ImageFont, PngImagePlugin
 
 from dev.banner import create_banner
+from dev.tasks.setup_common import CANONICAL_BANNER_RELATIVE_PATH, LEGACY_BANNER_RELATIVE_PATH, write_banner
 
 
 def _patch_default_font(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -116,3 +118,24 @@ def test_create_banner_rewrites_when_rendered_pixels_change(tmp_path: Path, monk
     )
 
     assert _read_rgba_signature(output_path) != original_signature
+
+
+def test_write_banner_writes_canonical_and_legacy_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_default_font(monkeypatch)
+
+    repo_template = tmp_path / "template"
+    repo_template.mkdir()
+    Image.new("RGBA", (12, 12), (255, 0, 0, 255)).save(repo_template / "banner4c.png")
+    (repo_template / "CooperHewitt-Light.otf").write_bytes(b"unused")
+
+    project = SimpleNamespace(name="demo", path=tmp_path / "project")
+    project.path.mkdir(parents=True)
+    ctx = SimpleNamespace(repo_template=repo_template)
+
+    write_banner(ctx, project)
+
+    canonical_path = project.path / CANONICAL_BANNER_RELATIVE_PATH
+    legacy_path = project.path / LEGACY_BANNER_RELATIVE_PATH
+    assert canonical_path.is_file()
+    assert legacy_path.is_file()
+    assert _read_rgba_signature(canonical_path) == _read_rgba_signature(legacy_path)

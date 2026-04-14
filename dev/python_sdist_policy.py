@@ -5,6 +5,7 @@ from pathlib import Path
 
 _SDIST_INCLUDED_DIR_NAMES = {
     "LICENSES",
+    ".meta",
     "docs",
     "examples",
     "example",
