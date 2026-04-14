@@ -7,6 +7,7 @@ General Guidelines:
 
 ## Python Coding Guidelines
 
+Review `python-conventions.md` before editing Python code in this repo.
 Use .venv python venv.
 Run tests (especially relevant tests) regularly while editing.
 Always keep CHANGELOG.md up to date with meaningful entries.

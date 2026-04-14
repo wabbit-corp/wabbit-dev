@@ -103,6 +103,8 @@ class RepoSetupContext:
     github_pull_request_template: jinja2.Template
     github_issue_bug_template: jinja2.Template
     github_issue_feature_template: jinja2.Template
+    kotlin_conventions_template: jinja2.Template
+    python_conventions_template: jinja2.Template
 
     settings_template: jinja2.Template
     settings_local_template: jinja2.Template
@@ -502,6 +504,53 @@ def _repo_root_gitignore_text(ctx: RepoSetupContext, repo_projects: list[Project
     return clean_text("\n\n".join(section for section in sections if section))
 
 
+def _repo_uses_kotlin(repo_projects: list[Project]) -> bool:
+    return any(
+        isinstance(project, GradleProject) and ("kotlin" in project.resolved_features or project.is_kmp)
+        for project in repo_projects
+    )
+
+
+def _repo_uses_python(repo_projects: list[Project]) -> bool:
+    return any(isinstance(project, PythonProject) for project in repo_projects)
+
+
+def _write_repo_convention_files(ctx: RepoSetupContext, repo_root: Path, repo_projects: list[Project]) -> bool:
+    wrote_any = False
+
+    if _repo_uses_kotlin(repo_projects):
+        kotlin_conventions_text = _managed_html_comment(
+            render_template(ctx.kotlin_conventions_template),
+            body_lines=[
+                "This file is generated from shared repo-template assets in app-wabbit-dev.",
+                "To change it, update the shared conventions template and rerun:",
+                "  dev setup <project-or-repo>",
+                "Put repo-specific guidance in AGENTS.md rather than editing this file directly.",
+            ],
+        )
+        dev.io.write_text_file(repo_root / "kotlin-conventions.md", kotlin_conventions_text)
+        wrote_any = True
+    else:
+        _delete_if_setup_managed(repo_root / "kotlin-conventions.md")
+
+    if _repo_uses_python(repo_projects):
+        python_conventions_text = _managed_html_comment(
+            render_template(ctx.python_conventions_template),
+            body_lines=[
+                "This file is generated from shared repo-template assets in app-wabbit-dev.",
+                "To change it, update the shared conventions template and rerun:",
+                "  dev setup <project-or-repo>",
+                "Put repo-specific guidance in AGENTS.md rather than editing this file directly.",
+            ],
+        )
+        dev.io.write_text_file(repo_root / "python-conventions.md", python_conventions_text)
+        wrote_any = True
+    else:
+        _delete_if_setup_managed(repo_root / "python-conventions.md")
+
+    return wrote_any
+
+
 def _write_repo_metadata_files(ctx: RepoSetupContext, projects: list[Project]) -> list[str]:
     repo_roots = {project_repo_root(project).resolve() for project in projects}
     written_roots: list[str] = []
@@ -529,6 +578,8 @@ def _write_repo_metadata_files(ctx: RepoSetupContext, projects: list[Project]) -
             merged_gitignore_text(repo_root, _repo_root_gitignore_text(ctx, repo_projects)),
         )
         wrote_any = True
+        if _write_repo_convention_files(ctx, repo_root, repo_projects):
+            wrote_any = True
         if plan.requires_editorconfig:
             editorconfig_text = _managed_hash_comment(
                 render_template(ctx.editorconfig_template, line_length=plan.editorconfig_line_length),
@@ -2013,6 +2064,8 @@ def create_repo_setup_context(
         github_issue_feature_template=dev.io.read_template(
             repo_template / ".github" / "ISSUE_TEMPLATE" / "feature_request.yml.jinja2"
         ),
+        kotlin_conventions_template=dev.io.read_template(repo_template / "kotlin-conventions.md"),
+        python_conventions_template=dev.io.read_template(repo_template / "python-conventions.md"),
         gradle_gitignore_template=dev.io.read_template(repo_template / "gradle-files" / "gitignore.jinja2"),
         dotnet_gitignore_template=dev.io.read_template(repo_template / "dotnet-files" / "gitignore.jinja2"),
         settings_template=dev.io.read_template(repo_template / "gradle-files" / "settings.gradle.kts.jinja2"),
@@ -2184,7 +2237,7 @@ def setup(
         payload["projects"] = [project_payload(project_item) for project_item in selected_projects]
         requires_github_api = any(project_item.github_repo is not None for project_item in selected_projects)
         create_ctx_signature = inspect.signature(create_repo_setup_context)
-        create_ctx_kwargs: dict[str, object] = {}
+        create_ctx_kwargs: dict[str, Sequence[Project] | bool] = {}
         if "selected_projects" in create_ctx_signature.parameters:
             create_ctx_kwargs["selected_projects"] = selected_projects
         if "require_github_api" in create_ctx_signature.parameters:

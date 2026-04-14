@@ -46,6 +46,34 @@ def _make_python_project(path: Path, *, project_id: str, repo_id: str | None = N
     )
 
 
+def _make_kotlin_project(path: Path, *, project_id: str, repo_id: str | None = None, repo_root: Path | None = None):
+    from dev.config import GradleProject, Kotlin, OwnershipType, Version
+
+    return GradleProject(
+        path=path,
+        group_name="one.wabbit",
+        name=path.name,
+        version=Version.parse("0.1.0"),
+        description=None,
+        authors=[],
+        license=None,
+        quarantine=False,
+        publish=False,
+        github_repo="org/demo",
+        ownership=OwnershipType.WABBIT,
+        raw_dependencies=[],
+        raw_features=[],
+        resolved_dependencies=[],
+        resolved_maven_repositories=[],
+        resolved_features={"kotlin": Kotlin()},
+        project_id=project_id,
+        repo_id=repo_id,
+        repo_root=repo_root,
+        docs_enabled=False,
+        docs_system=None,
+    )
+
+
 def _make_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupContext:
     import dev.tasks.setup as setup_module
 
@@ -67,6 +95,8 @@ def _make_setup_context(config: Config, mode: RepoSetupMode) -> RepoSetupContext
         github_pull_request_template=jinja2.Template("## Summary\n"),
         github_issue_bug_template=jinja2.Template("name: Bug report\n"),
         github_issue_feature_template=jinja2.Template("name: Feature request\n"),
+        kotlin_conventions_template=jinja2.Template("# Kotlin Conventions\n"),
+        python_conventions_template=jinja2.Template("# Python Conventions\n"),
         settings_template=jinja2.Template(""),
         settings_local_template=jinja2.Template(""),
         subproject_settings_template=jinja2.Template(""),
@@ -140,6 +170,7 @@ def test_write_repo_agents_file_creates_starter_when_missing(tmp_path: Path) -> 
     assert "`dev where`" in agents_text
     assert "`dev setup demo`" in agents_text
     assert "`BUILD.md`" in agents_text
+    assert "`python-conventions.md`" in agents_text
     assert "./dev" not in agents_text
 
 
@@ -210,6 +241,32 @@ def test_write_repo_agents_file_updates_only_managed_block(tmp_path: Path) -> No
     assert "- stale block" not in agents_text
     assert "`dev project show demo`" in agents_text
     assert "`SPECIFICATION.md`" in agents_text
+    assert "`python-conventions.md`" in agents_text
+
+
+def test_write_repo_agents_file_references_kotlin_conventions_for_kotlin_repo(tmp_path: Path) -> None:
+    import dev.agents_md as agents_md
+    from dev.config import Config, RepoDefinition
+
+    repo_root = tmp_path / "demo"
+    repo_root.mkdir()
+
+    project = _make_kotlin_project(repo_root, project_id="demo", repo_id="demo", repo_root=repo_root)
+    config = Config(raw=parse("()"))
+    config.defined_projects["demo"] = project
+    config.defined_repos["demo"] = RepoDefinition(
+        repo_id="demo",
+        path=repo_root,
+        github_repo="org/demo",
+        gradle_root_project_name="demo",
+        jvm_policy=None,
+        project_ids=["demo"],
+    )
+
+    assert agents_md.write_repo_agents_file(config, repo_root, [project]) is True
+
+    agents_text = (repo_root / "AGENTS.md").read_text(encoding="utf-8")
+    assert "`kotlin-conventions.md`" in agents_text
 
 
 def test_write_repo_agents_file_reports_multiple_managed_blocks_with_file_path(
@@ -311,3 +368,35 @@ def test_setup_writes_repo_root_agents_for_repo_managed_project(
     assert result == 0
     assert (repo_root / "AGENTS.md").is_file()
     assert not (project_path / "AGENTS.md").exists()
+
+
+def test_write_repo_metadata_files_writes_language_convention_files(tmp_path: Path) -> None:
+    import dev.tasks.setup as setup_module
+    from dev.config import Config, RepoDefinition
+
+    repo_root = tmp_path / "demo"
+    repo_root.mkdir()
+    python_project = _make_python_project(repo_root / "py", project_id="demo/py", repo_id="demo", repo_root=repo_root)
+    kotlin_project = _make_kotlin_project(repo_root / "kt", project_id="demo/kt", repo_id="demo", repo_root=repo_root)
+    python_project.path.mkdir(parents=True, exist_ok=True)
+    kotlin_project.path.mkdir(parents=True, exist_ok=True)
+
+    config = Config(raw=parse("()"))
+    config.defined_projects["demo/py"] = python_project
+    config.defined_projects["demo/kt"] = kotlin_project
+    config.defined_repos["demo"] = RepoDefinition(
+        repo_id="demo",
+        path=repo_root,
+        github_repo="org/demo",
+        gradle_root_project_name="demo",
+        jvm_policy=None,
+        project_ids=["demo/py", "demo/kt"],
+    )
+
+    ctx = _make_setup_context(config, setup_module.RepoSetupMode.LOCAL)
+
+    written_roots = setup_module._write_repo_metadata_files(ctx, [python_project, kotlin_project])
+
+    assert str(repo_root) in written_roots
+    assert (repo_root / "python-conventions.md").is_file()
+    assert (repo_root / "kotlin-conventions.md").is_file()

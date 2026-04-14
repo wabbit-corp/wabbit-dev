@@ -5,7 +5,16 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import dev.io
-from dev.config import Config, DataProject, GradleProject, PremakeProject, Project, PurescriptProject, PythonProject
+from dev.config import (
+    Config,
+    DataProject,
+    GradleProject,
+    PremakeProject,
+    Project,
+    PurescriptProject,
+    PythonProject,
+    RepoDefinition,
+)
 from dev.messages import warning
 
 AGENTS_MANAGED_FACTS_BEGIN = "<!-- BEGIN app-wabbit-dev managed facts -->"
@@ -24,7 +33,7 @@ def _normalize_markdown(text: str) -> str:
     return normalized + "\n"
 
 
-def _repo_definition_for_root(config: Config, repo_root: Path) -> object | None:
+def _repo_definition_for_root(config: Config, repo_root: Path) -> RepoDefinition | None:
     repo_root_resolved = repo_root.resolve()
     for repo_definition in config.defined_repos.values():
         if repo_definition.path.resolve() == repo_root_resolved:
@@ -34,9 +43,8 @@ def _repo_definition_for_root(config: Config, repo_root: Path) -> object | None:
 
 def _canonical_target(config: Config, repo_root: Path, repo_projects: Sequence[Project]) -> str:
     repo_definition = _repo_definition_for_root(config, repo_root)
-    repo_id = getattr(repo_definition, "repo_id", None)
-    if isinstance(repo_id, str) and repo_id:
-        return repo_id
+    if repo_definition is not None and repo_definition.repo_id:
+        return repo_definition.repo_id
 
     sorted_projects = sorted(
         repo_projects,
@@ -51,36 +59,36 @@ def _canonical_target(config: Config, repo_root: Path, repo_projects: Sequence[P
     return repo_root.name
 
 
-def _project_type_label(project: Project | object) -> str | None:
-    if isinstance(project, PythonProject):
-        return "python"
-    if isinstance(project, GradleProject):
-        if "scala" in project.resolved_features:
-            return "scala/kmp" if project.is_kmp else "scala/jvm"
-        if "kotlin" in project.resolved_features or project.is_kmp:
-            return "kotlin/kmp" if project.is_kmp else "kotlin/jvm"
-        return "gradle/kmp" if project.is_kmp else "gradle/jvm"
-    if isinstance(project, PurescriptProject):
-        return "purescript"
-    if isinstance(project, PremakeProject):
-        return "premake"
-    if isinstance(project, DataProject):
-        return "data"
-    if isinstance(project, Project):
-        return type(project).__name__.removesuffix("Project").lower()
-    return None
+def _project_type_label(project: Project) -> str:
+    match project:
+        case PythonProject():
+            return "python"
+        case GradleProject():
+            if "scala" in project.resolved_features:
+                return "scala/kmp" if project.is_kmp else "scala/jvm"
+            if "kotlin" in project.resolved_features or project.is_kmp:
+                return "kotlin/kmp" if project.is_kmp else "kotlin/jvm"
+            return "gradle/kmp" if project.is_kmp else "gradle/jvm"
+        case PurescriptProject():
+            return "purescript"
+        case PremakeProject():
+            return "premake"
+        case DataProject():
+            return "data"
+        case _:
+            return type(project).__name__.removesuffix("Project").lower()
 
 
-def _configured_project_types(repo_projects: Sequence[Project | object]) -> list[str]:
-    return sorted({label for project in repo_projects if (label := _project_type_label(project)) is not None})
+def _configured_project_types(repo_projects: Sequence[Project]) -> list[str]:
+    return sorted({_project_type_label(project) for project in repo_projects})
 
 
-def _docs_systems(repo_projects: Sequence[Project | object]) -> list[str]:
+def _docs_systems(repo_projects: Sequence[Project]) -> list[str]:
     docs_systems: set[str] = set()
     for project in repo_projects:
-        if not getattr(project, "docs_enabled", False):
+        if not project.docs_enabled:
             continue
-        docs_systems.add(getattr(project, "docs_system", None) or "enabled")
+        docs_systems.add(project.docs_system or "enabled")
     return sorted(docs_systems)
 
 
@@ -96,6 +104,26 @@ def _sanctioned_override_files(repo_projects: Sequence[Project]) -> list[str]:
     ):
         overrides.append("mkdocs.extra.yml")
     return overrides
+
+
+def _repo_uses_kotlin(repo_projects: Sequence[Project]) -> bool:
+    return any(
+        isinstance(project, GradleProject) and ("kotlin" in project.resolved_features or project.is_kmp)
+        for project in repo_projects
+    )
+
+
+def _repo_uses_python(repo_projects: Sequence[Project]) -> bool:
+    return any(isinstance(project, PythonProject) for project in repo_projects)
+
+
+def _language_convention_files(repo_projects: Sequence[Project]) -> list[tuple[str, str]]:
+    files: list[tuple[str, str]] = []
+    if _repo_uses_kotlin(repo_projects):
+        files.append(("Kotlin", "kotlin-conventions.md"))
+    if _repo_uses_python(repo_projects):
+        files.append(("Python", "python-conventions.md"))
+    return files
 
 
 def _reference_docs(repo_root: Path) -> list[str]:
@@ -121,6 +149,15 @@ def render_repo_agents_facts_block(config: Config, repo_root: Path, repo_project
     if overrides:
         override_list = ", ".join(f"`{path}`" for path in overrides)
         fact_lines.append(f"- Sanctioned override files in this repo: {override_list}.")
+
+    convention_files = _language_convention_files(repo_projects)
+    if convention_files:
+        if len(convention_files) == 1:
+            language_name, file_name = convention_files[0]
+            fact_lines.append(f"- Review `{file_name}` before editing {language_name} code in this repo.")
+        else:
+            rendered = ", ".join(f"`{file_name}` ({language_name})" for language_name, file_name in convention_files)
+            fact_lines.append(f"- Review the generated language guides before editing code in this repo: {rendered}.")
 
     project_types = _configured_project_types(repo_projects)
     docs_systems = _docs_systems(repo_projects)
