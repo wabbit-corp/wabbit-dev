@@ -490,6 +490,7 @@ class DefineBackupTargetCommand:
 class BackupPolicyCommand:
     targets: list[str]
     service: bool | None = None
+    serviceAgeMinutes: int | None = None
     serviceDirtyAgeMinutes: int | None = None
     serviceMinIntervalMinutes: int | None = None
     includeGit: bool | None = None

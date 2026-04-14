@@ -1762,7 +1762,7 @@ class BackupTarget:
 class BackupPolicy:
     target_names: tuple[str, ...]
     service_enabled: bool = True
-    service_dirty_age_minutes: int = 60
+    service_age_minutes: int = 60
     service_min_interval_minutes: int = 360
     include_git: bool = True
     exclude: tuple[str, ...] = ()
@@ -1770,6 +1770,10 @@ class BackupPolicy:
     exclude_caches: bool = True
     include_repos: tuple[str, ...] = ("*",)
     exclude_repos: tuple[str, ...] = ()
+
+    @property
+    def service_dirty_age_minutes(self) -> int:
+        return self.service_age_minutes
 
 
 @dataclass
@@ -3109,16 +3113,30 @@ def load_config(start: Path | None = None) -> Config:
         if isinstance(command, config_typed.BackupPolicyCommand):
             if not command.targets:
                 raise ValueError("backup-policy.targets must not be empty")
-            dirty_age_minutes = command.serviceDirtyAgeMinutes if command.serviceDirtyAgeMinutes is not None else 60
+            if (
+                command.serviceAgeMinutes is not None
+                and command.serviceDirtyAgeMinutes is not None
+                and command.serviceAgeMinutes != command.serviceDirtyAgeMinutes
+            ):
+                raise ValueError(
+                    "backup-policy.serviceAgeMinutes and backup-policy.serviceDirtyAgeMinutes must match when both are set"
+                )
+            service_age_minutes = (
+                command.serviceAgeMinutes
+                if command.serviceAgeMinutes is not None
+                else command.serviceDirtyAgeMinutes
+            )
+            if service_age_minutes is None:
+                service_age_minutes = 60
             min_interval_minutes = command.serviceMinIntervalMinutes if command.serviceMinIntervalMinutes is not None else 360
-            if dirty_age_minutes < 0:
-                raise ValueError("backup-policy.serviceDirtyAgeMinutes must be >= 0")
+            if service_age_minutes < 0:
+                raise ValueError("backup-policy.serviceAgeMinutes must be >= 0")
             if min_interval_minutes < 0:
                 raise ValueError("backup-policy.serviceMinIntervalMinutes must be >= 0")
             config.backup_policy = BackupPolicy(
                 target_names=tuple(command.targets),
                 service_enabled=command.service if command.service is not None else True,
-                service_dirty_age_minutes=dirty_age_minutes,
+                service_age_minutes=service_age_minutes,
                 service_min_interval_minutes=min_interval_minutes,
                 include_git=command.includeGit if command.includeGit is not None else True,
                 exclude=tuple(command.exclude or []),

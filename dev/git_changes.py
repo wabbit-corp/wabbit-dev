@@ -196,7 +196,12 @@ def _read_working_tree_file(repo: Repo, path: str) -> tuple[bytes | None, FileTy
 
 
 # FIX: New helper using 'git hash-object' for WT files
-def _calculate_wt_sha_via_hash_object(repo: Repo, path: str) -> str | None:
+def _calculate_wt_sha_via_hash_object(
+    repo: Repo,
+    path: str,
+    *,
+    allow_missing: bool = False,
+) -> str | None:
     """Calculates WT file SHA using 'git hash-object'.
     This is generally more reliable than reading/calculating manually,
     as it respects gitattributes, line endings etc.
@@ -204,6 +209,8 @@ def _calculate_wt_sha_via_hash_object(repo: Repo, path: str) -> str | None:
     full_path = os.path.join(repo.working_dir, path)
     # Check if it exists and is a file (hash-object doesn't work on dirs/links directly)
     if not os.path.exists(full_path) or not os.path.isfile(full_path):
+        if allow_missing and not os.path.exists(full_path):
+            return None
         # If it's a symlink, we might handle it differently if needed,
         # but for SHA calculation, hash-object needs a regular file.
         # Return None if not a file we can hash this way.
@@ -501,7 +508,7 @@ def compute_repo_diffs(repo: Repo, include_untracked: bool = True) -> list[FileD
 
         # Calculate the correct blob SHA for the working tree content
         # Use git hash-object for more reliable WT SHA calculation
-        wt_sha = _calculate_wt_sha_via_hash_object(repo, path_key)
+        wt_sha = _calculate_wt_sha_via_hash_object(repo, path_key, allow_missing=not wt_exists)
 
         # Merge with existing staged diff or create a new diff entry
         if path_key in diffs_dict:

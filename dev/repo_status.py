@@ -29,6 +29,7 @@ class RepoStatusRecord:
     staged_changes: tuple[str, ...]
     unstaged_changes: tuple[str, ...]
     untracked_files: tuple[str, ...]
+    repo_started_at: datetime | None = None
     oldest_dirty_timestamp: datetime | None = None
     error: str | None = None
     tracking: RepoTrackingState | None = None
@@ -252,6 +253,15 @@ def collect_repo_status_record(target: ResolvedRepoTarget) -> RepoStatusRecord:
         staged_changes = list(summary.staged)
         unstaged_changes = list(summary.unstaged)
         untracked_files = list(summary.untracked)
+        repo_started_at: datetime | None = None
+        try:
+            root_commit = next(repo.iter_commits(rev="HEAD", max_parents=0))
+            repo_started_at = datetime.fromtimestamp(root_commit.committed_date, tz=UTC)
+        except (StopIteration, GitCommandError, ValueError):
+            try:
+                repo_started_at = datetime.fromtimestamp(repo_root.stat().st_mtime, tz=UTC)
+            except OSError:
+                repo_started_at = None
         if staged_changes or unstaged_changes or untracked_files:
             oldest_dirty_timestamp = oldest_dirty_timestamp_for_paths(
                 repo_root,
@@ -265,6 +275,7 @@ def collect_repo_status_record(target: ResolvedRepoTarget) -> RepoStatusRecord:
             staged_changes=tuple(staged_changes),
             unstaged_changes=tuple(unstaged_changes),
             untracked_files=tuple(untracked_files),
+            repo_started_at=repo_started_at,
             oldest_dirty_timestamp=oldest_dirty_timestamp,
             tracking=summary.tracking,
         )

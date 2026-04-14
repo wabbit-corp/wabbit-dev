@@ -601,11 +601,16 @@ def service_backup_due(
     policy = _matching_backup_policy(config, resolved_target.name, repo_relative_path)
     if policy is None or not policy.service_enabled:
         return False
-    if not repo_status.is_dirty or repo_status.oldest_dirty_timestamp is None:
-        return False
     active_now = _now_utc() if now is None else now
-    dirty_age = active_now - repo_status.oldest_dirty_timestamp
-    if dirty_age < timedelta(minutes=policy.service_dirty_age_minutes):
+    repo_started_at = repo_status.repo_started_at
+    if repo_started_at is None:
+        repo_path = repo_status.path if repo_status.path.exists() else resolved_target.path.resolve()
+        try:
+            repo_started_at = datetime.fromtimestamp(repo_path.stat().st_mtime, tz=UTC)
+        except OSError:
+            return False
+    repo_age = active_now - repo_started_at
+    if repo_age < timedelta(minutes=policy.service_age_minutes):
         return False
     if last_attempted_at is None:
         return True

@@ -226,12 +226,15 @@ class DirtyRepoMenuApp(NSObject):
         if not due_pairs:
             return
 
-        def _sort_key(item: tuple[ResolvedRepoTarget, RepoStatusRecord]) -> tuple[float, str]:
+        def _sort_key(item: tuple[ResolvedRepoTarget, RepoStatusRecord]) -> tuple[int, float, float, str]:
             target, repo_status = item
-            dirty_since = repo_status.oldest_dirty_timestamp
-            if dirty_since is None:
-                return (now.timestamp(), target.name)
-            return (dirty_since.timestamp(), target.name)
+            summary = backup_summary_by_repo.get(target.name)
+            last_attempted_at = summary.last_attempted_at if summary is not None else None
+            repo_started_at = repo_status.repo_started_at
+            attempt_rank = 0 if last_attempted_at is None else 1
+            attempt_timestamp = 0.0 if last_attempted_at is None else last_attempted_at.timestamp()
+            repo_started_timestamp = now.timestamp() if repo_started_at is None else repo_started_at.timestamp()
+            return (attempt_rank, attempt_timestamp, repo_started_timestamp, target.name)
 
         due_pairs.sort(key=_sort_key)
         selected_target, _selected_repo_status = due_pairs[0]

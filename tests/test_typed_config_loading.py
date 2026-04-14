@@ -177,7 +177,7 @@ def test_backup_targets_and_policy_are_loaded(tmp_path: Path) -> None:
                 "("
                 'backup-policy ["desktop-archive"] '
                 ":service true "
-                ":serviceDirtyAgeMinutes 90 "
+                ":serviceAgeMinutes 90 "
                 ":serviceMinIntervalMinutes 720 "
                 ":includeGit false "
                 ':exclude ["tmp/**"] '
@@ -203,7 +203,7 @@ def test_backup_targets_and_policy_are_loaded(tmp_path: Path) -> None:
     assert policy is not None
     assert policy.target_names == ("desktop-archive",)
     assert policy.service_enabled is True
-    assert policy.service_dirty_age_minutes == 90
+    assert policy.service_age_minutes == 90
     assert policy.service_min_interval_minutes == 720
     assert policy.include_git is False
     assert policy.exclude == ("tmp/**",)
@@ -235,6 +235,32 @@ def test_backup_policy_can_reference_target_defined_in_root_private(tmp_path: Pa
     assert policy is not None
     assert policy.target_names == ("desktop-archive",)
     assert "desktop-archive" in config.backup_targets
+
+
+def test_backup_policy_accepts_legacy_service_dirty_age_minutes(tmp_path: Path) -> None:
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                "("
+                'define-backup-target "desktop-archive" '
+                '"restic-sftp" '
+                '"100.79.145.10" '
+                '"alexk" '
+                '"/H:/restic/datatron" '
+                ':passwordCommand "cat ~/.config/restic/datatron.pass")',
+                "("
+                'backup-policy ["desktop-archive"] '
+                ":serviceDirtyAgeMinutes 45 "
+                ":serviceMinIntervalMinutes 720)",
+                "",
+            ]
+        ),
+    )
+
+    policy = config.backup_policy
+    assert policy is not None
+    assert policy.service_age_minutes == 45
 
 
 def test_purescript_project_is_loaded_with_explicit_license(tmp_path: Path) -> None:

@@ -30,7 +30,7 @@ def _load_from_temp_root(
         os.chdir(cwd)
 
 
-def test_service_backup_due_respects_dirty_age_and_min_interval(tmp_path: Path) -> None:
+def test_service_backup_due_respects_repo_age_and_min_interval(tmp_path: Path) -> None:
     from dev.repo_resolution import ResolvedRepoTarget
     from dev.repo_status import RepoStatusRecord
     from dev.tasks.backup import service_backup_due
@@ -52,7 +52,7 @@ def test_service_backup_due_respects_dirty_age_and_min_interval(tmp_path: Path) 
                 "("
                 'backup-policy ["desktop-archive"] '
                 ":service true "
-                ":serviceDirtyAgeMinutes 60 "
+                ":serviceAgeMinutes 60 "
                 ":serviceMinIntervalMinutes 180)",
                 "",
             ]
@@ -61,13 +61,16 @@ def test_service_backup_due_respects_dirty_age_and_min_interval(tmp_path: Path) 
 
     target = ResolvedRepoTarget(name="demo-repo", path=repo_path)
     now = datetime(2026, 4, 12, 18, 0, tzinfo=UTC)
+    repo_started_at = now - timedelta(minutes=90)
+    repo_age_timestamp = repo_started_at.timestamp()
+    os.utime(repo_path, (repo_age_timestamp, repo_age_timestamp))
     repo_status = RepoStatusRecord(
         name="demo-repo",
         path=repo_path,
-        staged_changes=("README.md",),
+        staged_changes=(),
         unstaged_changes=(),
         untracked_files=(),
-        oldest_dirty_timestamp=now - timedelta(minutes=90),
+        oldest_dirty_timestamp=None,
     )
 
     assert service_backup_due(config, target, repo_status, last_attempted_at=None, now=now) is True
@@ -81,6 +84,52 @@ def test_service_backup_due_respects_dirty_age_and_min_interval(tmp_path: Path) 
         )
         is False
     )
+
+
+def test_service_backup_due_skips_repo_until_repo_age_threshold(tmp_path: Path) -> None:
+    from dev.repo_resolution import ResolvedRepoTarget
+    from dev.repo_status import RepoStatusRecord
+    from dev.tasks.backup import service_backup_due
+
+    repo_path = tmp_path / "demo-repo"
+    repo_path.mkdir()
+
+    config = _load_from_temp_root(
+        tmp_path,
+        "\n".join(
+            [
+                "("
+                'define-backup-target "desktop-archive" '
+                '"restic-sftp" '
+                '"100.79.145.10" '
+                '"alexk" '
+                '"/H:/restic/datatron" '
+                ':passwordCommand "cat ~/.config/restic/datatron.pass")',
+                "("
+                'backup-policy ["desktop-archive"] '
+                ":service true "
+                ":serviceAgeMinutes 60 "
+                ":serviceMinIntervalMinutes 180)",
+                "",
+            ]
+        ),
+    )
+
+    target = ResolvedRepoTarget(name="demo-repo", path=repo_path)
+    now = datetime(2026, 4, 12, 18, 0, tzinfo=UTC)
+    repo_started_at = now - timedelta(minutes=15)
+    repo_age_timestamp = repo_started_at.timestamp()
+    os.utime(repo_path, (repo_age_timestamp, repo_age_timestamp))
+    repo_status = RepoStatusRecord(
+        name="demo-repo",
+        path=repo_path,
+        staged_changes=("README.md",),
+        unstaged_changes=(),
+        untracked_files=(),
+        oldest_dirty_timestamp=now - timedelta(minutes=5),
+    )
+
+    assert service_backup_due(config, target, repo_status, last_attempted_at=None, now=now) is False
 
 
 def test_restore_requires_explicit_target_when_multiple_backup_targets_apply(tmp_path: Path) -> None:
