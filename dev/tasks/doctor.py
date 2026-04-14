@@ -27,6 +27,11 @@ class DoctorStatus(Enum):
     FAIL = "fail"
 
 
+class PublishCredentialMode(Enum):
+    ADVISORY = "advisory"
+    STRICT = "strict"
+
+
 @dataclass(frozen=True)
 class DoctorFinding:
     key: str
@@ -40,6 +45,7 @@ class DoctorFinding:
 class DoctorContext:
     cwd: Path = field(default_factory=Path.cwd)
     selected_targets: tuple[str, ...] | None = None
+    publish_credential_mode: PublishCredentialMode = PublishCredentialMode.ADVISORY
     workspace_root: Path | None = field(init=False)
     root_clj: Path = field(init=False)
     root_private_clj: Path = field(init=False)
@@ -382,6 +388,33 @@ def _publish_target_projects(config: Config, target_name: str, ctx: DoctorContex
     return [project for project in _selected_projects(config, ctx) if _determine_publish_target(project) == target_name]
 
 
+def _publish_credentials_finding(
+    *,
+    ctx: DoctorContext,
+    key: str,
+    label: str,
+    strict_detail: str,
+    advisory_detail: str,
+    fix: str,
+) -> DoctorFinding:
+    match ctx.publish_credential_mode:
+        case PublishCredentialMode.STRICT:
+            return DoctorFinding(
+                key=key,
+                label=label,
+                status=DoctorStatus.FAIL,
+                detail=strict_detail,
+                fix=fix,
+            )
+        case PublishCredentialMode.ADVISORY:
+            return DoctorFinding(
+                key=key,
+                label=label,
+                status=DoctorStatus.PASS,
+                detail=advisory_detail,
+            )
+
+
 def _publish_pypi_finding(ctx: DoctorContext) -> DoctorFinding:
     config = ctx.load_config()
     if config is None:
@@ -407,11 +440,16 @@ def _publish_pypi_finding(ctx: DoctorContext) -> DoctorFinding:
             detail=f"PyPI credentials are available for {len(projects)} project(s).",
         )
     names = ", ".join(project.project_id or project.name for project in projects[:3])
-    return DoctorFinding(
+    return _publish_credentials_finding(
+        ctx=ctx,
         key="publish-pypi",
         label="Publish / PyPI",
-        status=DoctorStatus.FAIL,
-        detail=f"Missing PyPI credentials for {len(projects)} project(s), including {names}.",
+        strict_detail=f"Missing PyPI credentials for {len(projects)} project(s), including {names}.",
+        advisory_detail=(
+            f"No local PyPI credentials are configured for {len(projects)} project(s), including {names}. "
+            "That is fine if releases publish through GitHub Actions; configure local credentials only for "
+            "`dev publish` from this machine."
+        ),
         fix='Add `(pypi-token "...")` to root.private.clj or export `TWINE_USERNAME`/`TWINE_PASSWORD`.',
     )
 
@@ -453,11 +491,16 @@ def _publish_maven_central_finding(ctx: DoctorContext) -> DoctorFinding:
         missing.append("maven-gpg-private-key")
     if not gpg_passphrase:
         missing.append("maven-gpg-passphrase")
-    return DoctorFinding(
+    return _publish_credentials_finding(
+        ctx=ctx,
         key="publish-maven-central",
         label="Publish / Maven Central",
-        status=DoctorStatus.FAIL,
-        detail=f"Missing Maven Central publishing material: {', '.join(missing)}.",
+        strict_detail=f"Missing Maven Central publishing material: {', '.join(missing)}.",
+        advisory_detail=(
+            "No local Maven Central publishing material is configured. "
+            "That is fine if releases publish through GitHub Actions; configure local credentials only for "
+            "`dev publish` from this machine."
+        ),
         fix=("Set the missing values in root.private.clj or export the matching " "`MAVEN_*` environment variables."),
     )
 
@@ -497,11 +540,16 @@ def _publish_intellij_finding(ctx: DoctorContext) -> DoctorFinding:
             detail=f"Marketplace token is available for {len(projects)} project(s).",
         )
     env_hint = ", ".join(sorted(env_names))
-    return DoctorFinding(
+    return _publish_credentials_finding(
+        ctx=ctx,
         key="publish-intellij",
         label="Publish / JetBrains Marketplace",
-        status=DoctorStatus.FAIL,
-        detail="Missing JetBrains Marketplace token.",
+        strict_detail="Missing JetBrains Marketplace token.",
+        advisory_detail=(
+            "No local JetBrains Marketplace token is configured. "
+            "That is fine if releases publish through GitHub Actions; configure a local token only for "
+            "`dev publish` from this machine."
+        ),
         fix=(
             'Add `(jetbrains-marketplace-token "...")` to root.private.clj or export one of '
             f"the expected environment variables: {env_hint}."
@@ -533,11 +581,16 @@ def _publish_jitpack_finding(ctx: DoctorContext) -> DoctorFinding:
             status=DoctorStatus.PASS,
             detail="OpenAI key is available for JitPack release version recommendations.",
         )
-    return DoctorFinding(
+    return _publish_credentials_finding(
+        ctx=ctx,
         key="publish-jitpack",
         label="Publish / JitPack",
-        status=DoctorStatus.FAIL,
-        detail="JitPack publishing requires an OpenAI key for version recommendations.",
+        strict_detail="JitPack publishing requires an OpenAI key for version recommendations.",
+        advisory_detail=(
+            "No local OpenAI key is configured for JitPack version recommendations. "
+            "That is fine if releases publish through GitHub Actions; configure it locally only for "
+            "`dev publish` from this machine."
+        ),
         fix='Add `(openai-key "...")` to root.private.clj before running `dev publish`.',
     )
 
@@ -792,7 +845,10 @@ def preflight_for_command(
 
     findings = collect_doctor_findings(
         check_ids=check_ids,
-        ctx=DoctorContext(selected_targets=projects),
+        ctx=DoctorContext(
+            selected_targets=projects,
+            publish_credential_mode=PublishCredentialMode.STRICT if command_path == "publish" else PublishCredentialMode.ADVISORY,
+        ),
     )
     failures = [finding for finding in findings if finding.status == DoctorStatus.FAIL]
     if not failures:

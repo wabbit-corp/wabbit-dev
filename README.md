@@ -236,6 +236,11 @@ The main target forms are:
 - `dev doctor`
 - `dev doctor --only publish app-wabbit-dev`
 - `dev doctor --json`
+
+`dev doctor` treats missing local publish credentials as advisory when releases
+are expected to run through GitHub Actions. Local publish credential checks stay
+strict when you run `dev publish`.
+
 - `dev docs check app-wabbit-dev`
 - `dev docs check --semantic app-wabbit-dev`
 - `dev build app-wabbit-dev --json`

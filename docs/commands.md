@@ -226,6 +226,10 @@ Runs an environment and workspace readiness check covering:
 - contributor audit baseline identity
 - commit and publish credentials
 
+For publish targets, `dev doctor` treats missing local credentials as advisory:
+that is fine when publishing is handled by GitHub Actions. The same checks stay
+strict when you actually run `dev publish` locally.
+
 The CLI also reuses a subset of these checks as preflight for commands such as
 `setup`, `release verify`, `build`, `publish`, `commit`, `project ...`, `dep ...`, and
 `contributors audit`.

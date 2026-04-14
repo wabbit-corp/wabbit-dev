@@ -155,3 +155,68 @@ def test_doctor_json_output_includes_only_and_targets(
     assert '"build"' in output
     assert '"selectedTargets": [' in output
     assert '"app-wabbit-dev"' in output
+
+
+def test_publish_pypi_doctor_is_advisory_by_default(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import dev.tasks.doctor as doctor_task
+    from dev.tasks.doctor import DoctorContext, DoctorStatus, collect_doctor_findings
+
+    project = SimpleNamespace(project_id="python-easytime", name="python-easytime")
+    monkeypatch.setattr(
+        doctor_task,
+        "load_config",
+        lambda start=None: SimpleNamespace(
+            pypi_token=None,
+            maven_username=None,
+            maven_password=None,
+            maven_gpg_private_key=None,
+            maven_gpg_passphrase=None,
+            jetbrains_marketplace_token=None,
+            openai_key=None,
+            defined_projects={},
+        ),
+    )
+    monkeypatch.setattr(doctor_task, "_publish_target_projects", lambda config, target_name, ctx: [project])
+    monkeypatch.delenv("TWINE_PASSWORD", raising=False)
+
+    findings = collect_doctor_findings(check_ids=("publish-pypi",), ctx=DoctorContext(cwd=tmp_path))
+
+    assert len(findings) == 1
+    assert findings[0].status == DoctorStatus.PASS
+    assert "GitHub Actions" in findings[0].detail
+    assert "local PyPI credentials" in findings[0].detail
+
+
+def test_publish_pypi_preflight_stays_strict(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import dev.tasks.doctor as doctor_task
+    from dev.tasks.doctor import DoctorContext, DoctorStatus, collect_doctor_findings
+
+    project = SimpleNamespace(project_id="python-easytime", name="python-easytime")
+    monkeypatch.setattr(
+        doctor_task,
+        "load_config",
+        lambda start=None: SimpleNamespace(
+            pypi_token=None,
+            maven_username=None,
+            maven_password=None,
+            maven_gpg_private_key=None,
+            maven_gpg_passphrase=None,
+            jetbrains_marketplace_token=None,
+            openai_key=None,
+            defined_projects={},
+        ),
+    )
+    monkeypatch.setattr(doctor_task, "_publish_target_projects", lambda config, target_name, ctx: [project])
+    monkeypatch.delenv("TWINE_PASSWORD", raising=False)
+
+    findings = collect_doctor_findings(
+        check_ids=("publish-pypi",),
+        ctx=DoctorContext(
+            cwd=tmp_path,
+            publish_credential_mode=doctor_task.PublishCredentialMode.STRICT,
+        ),
+    )
+
+    assert len(findings) == 1
+    assert findings[0].status == DoctorStatus.FAIL
+    assert "Missing PyPI credentials" in findings[0].detail
