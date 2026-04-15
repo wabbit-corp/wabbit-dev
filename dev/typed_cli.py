@@ -576,7 +576,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _dedupe([".", *_configured_names(config)])
             case "check-target":
                 configured = _configured_names(config)
-                return _dedupe([":root", *configured, *[f":{name}" for name in configured]])
+                return _dedupe([".", ":root", *configured, *[f":{name}" for name in configured]])
             case "check-name":
                 from dev.tasks.check import list_check_selectors
 
@@ -622,11 +622,23 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 case CompletionTargetPositionalValue(index=0):
                     config = _load_workspace_config()
                     candidates = [CompletionCandidate(value) for value in _completion_values_for_kind("check-target", config)]
+                    candidates.extend(
+                        CompletionCandidate(value) for value in _completion_values_for_kind("check-bundle", config)
+                    )
+                    candidates.extend(CompletionCandidate(value) for value in _completion_values_for_kind("check-name", config))
                     candidates.extend(_path_completion_candidates(context.current_word))
                     return candidates
                 case CompletionTargetPositionalValue():
                     config = _load_workspace_config()
-                    return [CompletionCandidate(value) for value in _completion_values_for_kind("check-name", config)]
+                    candidates = [CompletionCandidate(value) for value in _completion_values_for_kind("check-name", config)]
+                    candidates.extend(
+                        CompletionCandidate(value) for value in _completion_values_for_kind("check-bundle", config)
+                    )
+                    candidates.extend(
+                        CompletionCandidate(value) for value in _completion_values_for_kind("check-target", config)
+                    )
+                    candidates.extend(_path_completion_candidates(context.current_word))
+                    return candidates
                 case _:
                     return []
 
@@ -1381,16 +1393,80 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             case _:
                 return fail([ValidationFailed("Invalid backup restore arguments.")])
 
+    def _is_check_target_token(token: str, config: Config | None) -> bool:
+        if token in {".", ":root"}:
+            return True
+        if token.startswith(":"):
+            return True
+        path = Path(token).expanduser()
+        if path.exists():
+            return True
+        if config is None:
+            return False
+        return token in config.defined_projects or token in config.defined_repos
+
+    def _decode_check_run_parts(
+        args: list[str],
+        only_values: list[str],
+    ) -> tuple[str | None, list[str], list[str]]:
+        from dev.tasks.check import list_check_bundle_names, list_check_selectors
+
+        config = _load_workspace_config()
+        known_bundles = set(list_check_bundle_names())
+        known_selectors = set(list_check_selectors(config))
+
+        target: str | None = None
+        selectors: list[str] = []
+        bundles: list[str] = []
+
+        def add_bundle(value: str) -> None:
+            if value not in bundles:
+                bundles.append(value)
+
+        def add_selector(value: str) -> None:
+            selectors.append(value)
+
+        def classify_positional(token: str) -> None:
+            nonlocal target
+            if token in known_bundles:
+                add_bundle(token)
+                return
+            if token in known_selectors:
+                add_selector(token)
+                return
+            if target is None and _is_check_target_token(token, config):
+                target = token
+                return
+            add_selector(token)
+
+        def classify_only(token: str) -> None:
+            nonlocal target
+            if token in known_bundles:
+                add_bundle(token)
+                return
+            if token in known_selectors:
+                add_selector(token)
+                return
+            if target is None and _is_check_target_token(token, config):
+                target = token
+                return
+            add_selector(token)
+
+        for token in args:
+            classify_positional(token)
+        for token in only_values:
+            classify_only(token)
+
+        return target, selectors, bundles
+
     def _check_run_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         args = _string_list(values.positional("arg"))
-        target = args[0] if args else None
-        legacy_selectors = args[1:] if len(args) > 1 else []
-        selectors = [*legacy_selectors, *_option_string_list(values, "--only")]
+        target, selectors, inferred_bundles = _decode_check_run_parts(args, _option_string_list(values, "--only"))
         return succeed(
             CheckRunRequest(
                 target=target,
                 selectors=selectors,
-                bundles=_option_string_list(values, "--bundle"),
+                bundles=_dedupe([*inferred_bundles, *_option_string_list(values, "--bundle")]),
                 fix=_bool_value(values, "--fix"),
                 json_output=_bool_value(values, "--json"),
             )
@@ -2183,8 +2259,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     )
     push_command = Command(
         name="push",
-        header="Push origin/master and tags for selected repos or all configured repos.",
-        options=(flag(long="dry-run", help="Print which repos would be pushed without sending branch or tag updates."),),
+        header="Push the current branch to its configured upstream when the remote can fast-forward.",
+        options=(flag(long="dry-run", help="Print pushability and upstream state without sending branch updates."),),
         positionals=(
             positional(
                 push_target_argument,
@@ -2334,7 +2410,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             positional(
                 _check_run_argument(),
                 "arg",
-                help="Optional target followed by optional explicit check IDs or legacy class names.",
+                help="Target, check bundle names such as `docs` or `python`, and/or explicit check IDs in any order.",
                 repeated=True,
             ),
         ),

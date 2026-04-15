@@ -75,7 +75,7 @@ commands from the workspace root.
 | `cloc [TARGET ...]` | Run `cloc` for configured targets or direct paths. |
 | `status [TARGET ...] [--json]` | Show staged, unstaged, and untracked status for the current or selected repo targets. |
 | `commit [TARGET ...] [--dry-run]` | Run PROD setup, stage changes, and create commits, or print the commit plan. |
-| `push [TARGET ...] [--dry-run]` | Push `origin/master` and tags, or print the push plan. |
+| `push [TARGET ...] [--dry-run]` | Push the current branch to its configured upstream when it can fast-forward, or print the push plan. |
 | `project list` | List configured projects grouped by repository. |
 | `project show [TARGET ...] [--json]` | Show detailed metadata for one or more configured projects. |
 | `project deps [TARGET ...] [--json]` | Show resolved dependencies for one or more configured projects. |
@@ -818,8 +818,8 @@ dev check list --json
 dev check show SpdxHeaderCheck
 dev check show SpdxHeaderCheck --json
 dev check describe SpdxHeaderCheck
-dev check [TARGET] [CHECK ...] [--fix]
-dev check run [TARGET] [CHECK ...] [--fix]
+dev check [TARGET|BUNDLE|CHECK ...] [--fix]
+dev check run [TARGET|BUNDLE|CHECK ...] [--fix]
 ```
 
 Runs the loaded check suite against:
@@ -837,6 +837,16 @@ Discovery helpers:
 - `check config`: hidden compatibility shortcut for `config check`
 - `--json`: with `check list` or `check show`, emit structured output instead of text
 
+Run-form notes:
+
+- one target can be provided as `.`, `:root`, a repo ID, a project ID, or a filesystem path
+- bundle names such as `docs`, `security`, `kmp`, `gradle`, or `python` can appear positionally or through `--bundle`
+- explicit check selectors can appear before or after the target
+- these are equivalent:
+  `dev check docs kotlin-base58`
+  `dev check kotlin-base58 docs`
+  `dev check --bundle docs kotlin-base58`
+
 Examples:
 
 ```bash
@@ -849,12 +859,14 @@ dev check :root --fix
 dev check run . SpdxHeaderCheck
 dev check show SpdxHeaderCheck
 dev check . SpdxHeaderCheck
+dev check docs .
+dev check kotlin-base58 docs
 ```
 
 Important notes:
 
 - `dev check` and `dev check run` are equivalent
-- explicit check names use the Python class names registered by the loaded check modules
+- explicit check selectors can use CLI IDs, issue IDs, or legacy Python class names
 - checks honor `.gitignore`, `.checkignore`, `checks/disable`, and `checks/ignore-finding`
 - `--fix` only applies to checks that supply an automatic fix callback
 
@@ -1001,7 +1013,8 @@ dev push [TARGET ...]
 dev push [TARGET ...] --dry-run
 ```
 
-Pushes `origin/master` and tags.
+Pushes the current branch to its configured upstream when the remote can accept
+the update as a fast-forward.
 
 Target behavior:
 
@@ -1010,10 +1023,15 @@ Target behavior:
 - configured project ID: resolve the repo for that project
 - filesystem path: resolve the repo containing that path
 
-Current caveat: the branch target is hard-coded to `master`.
+Behavior details:
 
-Use `--dry-run` to print the resolved repositories before pushing branch or tag
-updates.
+- fetches the upstream remote first
+- pushes only when the local branch is ahead and not behind
+- refuses detached HEAD, missing-upstream, behind, or diverged states
+- does not assume `master` or `origin`
+
+Use `--dry-run` to print the resolved repositories and their pushability before
+sending branch updates.
 
 ## Services and Backup
 

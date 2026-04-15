@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from types import SimpleNamespace
 
 import pytest
 
@@ -822,6 +823,7 @@ async def test_publish_and_jitpack_bypass_argparse_with_typed_cli(monkeypatch: p
 @pytest.mark.asyncio
 async def test_check_shortcuts_bypass_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev import cli
+    import dev.typed_cli as typed_cli
     from dev.tasks import check as check_task
     from dev.tasks import doctor as doctor_task
     from dev.tasks import spdx_headers as spdx_task
@@ -861,7 +863,17 @@ async def test_check_shortcuts_bypass_argparse_with_typed_cli(monkeypatch: pytes
         return 0
 
     monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
+    monkeypatch.setattr(
+        typed_cli,
+        "_load_workspace_config",
+        lambda: SimpleNamespace(
+            defined_projects={"kotlin-base58": SimpleNamespace()},
+            defined_repos={},
+        ),
+    )
     monkeypatch.setattr(doctor_task, "preflight_for_command", lambda *args, **kwargs: True)
+    monkeypatch.setattr(check_task, "list_check_bundle_names", lambda: ["docs", "security"])
+    monkeypatch.setattr(check_task, "list_check_selectors", lambda config=None: ["spdx-header", "text-quality"])
     monkeypatch.setattr(check_task, "check_main", fake_check_main)
     monkeypatch.setattr(check_task, "list_checks", fake_list_checks)
     monkeypatch.setattr(check_task, "show_check", fake_show_check)
@@ -877,6 +889,15 @@ async def test_check_shortcuts_bypass_argparse_with_typed_cli(monkeypatch: pytes
     monkeypatch.setattr("sys.argv", ["dev.py", "check", "show", "spdx-header", "--json"])
     show_result = await cli.async_main()
 
+    monkeypatch.setattr("sys.argv", ["dev.py", "check", "docs", "kotlin-base58"])
+    check_bundle_first_result = await cli.async_main()
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "check", "kotlin-base58", "docs"])
+    check_target_first_result = await cli.async_main()
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "check", "--only", ".", "docs"])
+    check_only_target_result = await cli.async_main()
+
     monkeypatch.setattr("sys.argv", ["dev.py", "spdx", "headers", "--fix", "."])
     spdx_result = await cli.async_main()
 
@@ -886,9 +907,17 @@ async def test_check_shortcuts_bypass_argparse_with_typed_cli(monkeypatch: pytes
     assert check_result == 0
     assert list_result == 0
     assert show_result == 0
+    assert check_bundle_first_result == 0
+    assert check_target_first_result == 0
+    assert check_only_target_result == 0
     assert spdx_result == 0
     assert secrets_result == 0
-    assert check_called == [(".", ["spdx-header"], True, [], False)]
+    assert check_called == [
+        (".", ["spdx-header"], True, [], False),
+        ("kotlin-base58", None, False, ["docs"], False),
+        ("kotlin-base58", None, False, ["docs"], False),
+        (".", None, False, ["docs"], False),
+    ]
     assert list_called == [True]
     assert show_called == [("spdx-header", True)]
     assert spdx_called == [(".", True)]

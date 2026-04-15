@@ -134,6 +134,7 @@ def test_completion_suggests_project_and_repo_targets(monkeypatch, capsys) -> No
 
 
 def test_completion_suggests_check_targets_and_colon_forms(monkeypatch, capsys) -> None:
+    import dev.tasks.check as check_task
     import dev.typed_cli as typed_cli
 
     config = SimpleNamespace(
@@ -142,6 +143,8 @@ def test_completion_suggests_check_targets_and_colon_forms(monkeypatch, capsys) 
     )
 
     monkeypatch.setattr(typed_cli, "_load_workspace_config", lambda: config)
+    monkeypatch.setattr(check_task, "list_check_selectors", lambda config=None: ["spdx-header"])
+    monkeypatch.setattr(check_task, "list_check_bundle_names", lambda: ["docs"])
 
     candidates = _run_typed_completion(["dev", "check", ""], 2, capsys)
 
@@ -159,12 +162,47 @@ def test_completion_suggests_check_names_after_target(monkeypatch, capsys) -> No
     import dev.tasks.check as check_task
     import dev.typed_cli as typed_cli
 
-    monkeypatch.setattr(typed_cli, "_load_workspace_config", lambda: None)
+    monkeypatch.setattr(
+        typed_cli,
+        "_load_workspace_config",
+        lambda: SimpleNamespace(
+            defined_projects=OrderedDict([("app-wabbit-dev", SimpleNamespace())]),
+            defined_repos=OrderedDict([("jeeves", SimpleNamespace())]),
+        ),
+    )
     monkeypatch.setattr(check_task, "list_check_selectors", lambda config=None: ["spdx-header", "text-quality"])
+    monkeypatch.setattr(check_task, "list_check_bundle_names", lambda: ["docs", "security"])
 
     candidates = _run_typed_completion(["dev", "check", "app-wabbit-dev", ""], 3, capsys)
 
-    assert candidates == ("spdx-header", "text-quality")
+    assert "spdx-header" in candidates
+    assert "text-quality" in candidates
+    assert "docs" in candidates
+    assert "." in candidates
+    assert "jeeves" in candidates
+
+
+def test_completion_suggests_check_targets_after_bundle(monkeypatch, capsys) -> None:
+    import dev.tasks.check as check_task
+    import dev.typed_cli as typed_cli
+
+    monkeypatch.setattr(
+        typed_cli,
+        "_load_workspace_config",
+        lambda: SimpleNamespace(
+            defined_projects=OrderedDict([("kotlin-base58", SimpleNamespace())]),
+            defined_repos=OrderedDict([("jeeves", SimpleNamespace())]),
+        ),
+    )
+    monkeypatch.setattr(check_task, "list_check_selectors", lambda config=None: ["spdx-header"])
+    monkeypatch.setattr(check_task, "list_check_bundle_names", lambda: ["docs", "security"])
+
+    candidates = _run_typed_completion(["dev", "check", "docs", ""], 3, capsys)
+
+    assert "." in candidates
+    assert "kotlin-base58" in candidates
+    assert "jeeves" in candidates
+    assert "spdx-header" in candidates
 
 
 def test_completion_suggests_check_names_for_show(monkeypatch, capsys) -> None:

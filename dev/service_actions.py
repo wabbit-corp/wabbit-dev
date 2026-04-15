@@ -10,11 +10,12 @@ from pathlib import Path
 import time
 
 from git import Repo
-from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
+from git.exc import InvalidGitRepositoryError, NoSuchPathError
 
 from dev.config import Config, Project, load_config
-from dev.git_env import configured_git_ssh, git_subprocess_env
+from dev.git_env import git_subprocess_env
 from dev.repo_resolution import ResolvedRepoTarget, resolve_repo_target
+from dev.tasks.push import push_resolved_repo_target
 from dev.tasks.setup import commit_repo_changes
 
 
@@ -168,22 +169,8 @@ def commit_repo_target(workspace_root: Path, target_name: str) -> RepoActionResu
 
 def push_repo_target(workspace_root: Path, target_name: str) -> RepoActionResult:
     config, target = _resolve_target(workspace_root, target_name)
-
-    try:
-        repo = Repo(target.path, search_parent_directories=True)
-    except (InvalidGitRepositoryError, NoSuchPathError) as ex:
-        return RepoActionResult(ok=False, message=f"{target.name}: failed to open git repo ({ex})")
-
-    try:
-        with configured_git_ssh(repo.git, config):
-            repo.git.push("origin", "master")
-            repo.git.push(tags=True)
-    except GitCommandError as ex:
-        repo.close()
-        return RepoActionResult(ok=False, message=f"{target.name}: push failed ({ex})")
-
-    repo.close()
-    return RepoActionResult(ok=True, message=f"{target.name}: pushed origin/master and tags")
+    ok, message = push_resolved_repo_target(config, target)
+    return RepoActionResult(ok=ok, message=message)
 
 
 __all__ = [

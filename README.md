@@ -140,7 +140,7 @@ subcommands and compatibility aliases, lives in
 | `cloc [TARGET ...]` | Runs `cloc` for configured targets or arbitrary filesystem paths. |
 | `status [TARGET ...] [--json]` | Shows staged, unstaged, and untracked repo status for the current or selected targets. |
 | `commit [TARGET ...] [--dry-run]` | Runs PROD setup, stages changes, and creates commits, or prints the commit plan. |
-| `push [TARGET ...] [--dry-run]` | Pushes `origin/master` and tags, or prints the push plan. |
+| `push [TARGET ...] [--dry-run]` | Pushes the current branch to its configured upstream when it can fast-forward, or prints the push plan. |
 | `project list` | Lists configured projects grouped by repository. |
 | `project show [TARGET ...] [--json]` | Shows detailed metadata for one or more configured projects. |
 | `project deps [TARGET ...] [--json]` | Shows resolved dependencies for one or more configured projects. |
@@ -256,6 +256,8 @@ strict when you run `dev publish`.
 - `dev check jeeves`
 - `dev check :app-wabbit-dev`
 - `dev check :root`
+- `dev check docs .`
+- `dev check kotlin-base58 docs`
 - `dev secrets scan .`
 - `dev security scan .`
 - `dev install tools --tool gitleaks --tool ktfmt`
