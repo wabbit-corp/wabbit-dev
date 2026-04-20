@@ -612,7 +612,6 @@ def test_gradle_project_accepts_local_gradle_plugin_definition(tmp_path: Path) -
     assert resolve_kotlin_compiler_plugin_id(config, plugin) == "one.wabbit.acyclic"
     assert resolve_kotlin_plugin_version(config, plugin) == "0.1.0"
 
-
 def test_add_default_gradle_plugin_applies_to_subsequent_projects_only(tmp_path: Path) -> None:
     from dev.config import GradleProject, get_gradle_plugin_applications
 
@@ -1383,3 +1382,22 @@ def test_loads_maven_central_secret_config_and_repo_docs_project(tmp_path: Path)
     assert config.maven_gpg_passphrase == "secret-passphrase"
     assert config.maven_gpg_key_id == "ABC123"
     assert config.defined_repos["jeeves"].docs_project_id == "jeeves/api"
+
+
+def test_additional_ai_keys_are_loaded(tmp_path: Path) -> None:
+    config = _load_from_temp_root(
+        tmp_path,
+        "",
+        root_private_clj="\n".join(
+            [
+                '(claude-key "claude-secret")',
+                '(gemini-key "gemini-secret")',
+                '(brave-key "brave-secret")',
+                "",
+            ]
+        ),
+    )
+
+    assert config.anthropic_key == "claude-secret"
+    assert config.gemini_key == "gemini-secret"
+    assert config.brave_key == "brave-secret"

@@ -63,6 +63,7 @@ commands from the workspace root.
 | `config check` | Parse and validate `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...] [--commit-if-setup-only] [--json]` | Generate or refresh managed project files, with an optional safe post-setup auto-commit. |
 | `llmcopy PATH ...` | Copy file contents to the clipboard in an LLM-friendly wrapper and report GPT-5.4 token totals. |
+| `ask gpt|claude|gemini [--conversation ID] [--file FILE]... [--model MODEL] [TEXT ...]` | Ask a hosted model, attach text or image files, and cache the conversation locally for reuse. |
 | `dep graph [TARGET ...]` | Render an SVG dependency graph. |
 | `dep updates` | Check configured Maven libraries for newer versions. |
 | `publish [TARGET ...] [--dry-run]` | Publish configured projects in dependency order or print the publish plan. |
@@ -740,6 +741,47 @@ Ignored by default:
 - `__pycache__`
 - `.DS_Store`
 - `Thumbs.db`
+
+### `ask gpt` / `ask claude` / `ask gemini`
+
+```bash
+dev ask gpt [--conversation ID] [--file FILE]... [--model MODEL] [TEXT ...]
+dev ask claude [--conversation ID] [--file FILE]... [--model MODEL] [TEXT ...]
+dev ask gemini [--conversation ID] [--file FILE]... [--model MODEL] [TEXT ...]
+```
+
+Sends a prompt to the selected provider, optionally attaching local files, then
+caches the full conversation transcript for later `--conversation` reuse.
+
+Current behavior:
+
+- `gpt` currently defaults to `gpt-5.4`
+- `claude` currently defaults to `claude-sonnet-4-6`
+- `gemini` currently defaults to `gemini-3.1-pro-preview`
+- `--conversation ID` resumes or names a cached conversation; omit it to start a new one
+- `--file FILE` is repeatable and currently supports UTF-8 text files plus raster images
+- `--model MODEL` overrides the default model for this turn and stores that model on the conversation
+
+Credential lookup order:
+
+- provider key in `root.private.clj`
+- matching environment variable
+- matching entry in workspace `keys.env`
+
+Supported key names:
+
+- GPT: `openai-key`, `OPENAI_API_KEY`, `OPENAI_KEY`
+- Claude: `claude-key`, `anthropic-key`, `ANTHROPIC_API_KEY`, `ANTHROPIC_KEY`, `CLAUDE_API_KEY`, `CLAUDE_KEY`
+- Gemini: `gemini-key`, `GEMINI_API_KEY`, `GEMINI_KEY`, `GOOGLE_API_KEY`
+
+Examples:
+
+```bash
+dev ask gpt "Summarize the current release blockers."
+dev ask claude --conversation docs-review --file README.md --file docs/index.md "Review this doc set."
+dev ask gemini --file screenshot.png "Describe the UI issue in this image."
+dev ask gpt --conversation triage --model gpt-5.4 "Continue."
+```
 
 ## Dependency and Release Inspection
 

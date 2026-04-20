@@ -28,8 +28,11 @@ Use this file for:
 Use this file for:
 
 - `openai-key`
+- `gemini-key`
 - `github-token`
 - `anthropic-key`
+- `claude-key`
+- `brave-key`
 - `jetbrains-marketplace-token`
 - `pypi-token`
 - `maven-username`
@@ -138,8 +141,11 @@ Examples:
 | --- | --- |
 | `(define name value)` | Define a reusable variable. Currently most useful for Maven version strings. |
 | `(openai-key "...")` | OpenAI credential used by AI-powered workflows such as `commit`. |
+| `(gemini-key "...")` | Gemini credential used by `dev ask gemini`. |
 | `(github-token "...")` | GitHub API token used by setup and related workflows. |
 | `(anthropic-key "...")` | Anthropic credential. |
+| `(claude-key "...")` | Alias for `anthropic-key`, used by `dev ask claude`. |
+| `(brave-key "...")` | Brave Search API credential for future search-backed workflows. |
 | `(jetbrains-marketplace-token "...")` | Token for JetBrains Marketplace publishing. |
 | `(pypi-token "...")` | Token for PyPI publishing. |
 | `(maven-username "...")` | Maven Central username. |

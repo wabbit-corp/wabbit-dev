@@ -399,6 +399,12 @@ class OpenaiKeyCommand:
     key: str
 
 
+@tag("gemini-key")
+@dataclass(frozen=True)
+class GeminiKeyCommand:
+    key: str
+
+
 @tag("github-token")
 @dataclass(frozen=True)
 class GithubTokenCommand:
@@ -414,6 +420,18 @@ class GithubSshKeyCommand:
 @tag("anthropic-key")
 @dataclass(frozen=True)
 class AnthropicKeyCommand:
+    key: str
+
+
+@tag("claude-key")
+@dataclass(frozen=True)
+class ClaudeKeyCommand:
+    key: str
+
+
+@tag("brave-key")
+@dataclass(frozen=True)
+class BraveKeyCommand:
     key: str
 
 
@@ -1065,9 +1083,12 @@ BuiltinTopLevelCommand = (
     | ChecksIgnoreFindingCommand
     | DefineCommand
     | OpenaiKeyCommand
+    | GeminiKeyCommand
     | GithubTokenCommand
     | GithubSshKeyCommand
     | AnthropicKeyCommand
+    | ClaudeKeyCommand
+    | BraveKeyCommand
     | JetbrainsMarketplaceTokenCommand
     | PypiTokenCommand
     | NugetApiKeyCommand
@@ -1110,9 +1131,12 @@ BUILTIN_TOPLEVEL_COMMAND_TYPES: tuple[type[object], ...] = (
     ChecksIgnoreFindingCommand,
     DefineCommand,
     OpenaiKeyCommand,
+    GeminiKeyCommand,
     GithubTokenCommand,
     GithubSshKeyCommand,
     AnthropicKeyCommand,
+    ClaudeKeyCommand,
+    BraveKeyCommand,
     JetbrainsMarketplaceTokenCommand,
     PypiTokenCommand,
     NugetApiKeyCommand,
@@ -1219,6 +1243,7 @@ __all__ = [
     "MavenUsernameCommand",
     "NugetApiKeyCommand",
     "OpenaiKeyCommand",
+    "GeminiKeyCommand",
     "PaperPluginCommand",
     "PypiTokenCommand",
     "PremakeProjectCommand",
@@ -1236,5 +1261,7 @@ __all__ = [
     "Value",
     "VarName",
     "AnthropicKeyCommand",
+    "ClaudeKeyCommand",
+    "BraveKeyCommand",
     "make_top_level_target",
 ]

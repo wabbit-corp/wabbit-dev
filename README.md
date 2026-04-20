@@ -95,6 +95,7 @@ dev check :root
 dev check app-wabbit-dev
 dev spdx headers . --fix
 dev docs check app-wabbit-dev
+dev ask gpt "Summarize the current release blockers."
 ```
 
 Build a configured project:
@@ -128,6 +129,7 @@ subcommands and compatibility aliases, lives in
 | `config check` | Parses and validates `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...] [--commit-if-setup-only] [--json]` | Generates or refreshes managed project files from configuration, with an optional safe post-setup auto-commit mode. |
 | `llmcopy PATH ...` | Copies file contents to the clipboard in an LLM-friendly wrapper and reports GPT-5.4 token totals. |
+| `ask gpt\|claude\|gemini [--conversation ID] [--file FILE]... [--model MODEL] [TEXT ...]` | Asks a hosted model, attaches text or image files, and caches the conversation locally for reuse. |
 | `dep graph [TARGET ...]` | Renders an SVG dependency graph for the workspace or selected configured targets. |
 | `dep updates` | Checks configured Maven libraries for newer upstream versions. |
 | `publish [TARGET ...] [--dry-run]` | Publishes configured projects in dependency order or prints the publish plan. |
@@ -244,6 +246,8 @@ strict when you run `dev publish`.
 - `dev docs check app-wabbit-dev`
 - `dev docs check --semantic app-wabbit-dev`
 - `dev build app-wabbit-dev --json`
+- `dev ask gpt "Summarize the current release blockers."`
+- `dev ask claude --conversation docs-review --file README.md "Review this README."`
 - `dev setup app-wabbit-dev --json`
 - `dev status app-wabbit-dev --json`
 - `dev check list`

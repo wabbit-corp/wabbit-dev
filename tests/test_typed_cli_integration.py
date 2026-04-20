@@ -922,3 +922,60 @@ async def test_check_shortcuts_bypass_argparse_with_typed_cli(monkeypatch: pytes
     assert show_called == [("spdx-header", True)]
     assert spdx_called == [(".", True)]
     assert secrets_called == ["."]
+
+
+@pytest.mark.asyncio
+async def test_ask_commands_bypass_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import ask as ask_task
+
+    called: list[tuple[str, str, str | None, list[str], str | None]] = []
+
+    def fake_ask(
+        provider: str,
+        *,
+        prompt: str,
+        conversation_id: str | None,
+        file_paths: list[str],
+        model: str | None = None,
+        store_path: str | None = None,
+    ) -> int:
+        del store_path
+        called.append((provider, prompt, conversation_id, file_paths, model))
+        return 0
+
+    monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
+    monkeypatch.setattr(ask_task, "ask", fake_ask)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "dev.py",
+            "ask",
+            "claude",
+            "--conversation",
+            "demo-123",
+            "--file",
+            "README.md",
+            "--file",
+            "docs/index.md",
+            "--model",
+            "claude-sonnet-4-6",
+            "Explain",
+            "the",
+            "current",
+            "repo",
+        ],
+    )
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [
+        (
+            "claude",
+            "Explain the current repo",
+            "demo-123",
+            ["README.md", "docs/index.md"],
+            "claude-sonnet-4-6",
+        )
+    ]

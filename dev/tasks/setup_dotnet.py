@@ -562,11 +562,46 @@ def _project_type_guid(project: DotnetProject) -> str:
     return _C_SHARP_PROJECT_TYPE_GUID
 
 
+def _solution_projects(
+    config: Config,
+    projects: Sequence[DotnetProject],
+    *,
+    mode: RepoSetupMode,
+) -> list[DotnetProject]:
+    selected: list[DotnetProject] = []
+    seen: set[str] = set()
+    queue = list(projects)
+
+    while queue:
+        project = queue.pop(0)
+        project_key = project.project_id or project.name
+        if project_key in seen:
+            continue
+        seen.add(project_key)
+        selected.append(project)
+
+        if mode != RepoSetupMode.LOCAL:
+            continue
+
+        local_project_dependencies, _package_references = _project_reference_dependencies(
+            config,
+            project,
+            mode=mode,
+        )
+        for dependency_project in local_project_dependencies:
+            dependency_key = dependency_project.project_id or dependency_project.name
+            if dependency_key in seen:
+                continue
+            queue.append(dependency_project)
+
+    return selected
+
+
 def _render_solution_text(
-    repo_definition: RepoDefinition,
+    *,
+    root_path: Path,
     projects: Sequence[DotnetProject],
 ) -> str:
-    root_path = repo_definition.path
     solution_lines = [
         "Microsoft Visual Studio Solution File, Format Version 12.00",
         "# Visual Studio Version 17",
@@ -575,7 +610,7 @@ def _render_solution_text(
     ]
     sorted_projects = sorted(projects, key=lambda item: item.project_id or item.name)
     for project in sorted_projects:
-        relative_path = dotnet_project_file(project).relative_to(root_path).as_posix().replace("/", "\\")
+        relative_path = Path(os.path.relpath(dotnet_project_file(project), start=root_path)).as_posix().replace("/", "\\")
         solution_lines.append(
             f'Project("{_project_type_guid(project)}") = "{project.effective_assembly_name}", "{relative_path}", "{_project_guid(project)}"'
         )
@@ -695,10 +730,11 @@ def _write_repo_root_files(
 
     solution_name = repo_definition.solution_name or repo_definition.repo_id
     solution_path = root_path / f"{solution_name}.sln"
+    solution_projects = _solution_projects(ctx.config, projects, mode=ctx.mode)
     ctx.setup_plan.replace_text(
         repo_root=root_path,
         path=solution_path,
-        content=_render_solution_text(repo_definition, projects),
+        content=_render_solution_text(root_path=root_path, projects=solution_projects),
         category=SetupPlanCategory.BUILD,
         ownership=SetupPlanOwnership.MANAGED_FILE,
     )

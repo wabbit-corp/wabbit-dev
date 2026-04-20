@@ -534,6 +534,139 @@ def test_setup_dotnet_local_mode_uses_cross_repo_project_reference_when_dependen
     assert 'ProjectReference Include="../../../dep-repo/src/Wabbit.Codec.NBT/Wabbit.Codec.NBT.fsproj"' in project_text
 
 
+def test_setup_dotnet_local_solution_includes_cross_repo_dependency_projects(tmp_path: Path) -> None:
+    import dev.tasks.setup_dotnet as setup_dotnet
+    from dev.config import Config, Dependency, DotnetProject, OwnershipType, ProjectDependencyTarget, Version
+    from dev.tasks.setup_common import RepoSetupMode
+
+    dependency_repo = tmp_path / "dep-repo"
+    dependency_dir = dependency_repo / "src" / "Wabbit.Codec.NBT"
+    dependency_dir.mkdir(parents=True)
+    dependency_file = dependency_dir / "Wabbit.Codec.NBT.fsproj"
+    dependency_file.write_text(
+        "\n".join(
+            [
+                '<Project Sdk="Microsoft.NET.Sdk">',
+                "  <ItemGroup>",
+                '    <Compile Include="NBT.fs" />',
+                "  </ItemGroup>",
+                "</Project>",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    app_repo = tmp_path / "app-repo"
+    app_dir = app_repo / "src" / "App"
+    app_dir.mkdir(parents=True)
+    app_file = app_dir / "App.fsproj"
+    app_file.write_text(
+        "\n".join(
+            [
+                '<Project Sdk="Microsoft.NET.Sdk">',
+                "  <ItemGroup>",
+                '    <Compile Include="Program.fs" />',
+                "  </ItemGroup>",
+                "</Project>",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (app_repo / "README.md").write_text("# App\n", encoding="utf-8")
+    (app_repo / "LICENSE.md").write_text("# License\n", encoding="utf-8")
+
+    dependency_project = DotnetProject(
+        path=dependency_dir,
+        name="codec-nbt",
+        version=Version.parse("0.1.0"),
+        description="NBT library",
+        authors=["Dev"],
+        license="AGPL",
+        quarantine=False,
+        publish=True,
+        github_repo="wabbit-corp/dep-repo",
+        ownership=OwnershipType.WABBIT,
+        resolved_dependencies=[],
+        language="fsharp",
+        project_kind="library",
+        sdk="Microsoft.NET.Sdk",
+        target_framework="net10.0",
+        project_id="dep-repo/src/Wabbit.Codec.NBT",
+        repo_id="dep-repo",
+        repo_root=dependency_repo,
+        managed_by_setup=False,
+        assembly_name="Wabbit.Codec.NBT",
+        package_id="Wabbit.Codec.NBT",
+        publish_target="nuget",
+        packable=True,
+    )
+    app_project = DotnetProject(
+        path=app_repo,
+        name="app",
+        version=Version.parse("0.1.0"),
+        description="App project",
+        authors=["Dev"],
+        license="AGPL",
+        quarantine=False,
+        publish=False,
+        github_repo="wabbit-corp/app-repo",
+        ownership=OwnershipType.WABBIT,
+        resolved_dependencies=[
+            Dependency(scope=None, target=ProjectDependencyTarget(project="dep-repo/src/Wabbit.Codec.NBT"))
+        ],
+        language="fsharp",
+        project_kind="exe",
+        sdk="Microsoft.NET.Sdk",
+        target_framework="net10.0",
+        project_id="app",
+        managed_by_setup=False,
+        assembly_name="App",
+        publish_target=None,
+        packable=True,
+    )
+
+    config = Config(raw=parse("()"))
+    config.workspace_root = tmp_path
+    config.default_company_legal_name = "Wabbit Corp"
+    config.default_git_user_name = "Test User"
+    config.defined_projects[dependency_project.project_id] = dependency_project
+    config.defined_projects[app_project.project_id] = app_project
+
+    ctx = SimpleNamespace(
+        config=config,
+        repo_template=tmp_path,
+        gitignore_template=jinja2.Template("# base\n"),
+        dotnet_gitignore_template=jinja2.Template("# dotnet\n"),
+        dotnet_global_json_template=jinja2.Template('{"sdk": {"version": "{{ dotnet_sdk_version }}"}}\n'),
+        dotnet_nuget_config_template=jinja2.Template("<configuration />\n"),
+        dotnet_directory_build_props_template=jinja2.Template("<Project />\n"),
+        dotnet_docs_quality_workflow_template=jinja2.Template(""),
+        dotnet_docs_deploy_workflow_template=jinja2.Template(""),
+        dotnet_release_publish_workflow_template=jinja2.Template(""),
+        python_mkdocs_template=jinja2.Template(""),
+        python_docs_index_template=jinja2.Template(""),
+        python_docs_installation_template=jinja2.Template(""),
+        python_docs_development_template=jinja2.Template(""),
+        python_contributing_template=jinja2.Template(""),
+        mode=RepoSetupMode.LOCAL,
+        setup_plan=SetupPlan(),
+    )
+
+    setup_dotnet.write_wabbit_legal_files = lambda _ctx, _project: None
+    setup_dotnet.write_banner = lambda _ctx, _project: None
+
+    setup_dotnet.setup_dotnet_project(ctx, app_project)
+
+    solution_text = (app_repo / "App.sln").read_text(encoding="utf-8")
+    assert 'Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "App", "src\\App\\App.fsproj"' in solution_text
+    assert (
+        'Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Wabbit.Codec.NBT", '
+        '"..\\dep-repo\\src\\Wabbit.Codec.NBT\\Wabbit.Codec.NBT.fsproj"'
+    ) in solution_text
+
+
 def test_setup_dotnet_project_preserves_unmanaged_xml_sections(tmp_path: Path) -> None:
     import dev.tasks.setup_dotnet as setup_dotnet
     from dev.config import Config, DotnetProject, OwnershipType, Version

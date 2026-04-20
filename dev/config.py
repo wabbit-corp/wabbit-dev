@@ -1782,9 +1782,11 @@ class Config:
     workspace_root: Path | None = None
 
     openai_key: str | None = None
+    gemini_key: str | None = None
     github_token: str | None = None
     github_ssh_key: str | None = None
     anthropic_key: str | None = None
+    brave_key: str | None = None
     jetbrains_marketplace_token: str | None = None
     pypi_token: str | None = None
     nuget_api_key: str | None = None
@@ -3077,6 +3079,10 @@ def load_config(start: Path | None = None) -> Config:
             config.openai_key = command.key
             return
 
+        if isinstance(command, config_typed.GeminiKeyCommand):
+            config.gemini_key = command.key
+            return
+
         if isinstance(command, config_typed.GithubTokenCommand):
             config.github_token = command.token
             return
@@ -3149,6 +3155,14 @@ def load_config(start: Path | None = None) -> Config:
 
         if isinstance(command, config_typed.AnthropicKeyCommand):
             config.anthropic_key = command.key
+            return
+
+        if isinstance(command, config_typed.ClaudeKeyCommand):
+            config.anthropic_key = command.key
+            return
+
+        if isinstance(command, config_typed.BraveKeyCommand):
+            config.brave_key = command.key
             return
 
         if isinstance(command, config_typed.JetbrainsMarketplaceTokenCommand):

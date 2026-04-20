@@ -169,6 +169,14 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         paths: list[str]
 
     @dataclass(frozen=True)
+    class AskRequest:
+        provider: str
+        conversation_id: str | None
+        file_paths: list[str]
+        prompt: str
+        model: str | None
+
+    @dataclass(frozen=True)
     class SetupRequest:
         targets: list[str]
         dev_mode: bool
@@ -412,6 +420,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         | ReleaseBundleRequest
         | SecurityScanRequest
         | LlmcopyRequest
+        | AskRequest
         | SetupRequest
         | PublishRequest
         | DuplicatesRequest
@@ -858,6 +867,23 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                     tokens.append("--json")
                 tokens.extend(targets)
                 return tokens
+            case AskRequest(
+                provider=provider,
+                conversation_id=conversation_id,
+                file_paths=file_paths,
+                prompt=prompt,
+                model=model,
+            ):
+                tokens = ["ask", provider]
+                if conversation_id is not None:
+                    tokens.extend(["--conversation", conversation_id])
+                if model is not None:
+                    tokens.extend(["--model", model])
+                for file_path in file_paths:
+                    tokens.extend(["--file", file_path])
+                if prompt:
+                    tokens.append(prompt)
+                return tokens
             case SetupRequest(
                 targets=targets,
                 dev_mode=dev_mode,
@@ -1204,6 +1230,29 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         if not paths:
             return fail([ValidationFailed("Expected at least one <path> argument.")])
         return succeed(LlmcopyRequest(paths=paths))
+
+    def _ask_decode(provider: str, values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        match _optional_string(values.option_or("--conversation", None), "conversation"):
+            case Failure(issues=issues):
+                return fail(issues)
+            case Success(value=conversation_id):
+                pass
+
+        match _optional_string(values.option_or("--model", None), "model"):
+            case Failure(issues=issues):
+                return fail(issues)
+            case Success(value=model):
+                pass
+
+        return succeed(
+            AskRequest(
+                provider=provider,
+                conversation_id=conversation_id,
+                file_paths=_option_string_list(values, "--file"),
+                prompt=" ".join(_string_list(values.positional("text"))).strip(),
+                model=model,
+            )
+        )
 
     def _setup_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(
@@ -1589,6 +1638,12 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _security_scan_decode(values)
             case ["llmcopy"]:
                 return _llmcopy_decode(values)
+            case ["ask", "gpt"]:
+                return _ask_decode("gpt", values)
+            case ["ask", "claude"]:
+                return _ask_decode("claude", values)
+            case ["ask", "gemini"]:
+                return _ask_decode("gemini", values)
             case ["publish"]:
                 return _publish_decode(values)
             case ["duplicates"]:
@@ -2005,6 +2060,61 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             ),
         ),
         decode=_unused_decode,
+    )
+    ask_gpt_command = Command(
+        name="gpt",
+        header="Ask OpenAI GPT with optional cached conversation history and file attachments.",
+        options=(
+            option(
+                Argument.string(),
+                long="conversation",
+                help="Resume or name a cached conversation. Omit to start a new one.",
+                meta_var="ID",
+            ),
+            option(
+                _path_argument(),
+                long="file",
+                help="Attach a UTF-8 text file or a raster image. Repeatable.",
+                repeated=True,
+                meta_var="FILE",
+            ),
+            option(
+                Argument.string(),
+                long="model",
+                help="Override the default GPT model for this turn or conversation.",
+                meta_var="MODEL",
+            ),
+        ),
+        positionals=(
+            positional(
+                Argument.string(),
+                "text",
+                help="Prompt text. Omit when you want to send only attached files.",
+                repeated=True,
+            ),
+        ),
+        decode=_unused_decode,
+    )
+    ask_claude_command = Command(
+        name="claude",
+        header="Ask Anthropic Claude with optional cached conversation history and file attachments.",
+        options=ask_gpt_command.options,
+        positionals=ask_gpt_command.positionals,
+        decode=_unused_decode,
+    )
+    ask_gemini_command = Command(
+        name="gemini",
+        header="Ask Google Gemini with optional cached conversation history and file attachments.",
+        options=ask_gpt_command.options,
+        positionals=ask_gpt_command.positionals,
+        decode=_unused_decode,
+    )
+    ask_command = Command(
+        name="ask",
+        header="Ask GPT, Claude, or Gemini and cache the conversation locally for reuse.",
+        subcommands=(ask_gpt_command, ask_claude_command, ask_gemini_command),
+        decode=_unused_decode,
+        help_on_empty=True,
     )
     publish_command = Command(
         name="publish",
@@ -2556,6 +2666,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             release_command,
             security_command,
             llmcopy_command,
+            ask_command,
             dep_command,
             publish_command,
             build_command,
@@ -2584,6 +2695,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             f"  {prog} service dashboard\n"
             f"  {prog} backup push\n"
             f"  {prog} completion bash\n"
+            f"  {prog} ask gpt \"Summarize the last release blockers.\"\n"
             f"  {prog} setup --local app-datatron\n"
             f"  {prog} build app-datatron\n"
             f"  {prog} check --bundle security .\n"
@@ -2774,6 +2886,22 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
 
                 llmcopy(paths)
                 return 0
+            case AskRequest(
+                provider=provider,
+                conversation_id=conversation_id,
+                file_paths=file_paths,
+                prompt=prompt,
+                model=model,
+            ):
+                from dev.tasks.ask import ask as ask_task
+
+                return ask_task(
+                    provider,
+                    prompt=prompt,
+                    conversation_id=conversation_id,
+                    file_paths=file_paths,
+                    model=model,
+                )
             case PublishRequest(targets=targets, dry_run=dry_run):
                 if not _preflight("publish", targets, dry_run=dry_run):
                     return 2
