@@ -60,6 +60,7 @@ commands from the workspace root.
 | `docs check [TARGET ...] [--semantic] [--json]` | Validate docs links, sections, snippets, hooks, and optional semantic quality. |
 | `docs snippets [TARGET ...] [--verify] [--json]` | Validate fenced docs snippets with optional deeper project-specific verification. |
 | `where [--json]` | Show the workspace, repo, and project context inferred from the current directory. |
+| `checkout [TARGET ...] [--dry-run] [--json]` | Clone missing configured repositories into their `root.clj` paths. |
 | `config check` | Parse and validate `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...] [--commit-if-setup-only] [--json]` | Generate or refresh managed project files, with an optional safe post-setup auto-commit. |
 | `llmcopy PATH ...` | Copy file contents to the clipboard in an LLM-friendly wrapper and report GPT-5.4 token totals. |
@@ -206,6 +207,23 @@ normally do not call this directly, but it remains a supported command path and
 is documented here because the completion scripts depend on it.
 
 ## Environment Diagnostics
+
+### `checkout`
+
+```bash
+dev checkout
+dev checkout --dry-run
+dev checkout app-wabbit-dev jeeves
+dev checkout --json
+```
+
+Clones repositories that are defined in `root.clj` but missing locally.
+
+- From the workspace root with no targets, it considers every configured repo root.
+- From inside a configured repo or project with no targets, it defaults to that current repo target.
+- Existing local git repos are skipped.
+- Repos without a configured GitHub slug are skipped.
+- If `root.private.clj` defines `(github-ssh-key "...")`, checkout uses SSH clone URLs; otherwise it uses HTTPS.
 
 ### `doctor`
 

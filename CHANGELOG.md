@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- add `dev checkout` to clone missing configured repositories from GitHub into their `root.clj` paths, with dry-run/JSON output and automatic SSH URL selection when `github-ssh-key` is configured
 - add a localhost `dev service dashboard` web UI with cached repo dirty state, release/watch diagnostics, slow-cadence health checks, and per-repo actions, and wire the macOS menubar service to open it
 - add supported Gradle flags to generated settings/build templates for disabling `settings.local.gradle.kts` overlays and enabling `MavenLocal` fallback for `one.wabbit*` artifacts during local verification lanes
 - derive generated Paper Gradle plugin and `paperDevBundle` versions from config instead of hardcoded template defaults, and update the paperweight fallback to `2.0.0-beta.17`

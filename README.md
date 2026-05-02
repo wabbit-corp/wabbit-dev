@@ -80,6 +80,7 @@ Inspect the configured project inventory:
 ```bash
 dev project list
 dev where
+dev checkout --dry-run
 ```
 
 Generate managed files for a project and its dependencies:
@@ -126,6 +127,7 @@ subcommands and compatibility aliases, lives in
 | `docs check [TARGET ...] [--semantic] [--json]` | Validates docs links, sections, snippets, hooks, and optional semantic quality such as unclear purpose or weak quickstarts, with constrained repo-local inspection in semantic mode. |
 | `docs snippets [TARGET ...] [--verify] [--json]` | Validates fenced docs snippets, with optional deeper project-specific verification. |
 | `where [--json]` | Shows the workspace, repo, and project context inferred from the current directory. |
+| `checkout [TARGET ...] [--dry-run] [--json]` | Clones missing configured repositories into their `root.clj` paths. |
 | `config check` | Parses and validates `root.clj` and `root.private.clj`. |
 | `setup [TARGET ...] [--commit-if-setup-only] [--json]` | Generates or refreshes managed project files from configuration, with an optional safe post-setup auto-commit mode. |
 | `llmcopy PATH ...` | Copies file contents to the clipboard in an LLM-friendly wrapper and reports GPT-5.4 token totals. |

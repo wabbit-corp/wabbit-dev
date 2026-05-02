@@ -30,6 +30,7 @@ Use this file for:
 - `openai-key`
 - `gemini-key`
 - `github-token`
+- `github-ssh-key`
 - `anthropic-key`
 - `claude-key`
 - `brave-key`
@@ -143,6 +144,7 @@ Examples:
 | `(openai-key "...")` | OpenAI credential used by AI-powered workflows such as `commit`. |
 | `(gemini-key "...")` | Gemini credential used by `dev ask gemini`. |
 | `(github-token "...")` | GitHub API token used by setup and related workflows. |
+| `(github-ssh-key "...")` | SSH private key path used for GitHub git operations such as `checkout` and `push`. |
 | `(anthropic-key "...")` | Anthropic credential. |
 | `(claude-key "...")` | Alias for `anthropic-key`, used by `dev ask claude`. |
 | `(brave-key "...")` | Brave Search API credential for future search-backed workflows. |

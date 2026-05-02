@@ -233,6 +233,12 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         json_output: bool
 
     @dataclass(frozen=True)
+    class CheckoutRequest:
+        targets: list[str]
+        dry_run: bool
+        json_output: bool
+
+    @dataclass(frozen=True)
     class ServiceStartRequest:
         interval_seconds: int
 
@@ -431,6 +437,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         | CleanRequest
         | ClocRequest
         | StatusRequest
+        | CheckoutRequest
         | ServiceStartRequest
         | ServiceStopRequest
         | ServiceStatusRequest
@@ -714,6 +721,19 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                     ]
                 else:
                     steps = [f"{prog} check :root", f"{prog} project list", f"{prog} publish --dry-run"]
+            case "checkout":
+                if dry_run:
+                    steps = [
+                        f"{prog} checkout {target}" if target else f"{prog} checkout",
+                        f"{prog} project repo {target}" if target else f"{prog} project list",
+                        f"{prog} status {target}" if target else f"{prog} status",
+                    ]
+                else:
+                    steps = [
+                        f"{prog} status {target}" if target else f"{prog} status",
+                        f"{prog} install hooks {target}" if target else f"{prog} install hooks",
+                        f"{prog} setup --local {target}" if target else f"{prog} setup --local",
+                    ]
             case "publish":
                 if dry_run:
                     steps = [
@@ -928,6 +948,14 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return ["cloc", *targets]
             case StatusRequest(targets=targets, json_output=json_output):
                 tokens = ["status"]
+                if json_output:
+                    tokens.append("--json")
+                tokens.extend(targets)
+                return tokens
+            case CheckoutRequest(targets=targets, dry_run=dry_run, json_output=json_output):
+                tokens = ["checkout"]
+                if dry_run:
+                    tokens.append("--dry-run")
                 if json_output:
                     tokens.append("--json")
                 tokens.extend(targets)
@@ -1332,6 +1360,15 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             )
         )
 
+    def _checkout_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        return succeed(
+            CheckoutRequest(
+                targets=_string_list(values.positional("target")),
+                dry_run=_bool_value(values, "--dry-run"),
+                json_output=_bool_value(values, "--json"),
+            )
+        )
+
     def _service_start_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(ServiceStartRequest(interval_seconds=_int_value(values, "--interval-seconds", 60)))
 
@@ -1662,6 +1699,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _cloc_decode(values)
             case ["status"]:
                 return _status_decode(values)
+            case ["checkout"]:
+                return _checkout_decode(values)
             case ["service", "start"]:
                 return _service_start_decode(values)
             case ["service", "stop"]:
@@ -2272,6 +2311,23 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         ),
         decode=_unused_decode,
     )
+    checkout_command = Command(
+        name="checkout",
+        header="Clone missing configured repositories from GitHub into their root.clj paths.",
+        options=(
+            flag(long="dry-run", help="Print the checkout plan without running git clone."),
+            flag(long="json", help="Emit checkout results as JSON."),
+        ),
+        positionals=(
+            positional(
+                repo_target_argument,
+                "target",
+                help="Repo IDs, project IDs, or configured repo paths.",
+                repeated=True,
+            ),
+        ),
+        decode=_unused_decode,
+    )
     service_start_command = Command(
         name="start",
         header="Start the macOS repo monitor menubar process for this workspace.",
@@ -2675,6 +2731,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             clean_command,
             cloc_command,
             status_command,
+            checkout_command,
             service_command,
             commit_command,
             push_command,
@@ -2986,6 +3043,15 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 from dev.tasks.status import status
 
                 return status(targets, json_output=json_output)
+            case CheckoutRequest(targets=targets, dry_run=dry_run, json_output=json_output):
+                targets = _repo_targets_with_defaults(targets)
+                if not _preflight("checkout", targets, json_output=json_output, dry_run=dry_run):
+                    return 2
+                from dev.tasks.checkout import checkout
+
+                exit_code = checkout(targets, dry_run=dry_run, json_output=json_output)
+                _print_next_steps("checkout", targets=targets, json_output=json_output, dry_run=dry_run)
+                return exit_code
             case ServiceStartRequest(interval_seconds=interval_seconds):
                 from dev.tasks.service import service_start
 
