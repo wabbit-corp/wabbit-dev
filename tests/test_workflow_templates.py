@@ -108,6 +108,22 @@ def test_gradle_release_publish_template_uploads_github_release_assets() -> None
     assert "contents: write" in text
 
 
+def test_gradle_workflow_templates_install_shell_test_dependencies() -> None:
+    workflow_paths = (
+        ("gradle-files", ".github", "workflows", "release-publish.yml.jinja2"),
+        ("gradle-files", ".github", "workflows", "snapshot-publish.yml.jinja2"),
+        ("gradle-files", ".github", "workflows", "docs-quality.yml.jinja2"),
+        ("gradle-files", ".github", "workflows", "docs-deploy.yml.jinja2"),
+        ("gradle-files", ".github", "workflows", "compiler-plugin-release-publish.yml.jinja2"),
+        ("gradle-files", ".github", "workflows", "compiler-plugin-snapshot-publish.yml.jinja2"),
+    )
+
+    for path in workflow_paths:
+        text = _template_text(*path)
+        assert "Install shell test dependencies" in text
+        assert "sudo apt-get install -y zsh" in text
+
+
 def test_gradle_release_publish_template_renders_bundle_fields_without_jinja_errors() -> None:
     template = dev.io.read_template(
         repo_template_path("gradle-files", ".github", "workflows", "release-publish.yml.jinja2"),
