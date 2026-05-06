@@ -115,7 +115,7 @@ def _build_gradle_docs(repo_root: Path, entries: list[RepoDocsEntry]) -> None:
     gradle_tasks = [entry.gradle_task for entry in entries if entry.kind == "gradle-dokka" and entry.gradle_task is not None]
     if not gradle_tasks:
         return
-    _run(["./gradlew", "--no-daemon", "build", *gradle_tasks], cwd=repo_root)
+    _run(["./gradlew", "--no-daemon", *gradle_tasks], cwd=repo_root)
 
 
 def _copy_tree(source: Path, destination: Path) -> None:
