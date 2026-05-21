@@ -143,8 +143,10 @@ subcommands and compatibility aliases, lives in
 | `clean [TARGET ...]` | Deletes generated build and cache directories for configured projects. |
 | `cloc [TARGET ...]` | Runs `cloc` for configured targets or arbitrary filesystem paths. |
 | `status [TARGET ...] [--json]` | Shows staged, unstaged, and untracked repo status for the current or selected targets. |
+| `untracked [--all] [--json]` | Shows workspace files and directories not covered by `root.clj`. |
 | `commit [TARGET ...] [--dry-run]` | Runs PROD setup, stages changes, and creates commits, or prints the commit plan. |
 | `push [TARGET ...] [--dry-run]` | Pushes the current branch to its configured upstream when it can fast-forward, or prints the push plan. |
+| `pull [TARGET ...] [--dry-run]` | Fast-forwards local branches from their configured upstreams, or prints the pull plan. |
 | `project list` | Lists configured projects grouped by repository. |
 | `project show [TARGET ...] [--json]` | Shows detailed metadata for one or more configured projects. |
 | `project deps [TARGET ...] [--json]` | Shows resolved dependencies for one or more configured projects. |

@@ -667,6 +667,27 @@ async def test_build_status_and_push_bypass_argparse_with_typed_cli(monkeypatch:
 
 
 @pytest.mark.asyncio
+async def test_untracked_bypasses_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import untracked as untracked_task
+
+    called: list[tuple[bool, bool]] = []
+
+    def fake_untracked(*, json_output: bool = False, include_ignored: bool = False) -> int:
+        called.append((json_output, include_ignored))
+        return 0
+
+    monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
+    monkeypatch.setattr(untracked_task, "untracked", fake_untracked)
+    monkeypatch.setattr("sys.argv", ["dev.py", "untracked", "--all", "--json"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [(True, True)]
+
+
+@pytest.mark.asyncio
 async def test_service_commands_bypass_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     from dev import cli
     from dev.tasks import service as service_task
