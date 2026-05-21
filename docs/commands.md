@@ -76,8 +76,10 @@ commands from the workspace root.
 | `clean [TARGET ...]` | Remove generated build and cache directories. |
 | `cloc [TARGET ...]` | Run `cloc` for configured targets or direct paths. |
 | `status [TARGET ...] [--json]` | Show staged, unstaged, and untracked status for the current or selected repo targets. |
+| `untracked [--all] [--json]` | Show workspace files and directories not covered by `root.clj`. |
 | `commit [TARGET ...] [--dry-run]` | Run PROD setup, stage changes, and create commits, or print the commit plan. |
 | `push [TARGET ...] [--dry-run]` | Push the current branch to its configured upstream when it can fast-forward, or print the push plan. |
+| `pull [TARGET ...] [--dry-run]` | Fast-forward local branches from their configured upstreams, or print the pull plan. |
 | `project list` | List configured projects grouped by repository. |
 | `project show [TARGET ...] [--json]` | Show detailed metadata for one or more configured projects. |
 | `project deps [TARGET ...] [--json]` | Show resolved dependencies for one or more configured projects. |
@@ -1034,6 +1036,21 @@ This command reports staged changes, unstaged changes, and untracked files.
 Use `--json` to emit a per-repo status summary for scripts or editor
 integrations.
 
+### `untracked`
+
+```bash
+dev untracked
+dev untracked --all
+dev untracked --json
+```
+
+Shows workspace-root files and directories that are not covered by configured
+`root.clj` repo paths, project paths, or project repo roots.
+
+The default output suppresses hidden paths and common workspace metadata such as
+`root.clj`, `root.private.clj`, `.venv`, and the `dev` launcher. Use `--all` to
+include those paths. Use `--json` to emit the uncovered path list for scripts.
+
 ### `commit`
 
 ```bash
@@ -1092,6 +1109,32 @@ Behavior details:
 
 Use `--dry-run` to print the resolved repositories and their pushability before
 sending branch updates.
+
+### `pull`
+
+```bash
+dev pull [TARGET ...]
+dev pull [TARGET ...] --dry-run
+```
+
+Fast-forwards the current branch from its configured upstream.
+
+Target behavior matches `dev push`:
+
+- no target or `.`: pull every distinct configured repository once
+- configured repo ID: pull that repo
+- configured project ID: resolve the repo for that project
+- filesystem path: resolve the repo containing that path
+
+Behavior details:
+
+- fetches the upstream remote first
+- fast-forwards only when the local branch is behind and not ahead
+- refuses detached HEAD, missing-upstream, dirty worktrees, behind-plus-ahead, or non-fast-forward states
+- does not assume `master` or `origin`
+
+Use `--dry-run` to print the resolved repositories and their pullability before
+moving local branches.
 
 ## Services and Backup
 

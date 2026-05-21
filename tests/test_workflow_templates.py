@@ -73,6 +73,13 @@ def test_repo_docs_quality_template_runs_generated_repo_docs_site_builder() -> N
     assert 'python3 scripts/build_repo_docs_site.py --mode quality --output-dir "$RUNNER_TEMP/pages-site"' in text
 
 
+def test_repo_docs_builder_template_runs_dokka_without_full_gradle_build() -> None:
+    text = _template_text("repo-files", "scripts", "build_repo_docs_site.py.jinja2")
+
+    assert '_run(["./gradlew", "--no-daemon", *gradle_tasks], cwd=repo_root)' in text
+    assert '_run(["./gradlew", "--no-daemon", "build", *gradle_tasks], cwd=repo_root)' not in text
+
+
 def test_gradle_publish_workflows_do_not_force_optional_gpg_key_id() -> None:
     snapshot_text = _template_text("gradle-files", ".github", "workflows", "snapshot-publish.yml.jinja2")
     release_text = _template_text("gradle-files", ".github", "workflows", "release-publish.yml.jinja2")
@@ -106,6 +113,22 @@ def test_gradle_release_publish_template_uploads_github_release_assets() -> None
     assert "build/releases/release-manifest.json" in text
     assert "build/releases/SHA256SUMS" in text
     assert "contents: write" in text
+
+
+def test_gradle_workflow_templates_install_shell_test_dependencies() -> None:
+    workflow_paths = (
+        ("gradle-files", ".github", "workflows", "release-publish.yml.jinja2"),
+        ("gradle-files", ".github", "workflows", "snapshot-publish.yml.jinja2"),
+        ("gradle-files", ".github", "workflows", "docs-quality.yml.jinja2"),
+        ("gradle-files", ".github", "workflows", "docs-deploy.yml.jinja2"),
+        ("gradle-files", ".github", "workflows", "compiler-plugin-release-publish.yml.jinja2"),
+        ("gradle-files", ".github", "workflows", "compiler-plugin-snapshot-publish.yml.jinja2"),
+    )
+
+    for path in workflow_paths:
+        text = _template_text(*path)
+        assert "Install shell test dependencies" in text
+        assert "sudo apt-get install -y zsh" in text
 
 
 def test_gradle_release_publish_template_renders_bundle_fields_without_jinja_errors() -> None:

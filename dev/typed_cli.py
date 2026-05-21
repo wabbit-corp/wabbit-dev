@@ -233,6 +233,11 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         json_output: bool
 
     @dataclass(frozen=True)
+    class UntrackedRequest:
+        json_output: bool
+        include_ignored: bool
+
+    @dataclass(frozen=True)
     class CheckoutRequest:
         targets: list[str]
         dry_run: bool
@@ -271,6 +276,11 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
 
     @dataclass(frozen=True)
     class PushRequest:
+        targets: list[str]
+        dry_run: bool
+
+    @dataclass(frozen=True)
+    class PullRequest:
         targets: list[str]
         dry_run: bool
 
@@ -445,6 +455,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         | CommitRequest
         | CommitVerifyRequest
         | PushRequest
+        | PullRequest
         | BackupPushRequest
         | BackupRestoreRequest
         | CheckRunRequest
@@ -779,6 +790,17 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                         f"{prog} status {target}" if target else f"{prog} project list",
                         f"{prog} project repo {target}" if target else f"{prog} project list",
                     ]
+            case "pull":
+                if dry_run:
+                    steps = [
+                        f"{prog} pull {target}" if target else f"{prog} pull",
+                        f"{prog} status {target}" if target else f"{prog} project list",
+                    ]
+                else:
+                    steps = [
+                        f"{prog} status {target}" if target else f"{prog} project list",
+                        f"{prog} project repo {target}" if target else f"{prog} project list",
+                    ]
             case _:
                 return
 
@@ -952,6 +974,13 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                     tokens.append("--json")
                 tokens.extend(targets)
                 return tokens
+            case UntrackedRequest(json_output=json_output, include_ignored=include_ignored):
+                tokens = ["untracked"]
+                if include_ignored:
+                    tokens.append("--all")
+                if json_output:
+                    tokens.append("--json")
+                return tokens
             case CheckoutRequest(targets=targets, dry_run=dry_run, json_output=json_output):
                 tokens = ["checkout"]
                 if dry_run:
@@ -1007,6 +1036,12 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return tokens
             case PushRequest(targets=targets, dry_run=dry_run):
                 tokens = ["push"]
+                if dry_run:
+                    tokens.append("--dry-run")
+                tokens.extend(targets)
+                return tokens
+            case PullRequest(targets=targets, dry_run=dry_run):
+                tokens = ["pull"]
                 if dry_run:
                     tokens.append("--dry-run")
                 tokens.extend(targets)
@@ -1360,6 +1395,14 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             )
         )
 
+    def _untracked_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        return succeed(
+            UntrackedRequest(
+                json_output=_bool_value(values, "--json"),
+                include_ignored=_bool_value(values, "--all"),
+            )
+        )
+
     def _checkout_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(
             CheckoutRequest(
@@ -1420,6 +1463,14 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
     def _push_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         return succeed(
             PushRequest(
+                targets=_string_list(values.positional("target")),
+                dry_run=_bool_value(values, "--dry-run"),
+            )
+        )
+
+    def _pull_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        return succeed(
+            PullRequest(
                 targets=_string_list(values.positional("target")),
                 dry_run=_bool_value(values, "--dry-run"),
             )
@@ -1699,6 +1750,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _cloc_decode(values)
             case ["status"]:
                 return _status_decode(values)
+            case ["untracked"]:
+                return _untracked_decode(values)
             case ["checkout"]:
                 return _checkout_decode(values)
             case ["service", "start"]:
@@ -1715,6 +1768,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _commit_verify_decode(values)
             case ["push"]:
                 return _push_decode(values)
+            case ["pull"]:
+                return _pull_decode(values)
             case ["backup", "push"]:
                 return _backup_push_decode(values)
             case ["backup", "restore"]:
@@ -2311,6 +2366,15 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         ),
         decode=_unused_decode,
     )
+    untracked_command = Command(
+        name="untracked",
+        header="Show workspace files and directories not covered by root.clj.",
+        options=(
+            flag(long="json", help="Emit uncovered workspace paths as JSON."),
+            flag(long="all", help="Include hidden files and workspace metadata that are ignored by default."),
+        ),
+        decode=_unused_decode,
+    )
     checkout_command = Command(
         name="checkout",
         header="Clone missing configured repositories from GitHub into their root.clj paths.",
@@ -2427,6 +2491,20 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         name="push",
         header="Push the current branch to its configured upstream when the remote can fast-forward.",
         options=(flag(long="dry-run", help="Print pushability and upstream state without sending branch updates."),),
+        positionals=(
+            positional(
+                push_target_argument,
+                "target",
+                help="Use `.` for all configured repos, or provide repo IDs, project IDs, or paths.",
+                repeated=True,
+            ),
+        ),
+        decode=_unused_decode,
+    )
+    pull_command = Command(
+        name="pull",
+        header="Fast-forward the current branch from its configured upstream.",
+        options=(flag(long="dry-run", help="Print pullability and upstream state without moving local branches."),),
         positionals=(
             positional(
                 push_target_argument,
@@ -2731,10 +2809,12 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             clean_command,
             cloc_command,
             status_command,
+            untracked_command,
             checkout_command,
             service_command,
             commit_command,
             push_command,
+            pull_command,
             backup_command,
             check_command,
             spdx_command,
@@ -3043,6 +3123,10 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 from dev.tasks.status import status
 
                 return status(targets, json_output=json_output)
+            case UntrackedRequest(json_output=json_output, include_ignored=include_ignored):
+                from dev.tasks.untracked import untracked
+
+                return untracked(json_output=json_output, include_ignored=include_ignored)
             case CheckoutRequest(targets=targets, dry_run=dry_run, json_output=json_output):
                 targets = _repo_targets_with_defaults(targets)
                 if not _preflight("checkout", targets, dry_run=dry_run):
@@ -3103,6 +3187,14 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
 
                 exit_code = push(targets, dry_run=dry_run)
                 _print_next_steps("push", targets=targets, dry_run=dry_run)
+                return exit_code
+            case PullRequest(targets=targets, dry_run=dry_run):
+                if not _preflight("pull", targets, dry_run=dry_run):
+                    return 2
+                from dev.tasks.pull import pull
+
+                exit_code = pull(targets, dry_run=dry_run)
+                _print_next_steps("pull", targets=targets, dry_run=dry_run)
                 return exit_code
             case BackupPushRequest(
                 repo_targets=repo_targets,

@@ -562,12 +562,14 @@ async def test_build_status_and_push_bypass_argparse_with_typed_cli(monkeypatch:
     from dev.tasks import backup as backup_task
     from dev.tasks import build as build_task
     from dev.tasks import doctor as doctor_task
+    from dev.tasks import pull as pull_task
     from dev.tasks import push as push_task
     from dev.tasks import status as status_task
 
     build_called: list[tuple[list[str] | None, bool]] = []
     status_called: list[tuple[list[str] | None, bool]] = []
     push_called: list[tuple[list[str] | None, bool]] = []
+    pull_called: list[tuple[list[str] | None, bool]] = []
     backup_push_called: list[tuple[list[str] | None, str | None, bool, bool]] = []
     backup_restore_called: list[tuple[str | None, str | None, str, str, bool, bool]] = []
 
@@ -596,6 +598,15 @@ async def test_build_status_and_push_bypass_argparse_with_typed_cli(monkeypatch:
             case _:
                 pass
         push_called.append((targets, dry_run))
+        return 0
+
+    def fake_pull(targets: str | list[str] | None = None, *, dry_run: bool = False) -> int:
+        match targets:
+            case str():
+                raise AssertionError("typed CLI should pass repeated targets as a list")
+            case _:
+                pass
+        pull_called.append((targets, dry_run))
         return 0
 
     def fake_backup_push(
@@ -628,6 +639,7 @@ async def test_build_status_and_push_bypass_argparse_with_typed_cli(monkeypatch:
     monkeypatch.setattr(build_task, "build", fake_build)
     monkeypatch.setattr(status_task, "status", fake_status)
     monkeypatch.setattr(push_task, "push", fake_push)
+    monkeypatch.setattr(pull_task, "pull", fake_pull)
     monkeypatch.setattr(backup_task, "push", fake_backup_push)
     monkeypatch.setattr(backup_task, "restore", fake_backup_restore)
 
@@ -639,6 +651,9 @@ async def test_build_status_and_push_bypass_argparse_with_typed_cli(monkeypatch:
 
     monkeypatch.setattr("sys.argv", ["dev.py", "push", "--dry-run", "app-wabbit-dev"])
     push_result = await cli.async_main()
+
+    monkeypatch.setattr("sys.argv", ["dev.py", "pull", "--dry-run", "app-wabbit-dev"])
+    pull_result = await cli.async_main()
 
     monkeypatch.setattr(
         "sys.argv",
@@ -668,15 +683,38 @@ async def test_build_status_and_push_bypass_argparse_with_typed_cli(monkeypatch:
     assert build_result == 0
     assert status_result == 0
     assert push_result == 0
+    assert pull_result == 0
     assert backup_push_result == 0
     assert backup_restore_result == 0
     assert build_called == [(["app-wabbit-dev"], True)]
     assert status_called == [(["app-wabbit-dev"], True)]
     assert push_called == [(["app-wabbit-dev"], True)]
+    assert pull_called == [(["app-wabbit-dev"], True)]
     assert backup_push_called == [(["app-wabbit-dev"], "desktop-archive", True, True)]
     assert backup_restore_called == [
         ("app-wabbit-dev", "desktop-archive", "latest", "/tmp/restore-root", True, True)
     ]
+
+
+@pytest.mark.asyncio
+async def test_untracked_bypasses_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dev import cli
+    from dev.tasks import untracked as untracked_task
+
+    called: list[tuple[bool, bool]] = []
+
+    def fake_untracked(*, json_output: bool = False, include_ignored: bool = False) -> int:
+        called.append((json_output, include_ignored))
+        return 0
+
+    monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
+    monkeypatch.setattr(untracked_task, "untracked", fake_untracked)
+    monkeypatch.setattr("sys.argv", ["dev.py", "untracked", "--all", "--json"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [(True, True)]
 
 
 @pytest.mark.asyncio
@@ -852,8 +890,8 @@ async def test_publish_and_jitpack_bypass_argparse_with_typed_cli(monkeypatch: p
 
 @pytest.mark.asyncio
 async def test_check_shortcuts_bypass_argparse_with_typed_cli(monkeypatch: pytest.MonkeyPatch) -> None:
-    from dev import cli
     import dev.typed_cli as typed_cli
+    from dev import cli
     from dev.tasks import check as check_task
     from dev.tasks import doctor as doctor_task
     from dev.tasks import spdx_headers as spdx_task
