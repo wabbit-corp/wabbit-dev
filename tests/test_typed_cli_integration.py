@@ -46,6 +46,36 @@ async def test_docs_commands_bypass_argparse_with_typed_cli(
 
 
 @pytest.mark.asyncio
+async def test_checkout_command_bypasses_argparse_with_typed_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dev import cli
+    from dev.tasks import checkout as checkout_task
+    from dev.tasks import doctor as doctor_task
+
+    called: list[tuple[list[str], bool, bool]] = []
+
+    def fake_checkout(
+        targets: list[str] | None = None,
+        *,
+        dry_run: bool = False,
+        json_output: bool = False,
+    ) -> int:
+        called.append((targets or [], dry_run, json_output))
+        return 0
+
+    monkeypatch.setattr(cli.SuggestingArgumentParser, "parse_args", _fail_argparse)
+    monkeypatch.setattr(doctor_task, "preflight_for_command", lambda *args, **kwargs: True)
+    monkeypatch.setattr(checkout_task, "checkout", fake_checkout)
+    monkeypatch.setattr("sys.argv", ["dev.py", "checkout", "--dry-run", "--json", "app-wabbit-dev"])
+
+    result = await cli.async_main()
+
+    assert result == 0
+    assert called == [(["app-wabbit-dev"], True, True)]
+
+
+@pytest.mark.asyncio
 async def test_root_help_bypasses_argparse_with_typed_cli(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

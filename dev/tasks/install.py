@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import platform
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -32,6 +33,7 @@ class AppInstallResult:
     python_bin: Path
     dev_py: Path
     install_dir_on_path: bool
+    extra_paths: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -798,9 +800,6 @@ def _command_output(completed: subprocess.CompletedProcess[str]) -> str:
 
 
 def install_app(*, bin_dir: str | None = None) -> AppInstallResult:
-    if sys.platform.lower() == "win32":
-        raise ValueError("Global dev wrapper installation is currently supported on POSIX shells only.")
-
     repo_root = _repo_root()
     python_bin = _python_bin(repo_root)
     dev_py = repo_root / "dev.py"
@@ -812,12 +811,20 @@ def install_app(*, bin_dir: str | None = None) -> AppInstallResult:
 
     wabbit_dev_path = install_dir / "wabbit-dev"
     dev_path = install_dir / "dev"
-    _write_executable(
-        wabbit_dev_path,
-        "#!/bin/sh\n"
-        f"exec {shlex.quote(str(python_bin))} {shlex.quote(str(dev_py))} \"$@\"\n",
-    )
-    _replace_symlink(dev_path, wabbit_dev_path)
+    extra_paths: tuple[Path, ...] = ()
+    wrapper_text = _posix_python_wrapper_text(python_bin, dev_py)
+    _write_executable(wabbit_dev_path, wrapper_text)
+
+    if sys.platform.lower() == "win32":
+        _write_executable(dev_path, wrapper_text)
+        wabbit_dev_cmd_path = install_dir / "wabbit-dev.cmd"
+        dev_cmd_path = install_dir / "dev.cmd"
+        cmd_wrapper_text = _cmd_python_wrapper_text(python_bin, dev_py)
+        _write_executable(wabbit_dev_cmd_path, cmd_wrapper_text)
+        _write_executable(dev_cmd_path, cmd_wrapper_text)
+        extra_paths = (wabbit_dev_cmd_path, dev_cmd_path)
+    else:
+        _replace_symlink(dev_path, wabbit_dev_path)
 
     result = AppInstallResult(
         install_dir=install_dir,
@@ -826,6 +833,7 @@ def install_app(*, bin_dir: str | None = None) -> AppInstallResult:
         python_bin=python_bin,
         dev_py=dev_py,
         install_dir_on_path=_path_contains(install_dir),
+        extra_paths=extra_paths,
     )
     _print_app_install_result(result)
     return result
@@ -995,12 +1003,15 @@ def _data_home() -> Path:
 
 
 def _python_bin(repo_root: Path) -> Path:
-    local_venv = repo_root / ".venv" / "bin" / "python"
-    if local_venv.is_file():
-        return local_venv
-    workspace_venv = repo_root.parent / ".venv" / "bin" / "python"
-    if workspace_venv.is_file():
-        return workspace_venv
+    candidates = (
+        repo_root / ".venv" / "bin" / "python",
+        repo_root.parent / ".venv" / "bin" / "python",
+        repo_root / ".venv" / "Scripts" / "python.exe",
+        repo_root.parent / ".venv" / "Scripts" / "python.exe",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
     return Path(sys.executable)
 
 
@@ -1012,32 +1023,96 @@ def _pick_install_dir(explicit_bin_dir: str | None) -> Path:
     if env_bin_dir:
         return Path(env_bin_dir).expanduser()
 
+    home_bin = _home() / "bin"
     home_local = _home() / ".local" / "bin"
-    for candidate in [Path("/opt/homebrew/bin"), Path("/usr/local/bin"), home_local]:
-        if _is_writable_dir_on_path(candidate):
+    preferred_candidates = [Path("/opt/homebrew/bin"), Path("/usr/local/bin"), home_local]
+    if sys.platform.lower() == "win32":
+        preferred_candidates = [home_bin, home_local, *preferred_candidates]
+
+    for candidate in preferred_candidates:
+        if _is_usable_dir_on_path(candidate):
             return candidate
 
     for candidate_text in os.environ.get("PATH", "").split(os.pathsep):
         if not candidate_text:
             continue
         candidate = Path(candidate_text).expanduser()
-        if _is_writable_dir(candidate):
+        if _is_usable_dir(candidate):
             return candidate
 
     return home_local
 
 
-def _is_writable_dir_on_path(path: Path) -> bool:
-    return _path_contains(path) and _is_writable_dir(path)
+def _is_usable_dir_on_path(path: Path) -> bool:
+    return _path_contains(path) and _is_usable_dir(path)
 
 
-def _is_writable_dir(path: Path) -> bool:
-    return path.is_dir() and os.access(path, os.W_OK)
+def _is_usable_dir(path: Path) -> bool:
+    if path.is_dir():
+        return _can_write_in_dir(path)
+    if path.exists():
+        return False
+    return _can_create_dir(path)
+
+
+def _can_create_dir(path: Path) -> bool:
+    parent = path.parent
+    while True:
+        if parent.exists():
+            return parent.is_dir() and _can_write_in_dir(parent)
+        next_parent = parent.parent
+        if next_parent == parent:
+            return False
+        parent = next_parent
+
+
+def _can_write_in_dir(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    probe = path / f".wabbit-dev-write-test-{os.getpid()}-{secrets.token_hex(4)}"
+    try:
+        with probe.open("w", encoding="utf-8") as handle:
+            handle.write("")
+    except OSError:
+        return False
+    try:
+        probe.unlink()
+    except OSError:
+        pass
+    return True
 
 
 def _path_contains(path: Path) -> bool:
-    normalized = str(path.expanduser())
-    return normalized in {str(Path(entry).expanduser()) for entry in os.environ.get("PATH", "").split(os.pathsep) if entry}
+    normalized = _normalize_path_text(path)
+    return normalized in {
+        _normalize_path_text(Path(entry))
+        for entry in os.environ.get("PATH", "").split(os.pathsep)
+        if entry
+    }
+
+
+def _normalize_path_text(path: Path) -> str:
+    return os.path.normcase(os.path.normpath(str(path.expanduser())))
+
+
+def _posix_python_wrapper_text(python_bin: Path, dev_py: Path) -> str:
+    return "#!/bin/sh\n" f"exec {_shell_quote_path(python_bin)} {_shell_quote_path(dev_py)} \"$@\"\n"
+
+
+def _shell_quote_path(path: Path) -> str:
+    value = path.as_posix() if sys.platform.lower() == "win32" else str(path)
+    return shlex.quote(value)
+
+
+def _cmd_python_wrapper_text(python_bin: Path, dev_py: Path) -> str:
+    return (
+        "@echo off\r\n"
+        f"\"{_cmd_escape(str(python_bin))}\" \"{_cmd_escape(str(dev_py))}\" %*\r\n"
+    )
+
+
+def _cmd_escape(text: str) -> str:
+    return text.replace("%", "%%")
 
 
 def _write_executable(path: Path, text: str) -> None:
@@ -1117,7 +1192,12 @@ def _zsh_completion_rc_block(dev_path: Path, wabbit_dev_path: Path) -> str:
 def _print_app_install_result(result: AppInstallResult) -> None:
     success("Installed dev wrappers.")
     print(f"  {result.wabbit_dev_path}")
-    print(f"  {result.dev_path} -> {result.wabbit_dev_path}")
+    if result.dev_path.is_symlink():
+        print(f"  {result.dev_path} -> {result.wabbit_dev_path}")
+    else:
+        print(f"  {result.dev_path}")
+    for path in result.extra_paths:
+        print(f"  {path}")
     if not result.install_dir_on_path:
         warning(f"{result.install_dir} is not currently on PATH.")
         print(f"  Add it to PATH before using {command_text('dev')} or {command_text('wabbit-dev')}.")

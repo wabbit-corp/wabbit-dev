@@ -3045,7 +3045,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return status(targets, json_output=json_output)
             case CheckoutRequest(targets=targets, dry_run=dry_run, json_output=json_output):
                 targets = _repo_targets_with_defaults(targets)
-                if not _preflight("checkout", targets, json_output=json_output, dry_run=dry_run):
+                if not _preflight("checkout", targets, dry_run=dry_run):
                     return 2
                 from dev.tasks.checkout import checkout
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 
@@ -10,6 +11,7 @@ def test_install_app_writes_global_wrappers(tmp_path: Path, monkeypatch) -> None
 
     bin_dir = tmp_path / "bin"
     monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setattr("sys.platform", "linux")
 
     result = install_app(bin_dir=str(bin_dir))
 
@@ -19,6 +21,57 @@ def test_install_app_writes_global_wrappers(tmp_path: Path, monkeypatch) -> None
     assert result.dev_path.is_symlink()
     assert result.dev_path.resolve() == result.wabbit_dev_path
     assert "dev.py" in result.wabbit_dev_path.read_text(encoding="utf-8")
+    assert result.extra_paths == ()
+
+
+def test_install_app_writes_windows_wrappers(tmp_path: Path, monkeypatch) -> None:
+    from dev.tasks import install as install_task
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "dev.py").write_text("print('ok')\n", encoding="utf-8")
+    python_bin = repo_root / ".venv" / "Scripts" / "python.exe"
+    python_bin.parent.mkdir(parents=True)
+    python_bin.write_text("", encoding="utf-8")
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setattr("sys.platform", "win32")
+    monkeypatch.setattr(install_task, "_repo_root", lambda: repo_root)
+
+    result = install_task.install_app(bin_dir=str(bin_dir))
+
+    assert result.wabbit_dev_path == bin_dir / "wabbit-dev"
+    assert result.dev_path == bin_dir / "dev"
+    assert result.wabbit_dev_path.is_file()
+    assert result.dev_path.is_file()
+    assert not result.dev_path.is_symlink()
+    assert result.extra_paths == (bin_dir / "wabbit-dev.cmd", bin_dir / "dev.cmd")
+    assert all(path.is_file() for path in result.extra_paths)
+    assert python_bin.as_posix() in result.wabbit_dev_path.read_text(encoding="utf-8")
+    assert str(repo_root / "dev.py").replace("\\", "/") in result.wabbit_dev_path.read_text(encoding="utf-8")
+    assert "%*" in result.extra_paths[0].read_text(encoding="utf-8")
+
+
+def test_pick_install_dir_prefers_creatable_home_bin_on_windows(tmp_path: Path, monkeypatch) -> None:
+    from dev.tasks import install as install_task
+
+    home = tmp_path / "home"
+    home.mkdir()
+    user_bin = home / "bin"
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", os.pathsep.join([str(user_bin), str(blocked)]))
+    monkeypatch.delenv("BIN_DIR", raising=False)
+    monkeypatch.setattr("sys.platform", "win32")
+    monkeypatch.setattr(install_task, "_can_write_in_dir", lambda path: path != blocked)
+
+    result = install_task._pick_install_dir(None)
+
+    assert result == user_bin
 
 
 def test_install_completions_writes_scripts_and_managed_rc_blocks(tmp_path: Path, monkeypatch) -> None:

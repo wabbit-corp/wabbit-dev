@@ -112,8 +112,22 @@ def command_text(text: object, *, stream: IO[str] | None = None) -> str:
     return style(text, "green", stream=stream)
 
 
-def _prefix(symbol: str, color: str) -> str:
-    return f"[{style(symbol, color, attrs=('bold',))}]"
+def _supports_text(text: str, *, stream: IO[str] | None = None) -> bool:
+    active_stream = sys.stdout if stream is None else stream
+    encoding = getattr(active_stream, "encoding", None)
+    if not encoding:
+        return True
+    try:
+        text.encode(encoding)
+    except (LookupError, UnicodeEncodeError):
+        return False
+    return True
+
+
+def _prefix_parts(symbol: str, color: str, *, fallback: str) -> tuple[str, str]:
+    display_symbol = symbol if _supports_text(symbol) else fallback
+    raw_prefix = f"[{display_symbol}]"
+    return f"[{style(display_symbol, color, attrs=('bold',))}]", raw_prefix
 
 
 def _message(prefix: str, raw_prefix: str, *args: object) -> None:
@@ -129,22 +143,26 @@ def _message(prefix: str, raw_prefix: str, *args: object) -> None:
 
 # Use CROSSMARK for errors
 def error(*msg: object) -> None:
-    _message(_prefix("✗", "red"), CROSSMARK, *msg)
+    prefix, raw_prefix = _prefix_parts("✗", "red", fallback="x")
+    _message(prefix, raw_prefix, *msg)
 
 
 # Use QUESTIONMARK for warnings
 def warning(*msg: object) -> None:
-    _message(_prefix("?", "yellow"), QUESTIONMARK, *msg)
+    prefix, raw_prefix = _prefix_parts("?", "yellow", fallback="?")
+    _message(prefix, raw_prefix, *msg)
 
 
 # Use INFOMARK for information
 def info(*msg: object) -> None:
-    _message(_prefix("i", "blue"), INFOMARK, *msg)
+    prefix, raw_prefix = _prefix_parts("i", "blue", fallback="i")
+    _message(prefix, raw_prefix, *msg)
 
 
 # Use CHECKMARK for success
 def success(*msg: object) -> None:
-    _message(_prefix("✓", "green"), CHECKMARK, *msg)
+    prefix, raw_prefix = _prefix_parts("✓", "green", fallback="+")
+    _message(prefix, raw_prefix, *msg)
 
 
 YN: dict[str, bool] = {"Y": True, "N": False}
