@@ -275,6 +275,11 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         dry_run: bool
 
     @dataclass(frozen=True)
+    class PullRequest:
+        targets: list[str]
+        dry_run: bool
+
+    @dataclass(frozen=True)
     class BackupPushRequest:
         repo_targets: list[str]
         backup_target_name: str | None
@@ -445,6 +450,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         | CommitRequest
         | CommitVerifyRequest
         | PushRequest
+        | PullRequest
         | BackupPushRequest
         | BackupRestoreRequest
         | CheckRunRequest
@@ -779,6 +785,17 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                         f"{prog} status {target}" if target else f"{prog} project list",
                         f"{prog} project repo {target}" if target else f"{prog} project list",
                     ]
+            case "pull":
+                if dry_run:
+                    steps = [
+                        f"{prog} pull {target}" if target else f"{prog} pull",
+                        f"{prog} status {target}" if target else f"{prog} project list",
+                    ]
+                else:
+                    steps = [
+                        f"{prog} status {target}" if target else f"{prog} project list",
+                        f"{prog} project repo {target}" if target else f"{prog} project list",
+                    ]
             case _:
                 return
 
@@ -1007,6 +1024,12 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return tokens
             case PushRequest(targets=targets, dry_run=dry_run):
                 tokens = ["push"]
+                if dry_run:
+                    tokens.append("--dry-run")
+                tokens.extend(targets)
+                return tokens
+            case PullRequest(targets=targets, dry_run=dry_run):
+                tokens = ["pull"]
                 if dry_run:
                     tokens.append("--dry-run")
                 tokens.extend(targets)
@@ -1425,6 +1448,14 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             )
         )
 
+    def _pull_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
+        return succeed(
+            PullRequest(
+                targets=_string_list(values.positional("target")),
+                dry_run=_bool_value(values, "--dry-run"),
+            )
+        )
+
     def _backup_push_decode(values: ParsedValues) -> Validated[Issue, TypedRequest]:
         match _optional_string(values.option_or("--target", None), "target"):
             case Failure(issues=issues):
@@ -1715,6 +1746,8 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
                 return _commit_verify_decode(values)
             case ["push"]:
                 return _push_decode(values)
+            case ["pull"]:
+                return _pull_decode(values)
             case ["backup", "push"]:
                 return _backup_push_decode(values)
             case ["backup", "restore"]:
@@ -2437,6 +2470,20 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
         ),
         decode=_unused_decode,
     )
+    pull_command = Command(
+        name="pull",
+        header="Fast-forward the current branch from its configured upstream.",
+        options=(flag(long="dry-run", help="Print pullability and upstream state without moving local branches."),),
+        positionals=(
+            positional(
+                push_target_argument,
+                "target",
+                help="Use `.` for all configured repos, or provide repo IDs, project IDs, or paths.",
+                repeated=True,
+            ),
+        ),
+        decode=_unused_decode,
+    )
     backup_push_command = Command(
         name="push",
         header="Create immutable restic snapshots for selected repos.",
@@ -2735,6 +2782,7 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
             service_command,
             commit_command,
             push_command,
+            pull_command,
             backup_command,
             check_command,
             spdx_command,
@@ -3103,6 +3151,14 @@ async def maybe_run_typed_cli(argv: Sequence[str], *, prog: str) -> int | None:
 
                 exit_code = push(targets, dry_run=dry_run)
                 _print_next_steps("push", targets=targets, dry_run=dry_run)
+                return exit_code
+            case PullRequest(targets=targets, dry_run=dry_run):
+                if not _preflight("pull", targets, dry_run=dry_run):
+                    return 2
+                from dev.tasks.pull import pull
+
+                exit_code = pull(targets, dry_run=dry_run)
+                _print_next_steps("pull", targets=targets, dry_run=dry_run)
                 return exit_code
             case BackupPushRequest(
                 repo_targets=repo_targets,

@@ -1093,6 +1093,32 @@ Behavior details:
 Use `--dry-run` to print the resolved repositories and their pushability before
 sending branch updates.
 
+### `pull`
+
+```bash
+dev pull [TARGET ...]
+dev pull [TARGET ...] --dry-run
+```
+
+Fast-forwards the current branch from its configured upstream.
+
+Target behavior matches `dev push`:
+
+- no target or `.`: pull every distinct configured repository once
+- configured repo ID: pull that repo
+- configured project ID: resolve the repo for that project
+- filesystem path: resolve the repo containing that path
+
+Behavior details:
+
+- fetches the upstream remote first
+- fast-forwards only when the local branch is behind and not ahead
+- refuses detached HEAD, missing-upstream, dirty worktrees, behind-plus-ahead, or non-fast-forward states
+- does not assume `master` or `origin`
+
+Use `--dry-run` to print the resolved repositories and their pullability before
+moving local branches.
+
 ## Services and Backup
 
 ### `service`
