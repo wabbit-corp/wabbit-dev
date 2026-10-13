@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- allow repository-specific Python QA coverage baselines, unittest selection, and documented advisory exceptions through `tool.wabbit-dev.qa`, preserving environment overrides
 - add Windows-friendly `dev install app` wrappers, make CLI status prefixes fall back cleanly on limited terminal encodings, and fix typed-CLI `checkout` preflight dispatch with regression coverage
 - stop generated repository-docs builders from prepending full root `./gradlew build` before Dokka tasks, so large multi-app repos like Kairos can finish docs-quality runs without exhausting GitHub hosted runners
 - add `dev checkout` to clone missing configured repositories from GitHub into their `root.clj` paths, with dry-run/JSON output and automatic SSH URL selection when `github-ssh-key` is configured

@@ -43,6 +43,72 @@ def test_state_without_local_config_files_has_no_config_paths(tmp_path: Path) ->
     assert state.pyright_config is None
 
 
+def test_repo_qa_policy_and_environment_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.coverage.report]\nfail_under=80\n"
+        "[tool.wabbit-dev.qa]\ncoverage_fail_under=15\nrun_unittest=false\n"
+        'ignored_advisories=["GHSA-example"]\n',
+        encoding="utf-8",
+    )
+    state = qa._new_state(tmp_path)
+    assert state.coverage_fail_under == 15
+    assert not state.run_unittest
+    monkeypatch.setenv("COVERAGE_FAIL_UNDER", "70")
+    monkeypatch.setenv("RUN_UNITTEST", "1")
+    state = qa._new_state(tmp_path)
+    assert state.coverage_fail_under == 70
+    assert state.run_unittest
+
+
+@pytest.mark.parametrize(
+    "setting", ["coverage_fail_under=101", "coverage_fail_under=true", 'run_unittest="no"', "ignored_advisories=[1]"]
+)
+def test_repo_qa_policy_rejects_invalid_settings(tmp_path: Path, setting: str) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool.wabbit-dev.qa]\n" + setting + "\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        qa._new_state(tmp_path)
+
+
+def test_pip_audit_uses_only_configured_advisory_exceptions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.wabbit-dev.qa]\nignored_advisories=["GHSA-example"]\n', encoding="utf-8"
+    )
+    _make_executable(tmp_path / ".venv/bin/python")
+    _make_executable(tmp_path / ".venv/bin/pip-audit")
+    commands: list[list[str]] = []
+
+    def run(state: qa.PythonQaRepoState, label: str, cmd: list[str]) -> qa.ToolRunResult:
+        commands.append(cmd)
+        return qa.ToolRunResult(rc=0, issues=[])
+
+    monkeypatch.setattr(qa, "_run_subprocess", run)
+    assert qa.run_pip_audit(tmp_path, None) == []
+    assert commands[0][-2:] == ["--ignore-vuln", "GHSA-example"]
+
+
+def test_coverage_commands_apply_the_selected_repository_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.coverage.report]\nfail_under=80\n[tool.wabbit-dev.qa]\ncoverage_fail_under=15\n", encoding="utf-8"
+    )
+    state = qa._get_state(tmp_path)
+    state.pytest_rc = 0
+    state.tool_results["pytest"] = qa.ToolRunResult(rc=0, issues=[])
+    monkeypatch.setattr(qa, "_coverage_available", lambda _state: True)
+    commands: list[list[str]] = []
+
+    def run(state: qa.PythonQaRepoState, label: str, cmd: list[str]) -> qa.ToolRunResult:
+        commands.append(cmd)
+        return qa.ToolRunResult(rc=0, issues=[])
+
+    monkeypatch.setattr(qa, "_run_subprocess", run)
+    assert qa.run_coverage_report(tmp_path, None) == []
+    assert qa.run_coverage_xml(tmp_path, None) == []
+    for cmd in commands:
+        assert cmd[cmd.index("--fail-under") + 1] == "15"
+
+
 def test_state_uses_workspace_root_venv_when_root_clj_is_above_repo(tmp_path: Path) -> None:
     workspace_root = tmp_path
     repo_root = workspace_root / "python-easytime"

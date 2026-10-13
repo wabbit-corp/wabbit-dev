@@ -2237,6 +2237,28 @@ def _read_coverage_fail_under_from_pyproject(pyproject_path: Path | None) -> int
     return None
 
 
+def _read_repo_qa_settings(pyproject_path: Path | None) -> dict[str, object]:
+    """Read repository-specific QA policy without changing workspace defaults."""
+    if pyproject_path is None:
+        return {}
+    import tomllib
+
+    data = as_dict(tomllib.loads(pyproject_path.read_text(encoding="utf-8"))) or {}
+    tool = as_dict(data.get("tool")) or {}
+    wabbit = as_dict(tool.get("wabbit-dev")) or {}
+    settings = as_dict(wabbit.get("qa")) or {}
+    coverage = settings.get("coverage_fail_under")
+    if coverage is not None and (type(coverage) is not int or not 0 <= coverage <= 100):
+        raise ValueError("tool.wabbit-dev.qa.coverage_fail_under must be an integer from 0 to 100")
+    unittest = settings.get("run_unittest")
+    if unittest is not None and not isinstance(unittest, bool):
+        raise ValueError("tool.wabbit-dev.qa.run_unittest must be a boolean")
+    ignored = settings.get("ignored_advisories", [])
+    if not isinstance(ignored, list) or any(not isinstance(item, str) or not item.strip() for item in ignored):
+        raise ValueError("tool.wabbit-dev.qa.ignored_advisories must be a list of advisory identifiers")
+    return settings
+
+
 def _has_import_linter_contracts(pyproject_path: Path | None) -> bool:
     if pyproject_path is None:
         return False
@@ -2275,10 +2297,16 @@ def _new_state(repo_root: Path) -> PythonQaRepoState:
     pyproject_config = _resolve_existing(repo_root / "pyproject.toml")
     mypy_config = _resolve_existing(repo_root / "mypy.ini")
     pyright_config = _resolve_existing(repo_root / "pyrightconfig.json")
+    repo_qa = _read_repo_qa_settings(pyproject_config)
 
     fail_under = env_int("COVERAGE_FAIL_UNDER", -1)
     if fail_under < 0:
-        fail_under = _read_coverage_fail_under_from_pyproject(pyproject_config) or 15
+        configured_coverage = repo_qa.get("coverage_fail_under")
+        fail_under = (
+            configured_coverage
+            if isinstance(configured_coverage, int)
+            else _read_coverage_fail_under_from_pyproject(pyproject_config) or 15
+        )
     configured_excludes = _parse_csv_items(env.get("PYTHON_QA_EXCLUDE_CSV", DEFAULT_EXCLUDE_CSV))
     checkignore_excludes = _read_simple_checkignore_paths(repo_root)
     combined_excludes = _dedupe_preserving_order(configured_excludes + checkignore_excludes)
@@ -2300,7 +2328,7 @@ def _new_state(repo_root: Path) -> PythonQaRepoState:
         run_coverage=env_flag("RUN_COVERAGE", "1"),
         run_diff_cover=env_flag("RUN_DIFF_COVER", "1"),
         run_bandit=env_flag("RUN_BANDIT", "0"),
-        run_unittest=env_flag("RUN_UNITTEST", "1"),
+        run_unittest=env_flag("RUN_UNITTEST", "1" if repo_qa.get("run_unittest", True) else "0"),
         use_json=env_flag("USE_JSON_OUTPUT", "1"),
         semgrep_config=env.get("SEMGREP_CONFIG", "p/python"),
         diff_cover_compare_branch=env.get("DIFF_COVER_COMPARE_BRANCH") or None,
@@ -2740,7 +2768,15 @@ def run_coverage_report(repo_root: Path, project: Project | None) -> list[Issue]
         if not _coverage_available(state):
             return ToolRunResult(rc=127, issues=[_missing_issue("coverage", "coverage module missing", state.root)])
 
-        args = [str(state.python), "-m", "coverage", "report", "--show-missing"]
+        args = [
+            str(state.python),
+            "-m",
+            "coverage",
+            "report",
+            "--show-missing",
+            "--fail-under",
+            str(state.coverage_fail_under),
+        ]
         _append_config_arg(args, "--rcfile", state.coverage_rcfile)
         return _run_subprocess(state, "coverage report", args)
 
@@ -2762,7 +2798,16 @@ def run_coverage_xml(repo_root: Path, project: Project | None) -> list[Issue]:
             return ToolRunResult(rc=127, issues=[_missing_issue("coverage", "coverage module missing", state.root)])
 
         coverage_xml_path = state.log_dir / "coverage.xml"
-        args = [str(state.python), "-m", "coverage", "xml", "-o", str(coverage_xml_path)]
+        args = [
+            str(state.python),
+            "-m",
+            "coverage",
+            "xml",
+            "-o",
+            str(coverage_xml_path),
+            "--fail-under",
+            str(state.coverage_fail_under),
+        ]
         _append_config_arg(args, "--rcfile", state.coverage_rcfile)
         result = _run_subprocess(state, "coverage xml", args)
         if result.rc == 0:
@@ -2972,6 +3017,10 @@ def run_pip_audit(repo_root: Path, project: Project | None) -> list[Issue]:
         args = [str(tool)]
         if state.use_json:
             args.extend(["-f", "json", "--progress-spinner", "off"])
+        ignored = _read_repo_qa_settings(state.pyproject_config).get("ignored_advisories", [])
+        if isinstance(ignored, list):
+            for advisory in ignored:
+                args.extend(["--ignore-vuln", str(advisory)])
         return _run_subprocess(state, "pip-audit", args)
 
     return _run_once(state, "pip-audit", _runner).issues
